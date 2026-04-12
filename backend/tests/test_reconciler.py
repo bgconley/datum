@@ -82,3 +82,33 @@ class TestReconciler:
             project / ".piq" / "attachments" / "diagram" / "metadata" / "manifest.yaml"
         )
         assert manifest.get("branches", {}).get("main", {}).get("head") == "v001"
+
+    @pytest.mark.asyncio
+    async def test_resolves_attachment_pending_commit(self, project):
+        """Stale pending_commit under .piq/attachments/ must also be resolved."""
+        from datum.services.versioning import create_version
+
+        att_dir = project / "attachments" / "diagram"
+        att_dir.mkdir(parents=True, exist_ok=True)
+        content = b"blob_ref: sha256:abc123\ncontent_type: image/png\n"
+        (att_dir / "metadata.yaml").write_bytes(content)
+        create_version(project, "attachments/diagram/metadata.yaml", content, "web")
+
+        # Inject stale pending_commit with no version file
+        manifest_path = (
+            project / ".piq" / "attachments" / "diagram" / "metadata" / "manifest.yaml"
+        )
+        manifest = read_manifest(manifest_path)
+        manifest["pending_commit"] = {
+            "version": 99,
+            "branch": "main",
+            "file": "main/v099.yaml",
+            "content_hash": "sha256:fake",
+            "canonical_path": "attachments/diagram/metadata.yaml",
+        }
+        write_manifest(manifest_path, manifest)
+
+        result = await reconcile_project(project)
+        assert result.pending_commits_resolved >= 1
+        manifest = read_manifest(manifest_path)
+        assert "pending_commit" not in manifest

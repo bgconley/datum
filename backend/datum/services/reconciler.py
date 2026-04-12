@@ -103,11 +103,13 @@ def _resolve_pending_commits(project_path: Path, result: ReconcileResult):
     - pending_commit exists, version file exists, no canonical file: new doc, crash before h.
       Complete by writing canonical from version file.
     """
-    piq_docs = project_path / ".piq" / "docs"
-    if not piq_docs.exists():
+    # Scan all .piq subdirectories for stale pending_commits — not just docs/.
+    # Attachments also use the pending_commit protocol and need crash recovery.
+    piq_root = project_path / ".piq"
+    if not piq_root.exists():
         return
 
-    for manifest_path in piq_docs.rglob("manifest.yaml"):
+    for manifest_path in piq_root.rglob("manifest.yaml"):
         manifest = read_manifest(manifest_path)
         pending = manifest.get("pending_commit")
         if not pending:
