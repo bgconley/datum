@@ -7,7 +7,7 @@ services:
       POSTGRES_DB: datum
       TELEMETRY: "false"
     volumes:
-      - ${DATUM_PGDATA:-./dev/pgdata}:/var/lib/postgresql/data
+      - ${DATUM_PGDATA:-./dev/pgdata}:/var/lib/postgresql
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
