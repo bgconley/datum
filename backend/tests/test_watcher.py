@@ -42,3 +42,35 @@ class TestComputeFileState:
     def test_missing_file_returns_none(self, tmp_path):
         state = compute_file_state(tmp_path / "missing.md")
         assert state is None
+
+
+class TestDebouncedHandlerRename:
+    """Finding 1: watcher must handle editor atomic-save rename flows."""
+
+    def test_move_event_records_dest_path(self, tmp_path):
+        from datum.watcher import DebouncedHandler
+        handler = DebouncedHandler(tmp_path)
+
+        # Simulate a FileMovedEvent where src is a temp file (filtered) and dest is real
+        class FakeMovedEvent:
+            is_directory = False
+            src_path = str(tmp_path / ".note.md.tmp")
+            dest_path = str(tmp_path / "proj" / "docs" / "note.md")
+            event_type = "moved"
+
+        handler.on_any_event(FakeMovedEvent())
+
+        # dest_path should be in _pending even though src_path was filtered
+        assert str(tmp_path / "proj" / "docs" / "note.md") in handler._pending
+
+    def test_regular_event_still_works(self, tmp_path):
+        from datum.watcher import DebouncedHandler
+        handler = DebouncedHandler(tmp_path)
+
+        class FakeModifiedEvent:
+            is_directory = False
+            src_path = str(tmp_path / "proj" / "docs" / "file.md")
+            event_type = "modified"
+
+        handler.on_any_event(FakeModifiedEvent())
+        assert str(tmp_path / "proj" / "docs" / "file.md") in handler._pending

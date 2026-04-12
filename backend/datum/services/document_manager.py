@@ -131,10 +131,17 @@ def save_document(
 ) -> DocumentInfo:
     """Save changes to an existing document with optimistic concurrency.
 
+    content is the full file content including frontmatter — what GET returns
+    is what PUT accepts, ensuring exact round-trip fidelity. The only mutation
+    is updating the 'updated' field in frontmatter.
+
     base_hash must match the current file's hash, or ConflictError is raised.
     """
     _validate_document_path(relative_path)
     canonical_full = project_path / relative_path
+
+    if not canonical_full.exists():
+        raise FileNotFoundError(f"Document not found: {relative_path}")
 
     # Conflict check
     current_bytes = canonical_full.read_bytes()
@@ -142,9 +149,9 @@ def save_document(
     if current_hash != base_hash:
         raise ConflictError(current_hash, base_hash)
 
-    # Parse existing frontmatter, update content
-    post = frontmatter.loads(current_bytes.decode())
-    post.content = content
+    # Parse the incoming content as a full frontmatter document.
+    # This preserves whatever the client sent (including frontmatter).
+    post = frontmatter.loads(content)
     post["updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     new_bytes = frontmatter.dumps(post).encode()
 

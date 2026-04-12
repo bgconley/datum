@@ -46,10 +46,13 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
     # Phase 1: Resolve any stale pending_commits in manifests
     _resolve_pending_commits(project_path, result)
 
-    # Phase 2: Walk docs/ and ensure every file has a current version
-    docs_dir = project_path / "docs"
-    if docs_dir.exists():
-        for file_path in sorted(docs_dir.rglob("*")):
+    # Phase 2: Walk docs/ and attachments/ to ensure every canonical file has a current version.
+    # The watcher covers both directories, so the reconciler must too — it is the authority.
+    scan_dirs = [project_path / "docs", project_path / "attachments"]
+    for scan_dir in scan_dirs:
+        if not scan_dir.exists():
+            continue
+        for file_path in sorted(scan_dir.rglob("*")):
             if not file_path.is_file():
                 continue
             if file_path.suffix not in DOCUMENT_EXTENSIONS:

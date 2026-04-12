@@ -52,13 +52,15 @@ class TestCreateDocument:
 class TestSaveDocument:
     def test_save_creates_new_version(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# V1")
-        content_v1 = (project / "docs" / "a.md").read_bytes()
-        base_hash = compute_content_hash(content_v1)
+        # save_document expects full file content (frontmatter included) for round-trip fidelity
+        full_content = (project / "docs" / "a.md").read_text()
+        base_hash = compute_content_hash((project / "docs" / "a.md").read_bytes())
 
+        modified = full_content.replace("# V1", "# V2 updated")
         info = save_document(
             project_path=project,
             relative_path="docs/a.md",
-            content="# V2 updated",
+            content=modified,
             base_hash=base_hash,
             change_source="web",
         )
@@ -73,10 +75,15 @@ class TestSaveDocument:
 
     def test_save_idempotent(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# Same")
-        content = (project / "docs" / "a.md").read_bytes()
-        base_hash = compute_content_hash(content)
-        info = save_document(project, "docs/a.md", "# Same", base_hash, "web")
+        full_content = (project / "docs" / "a.md").read_text()
+        base_hash = compute_content_hash((project / "docs" / "a.md").read_bytes())
+        info = save_document(project, "docs/a.md", full_content, base_hash, "web")
         assert info.version == 1  # No new version
+
+    def test_save_missing_document_raises(self, project):
+        """Finding 3: save on nonexistent file should raise FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            save_document(project, "docs/missing.md", "# Content", "sha256:fake", "web")
 
 
 class TestListDocuments:

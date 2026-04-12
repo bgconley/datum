@@ -80,6 +80,8 @@ async def api_save_document(slug: str, doc_path: str, body: DocumentSave):
             base_hash=body.base_hash,
             change_source="web",
         )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
     except ConflictError as e:
         raise HTTPException(
             status_code=409,

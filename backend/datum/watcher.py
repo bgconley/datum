@@ -32,10 +32,19 @@ class DebouncedHandler(FileSystemEventHandler):
     def on_any_event(self, event: FileSystemEvent):
         if event.is_directory:
             return
+        # Record src_path if it passes filtering
         path = Path(event.src_path)
-        if not should_process_path(path):
-            return
-        self._pending[str(path)] = time.monotonic()
+        if should_process_path(path):
+            self._pending[str(path)] = time.monotonic()
+        # For rename/move events, also record dest_path.
+        # Editor atomic saves (write tmp -> rename to target) produce move events
+        # where src_path is the filtered temp file but dest_path is the real target.
+        # Design doc: "treat all relevant events as 'path may have changed'"
+        dest = getattr(event, "dest_path", None)
+        if dest:
+            dest_path = Path(dest)
+            if should_process_path(dest_path):
+                self._pending[str(dest_path)] = time.monotonic()
 
     def process_settled(self):
         """Process files that have been stable for DEBOUNCE_SECONDS."""

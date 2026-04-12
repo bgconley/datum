@@ -66,3 +66,19 @@ class TestReconciler:
         assert result.pending_commits_resolved > 0
         manifest = read_manifest(manifest_path)
         assert "pending_commit" not in manifest
+
+    @pytest.mark.asyncio
+    async def test_reconciles_attachment_metadata(self, project):
+        """Finding 4: reconciler must cover attachments/, not just docs/."""
+        # Create an attachment metadata.yaml manually (simulating blob upload)
+        att_dir = project / "attachments" / "diagram"
+        att_dir.mkdir(parents=True, exist_ok=True)
+        (att_dir / "metadata.yaml").write_text("blob_ref: sha256:abc123\ncontent_type: image/png\n")
+
+        result = await reconcile_project(project)
+        assert result.files_scanned >= 1
+        # The metadata.yaml should have been versioned
+        manifest = read_manifest(
+            project / ".piq" / "attachments" / "diagram" / "metadata" / "manifest.yaml"
+        )
+        assert manifest.get("branches", {}).get("main", {}).get("head") == "v001"
