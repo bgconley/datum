@@ -16,6 +16,8 @@ set -euo pipefail
 # --- Configuration ---
 VENV_PATH="/tank/venvs/datum"
 export DATUM_PROJECTS_ROOT="${DATUM_PROJECTS_ROOT:-/tank/datum/projects}"
+export DATUM_BLOBS_ROOT="${DATUM_BLOBS_ROOT:-/tank/datum/blobs}"
+export DATUM_CACHE_ROOT="${DATUM_CACHE_ROOT:-/tank/datum/cache}"
 export DATUM_PGDATA="${DATUM_PGDATA:-/tank/datum/pgdata}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -33,8 +35,7 @@ cleanup_api_test_state() {
 
     (
         cd "$REPO_DIR"
-        # Files are now user-owned (containers run as host UID/GID), so host-side rm works
-        rm -rf "${DATUM_PROJECTS_ROOT}/${slug}" 2>/dev/null || true
+        docker compose exec -T datum-api sh -lc "rm -rf '/tank/datum/projects/${slug}'" >/dev/null 2>&1 || true
         docker compose exec -T paradedb psql -v ON_ERROR_STOP=1 -q -U datum -d datum >/dev/null <<SQL
 DELETE FROM version_head_events
 WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')

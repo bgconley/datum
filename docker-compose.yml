@@ -20,8 +20,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    # Rootless Docker: container root (uid 0) = host user (uid 1000).
-    # Do NOT set user: here — it remaps via subuid to the wrong host UID.
     volumes:
       - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
       - ${DATUM_BLOBS_ROOT:-./dev/blobs}:/tank/datum/blobs
