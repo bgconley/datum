@@ -71,7 +71,7 @@ async def sync_document_version_to_db(
     filesystem_path: str,
 ) -> None:
     """Insert/update document and version rows after a filesystem write."""
-    # Upsert document
+    # Upsert document — always update metadata to track frontmatter changes
     result = await session.execute(
         select(Document).where(Document.uid == version_info.document_uid)
     )
@@ -89,6 +89,25 @@ async def sync_document_version_to_db(
         )
         session.add(doc)
         await session.flush()
+    else:
+        # Update metadata fields on existing document so frontmatter edits propagate
+        doc.title = title
+        doc.doc_type = doc_type
+        doc.status = status
+        doc.tags = tags
+
+    # Idempotency: skip if this exact version already exists in DB
+    existing_version = await session.execute(
+        select(DocumentVersion).where(
+            DocumentVersion.document_id == doc.id,
+            DocumentVersion.version_number == version_info.version_number,
+            DocumentVersion.branch == version_info.branch,
+        )
+    )
+    if existing_version.scalar_one_or_none():
+        # Version already synced — just commit any doc metadata updates
+        await session.commit()
+        return
 
     # Insert version
     version = DocumentVersion(

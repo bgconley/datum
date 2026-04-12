@@ -54,7 +54,13 @@ def check_project(project_path: Path) -> DoctorReport:
 def _check_document_manifest(
     project_path: Path, manifest_path: Path, report: DoctorReport
 ):
-    manifest = read_manifest(manifest_path)
+    try:
+        manifest = read_manifest(manifest_path)
+    except Exception as e:
+        report.errors.append(
+            f"Cannot parse manifest: {manifest_path.relative_to(project_path)} ({e})"
+        )
+        return
     if not manifest:
         report.errors.append(f"Cannot parse manifest: {manifest_path}")
         return
@@ -104,16 +110,42 @@ def _check_document_manifest(
                         f"Orphan version file: {f.relative_to(project_path)}"
                     )
 
-    # Check canonical file matches head
+        # Validate head pointer consistency
+        head_str = branch_data.get("head")
+        if head_str and versions:
+            # head should reference the last version's version_str
+            last_version_str = f"v{versions[-1]['version']:03d}"
+            if head_str != last_version_str:
+                report.errors.append(
+                    f"Head pointer mismatch on {branch_name}: "
+                    f"head={head_str} but last version is {last_version_str} "
+                    f"(doc: {canonical_path})"
+                )
+
+    # Check canonical file matches the head version's hash
     report.files_checked += 1
     canonical_full = project_path / canonical_path
     if canonical_full.exists():
         canonical_hash = compute_content_hash(canonical_full.read_bytes())
-        for branch_data in manifest.get("branches", {}).values():
+        for branch_name, branch_data in manifest.get("branches", {}).items():
+            head_str = branch_data.get("head")
             versions = branch_data.get("versions", [])
-            if versions:
-                head_hash = versions[-1].get("content_hash", "")
+            if not head_str or not versions:
+                continue
+            # Find the version that head points to (by head_str, not just [-1])
+            head_version = None
+            for v in versions:
+                if f"v{v['version']:03d}" == head_str:
+                    head_version = v
+                    break
+            if head_version:
+                head_hash = head_version.get("content_hash", "")
                 if canonical_hash != head_hash:
                     report.warnings.append(
                         f"Canonical file differs from manifest head: {canonical_path}"
                     )
+            else:
+                report.errors.append(
+                    f"Head pointer {head_str} references nonexistent version "
+                    f"(doc: {canonical_path})"
+                )

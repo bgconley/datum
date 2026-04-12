@@ -101,9 +101,61 @@ class DebouncedHandler(FileSystemEventHandler):
                         f"  Created v{version_info.version_number:03d} "
                         f"({version_info.content_hash[:20]}...)"
                     )
-                # DB catch-up deferred to Task 12 (DB Mirroring)
+                    # DB catch-up (best-effort)
+                    self._sync_to_db(
+                        project_slug, project_path, canonical_path,
+                        content, version_info,
+                    )
             except Exception:
                 logger.exception(f"Watcher: failed to version {path}")
+
+    def _sync_to_db(self, project_slug, project_path, canonical_path, content, version_info):
+        """Best-effort DB catch-up after a watcher-created version."""
+        try:
+            import asyncio
+            import frontmatter as fm
+            from datum.db import async_session
+            from datum.services.db_sync import sync_document_version_to_db, log_audit_event
+            from datum.services.filesystem import compute_content_hash
+            from sqlalchemy import select
+            from datum.models.core import Project
+
+            try:
+                post = fm.loads(content.decode())
+            except Exception:
+                post = fm.Post(content.decode())
+
+            async def _sync():
+                async with async_session() as session:
+                    result = await session.execute(
+                        select(Project).where(Project.slug == project_slug)
+                    )
+                    project = result.scalar_one_or_none()
+                    if not project:
+                        return
+                    await sync_document_version_to_db(
+                        session=session,
+                        project_id=project.id,
+                        version_info=version_info,
+                        canonical_path=canonical_path,
+                        title=post.get("title", Path(canonical_path).stem),
+                        doc_type=post.get("type", "unknown"),
+                        status=post.get("status", "draft"),
+                        tags=post.get("tags", []),
+                        change_source="watcher",
+                        content_hash=compute_content_hash(content),
+                        byte_size=len(content),
+                        filesystem_path=version_info.version_file,
+                    )
+                    await log_audit_event(
+                        session, "watcher", "version_created",
+                        project.id, canonical_path,
+                        new_hash=compute_content_hash(content),
+                    )
+
+            asyncio.run(_sync())
+        except Exception:
+            logger.debug("Watcher DB sync failed (database may be unavailable)", exc_info=True)
 
 
 def main():

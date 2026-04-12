@@ -84,6 +84,52 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                         f"Reconciler: created v{version_info.version_number:03d} "
                         f"for {canonical_path}"
                     )
+                    # DB catch-up if session provided
+                    if db_session:
+                        try:
+                            import frontmatter as fm
+                            from datum.services.db_sync import (
+                                sync_document_version_to_db,
+                                log_audit_event,
+                            )
+                            from sqlalchemy import select
+                            from datum.models.core import Project
+
+                            proj_result = await db_session.execute(
+                                select(Project).where(
+                                    Project.filesystem_path == str(project_path)
+                                )
+                            )
+                            project = proj_result.scalar_one_or_none()
+                            if project:
+                                try:
+                                    post = fm.loads(content.decode())
+                                except Exception:
+                                    post = fm.Post(content.decode())
+                                await sync_document_version_to_db(
+                                    session=db_session,
+                                    project_id=project.id,
+                                    version_info=version_info,
+                                    canonical_path=canonical_path,
+                                    title=post.get("title", file_path.stem),
+                                    doc_type=post.get("type", "unknown"),
+                                    status=post.get("status", "draft"),
+                                    tags=post.get("tags", []),
+                                    change_source="reconciler",
+                                    content_hash=content_hash,
+                                    byte_size=len(content),
+                                    filesystem_path=version_info.version_file,
+                                )
+                                await log_audit_event(
+                                    db_session, "reconciler", "version_created",
+                                    project.id, canonical_path,
+                                    new_hash=content_hash,
+                                )
+                        except Exception:
+                            logger.debug(
+                                "Reconciler DB sync failed for %s", canonical_path,
+                                exc_info=True,
+                            )
             except Exception as e:
                 result.errors.append(f"{canonical_path}: {e}")
                 logger.exception(f"Reconciler error: {canonical_path}")

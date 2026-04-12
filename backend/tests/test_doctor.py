@@ -50,3 +50,33 @@ class TestDoctor:
         orphan.write_bytes(b"orphan")
         report = check_project(project)
         assert any("orphan" in w.lower() for w in report.warnings)
+
+    def test_malformed_yaml_does_not_crash(self, project):
+        """Finding 3: doctor should report, not crash, on invalid YAML."""
+        create_document(project, "docs/a.md", "A", "plan", "# A")
+        manifest_path = project / ".piq" / "docs" / "a" / "manifest.yaml"
+        manifest_path.write_text("invalid: yaml: [unterminated")
+        report = check_project(project)
+        assert not report.is_healthy
+        assert any("cannot parse manifest" in e.lower() for e in report.errors)
+
+    def test_head_pointer_mismatch(self, project):
+        """Finding 4: doctor must detect when head points to wrong version."""
+        from datum.services.filesystem import read_manifest, write_manifest
+        create_document(project, "docs/a.md", "A", "plan", "# V1")
+        # Save V2
+        from datum.services.document_manager import save_document
+        from datum.services.filesystem import compute_content_hash
+        full = (project / "docs" / "a.md").read_text()
+        base_hash = compute_content_hash((project / "docs" / "a.md").read_bytes())
+        save_document(project, "docs/a.md", full.replace("# V1", "# V2"), base_hash, "web")
+
+        # Corrupt head pointer to point at v001 instead of v002
+        manifest_path = project / ".piq" / "docs" / "a" / "manifest.yaml"
+        manifest = read_manifest(manifest_path)
+        manifest["branches"]["main"]["head"] = "v001"
+        write_manifest(manifest_path, manifest)
+
+        report = check_project(project)
+        assert not report.is_healthy
+        assert any("head pointer mismatch" in e.lower() for e in report.errors)

@@ -9,6 +9,10 @@ venv/
 # Node
 node_modules/
 frontend/dist/
+*.tsbuildinfo
+
+# TypeScript build artifacts (tsc -b emits .js next to .tsx)
+frontend/src/**/*.js
 
 # Dev data (not committed)
 dev/
