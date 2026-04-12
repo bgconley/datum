@@ -53,7 +53,16 @@ async def _get_project_db_id(slug: str, session: AsyncSession):
 @router.get("", response_model=list[DocumentResponse])
 async def api_list_documents(slug: str):
     project_path = _get_project_path(slug)
-    docs = list_documents(project_path)
+    try:
+        docs = list_documents(project_path)
+    except ManifestLayoutConflictError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Manifest layout conflict — run datum doctor or migration to resolve",
+                "canonical_path": e.canonical_path,
+            },
+        )
     return [DocumentResponse(**d.__dict__) for d in docs]
 
 
@@ -131,6 +140,14 @@ async def api_get_document(slug: str, doc_path: str):
     project_path = _get_project_path(slug)
     try:
         info = get_document(project_path, doc_path)
+    except ManifestLayoutConflictError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Manifest layout conflict — run datum doctor or migration to resolve",
+                "canonical_path": e.canonical_path,
+            },
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     if not info:

@@ -188,3 +188,60 @@ async def test_stale_pending_commit_returns_503(client, tmp_path):
     })
     assert resp.status_code == 503
     assert "stale pending commit" in resp.json()["detail"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_manifest_conflict_on_get_returns_503(client):
+    """ManifestLayoutConflictError on GET doc should return 503, not 500."""
+    from datum.config import settings
+    from datum.services.filesystem import write_manifest
+
+    await client.post("/api/v1/projects", json={"name": "Conflict", "slug": "conflict"})
+    await client.post("/api/v1/projects/conflict/docs", json={
+        "relative_path": "docs/dup.md",
+        "title": "Dup",
+        "doc_type": "plan",
+        "content": "# Dup",
+    })
+
+    # Create legacy dir alongside the new dir to trigger conflict
+    project_path = settings.projects_root / "conflict"
+    legacy_dir = project_path / ".piq" / "docs" / "dup"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    write_manifest(legacy_dir / "manifest.yaml", {
+        "document_uid": "doc_legacy",
+        "canonical_path": "docs/dup.md",
+        "branches": {},
+    })
+
+    resp = await client.get("/api/v1/projects/conflict/docs/docs/dup.md")
+    assert resp.status_code == 503
+    assert "layout conflict" in resp.json()["detail"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_manifest_conflict_on_list_returns_503(client):
+    """ManifestLayoutConflictError on list docs should return 503, not 500."""
+    from datum.config import settings
+    from datum.services.filesystem import write_manifest
+
+    await client.post("/api/v1/projects", json={"name": "Conflict2", "slug": "conflict2"})
+    await client.post("/api/v1/projects/conflict2/docs", json={
+        "relative_path": "docs/dup.md",
+        "title": "Dup",
+        "doc_type": "plan",
+        "content": "# Dup",
+    })
+
+    project_path = settings.projects_root / "conflict2"
+    legacy_dir = project_path / ".piq" / "docs" / "dup"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    write_manifest(legacy_dir / "manifest.yaml", {
+        "document_uid": "doc_legacy",
+        "canonical_path": "docs/dup.md",
+        "branches": {},
+    })
+
+    resp = await client.get("/api/v1/projects/conflict2/docs")
+    assert resp.status_code == 503
+    assert "layout conflict" in resp.json()["detail"]["message"].lower()
