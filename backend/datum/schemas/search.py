@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -37,3 +39,14 @@ class SearchResponse(BaseModel):
     query: str
     result_count: int
     latency_ms: int | None = None
+
+
+class SearchStreamEventResponse(BaseModel):
+    event: Literal["phase", "error"]
+    phase: Literal["lexical", "hybrid"] | None = None
+    query: str
+    results: list[SearchResultResponse] = []
+    result_count: int = 0
+    latency_ms: int | None = None
+    semantic_enabled: bool = False
+    message: str | None = None

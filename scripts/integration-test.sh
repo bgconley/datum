@@ -524,6 +524,16 @@ fi
 
 wait_for_search_pipeline "$API_TEST_SLUG" 45 "$REQUIRE_EMBEDDINGS"
 
+echo "  Streaming phased search results..."
+SEARCH_STREAM=$(curl --fail-with-body -sS -N -X POST "$API/search/stream" \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"Updated via API\",\"project\":\"${API_TEST_SLUG}\"}")
+STREAM_PHASES=$(echo "$SEARCH_STREAM" | python3 -c 'import sys,json; lines=[json.loads(line) for line in sys.stdin if line.strip()]; print(",".join(item.get("phase","") for item in lines if item.get("event")=="phase"))')
+STREAM_FINAL_COUNT=$(echo "$SEARCH_STREAM" | python3 -c 'import sys,json; lines=[json.loads(line) for line in sys.stdin if line.strip()]; phases=[item for item in lines if item.get("event")=="phase"]; print(phases[-1]["result_count"] if phases else 0)')
+echo "    Stream phases: ${STREAM_PHASES:-none}"
+[ "$STREAM_PHASES" = "lexical,hybrid" ] || { echo "    FAIL: expected lexical,hybrid phases"; exit 1; }
+[ "$STREAM_FINAL_COUNT" -ge 1 ] 2>/dev/null || { echo "    FAIL: stream final phase returned 0 results"; exit 1; }
+
 echo "  Searching current-version content..."
 SEARCH_UPDATED=$(curl --fail-with-body -sS -X POST "$API/search" \
   -H "Content-Type: application/json" \

@@ -2,12 +2,18 @@ from dataclasses import asdict
 import time
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.db import get_session
-from datum.schemas.search import SearchRequest, SearchResponse, SearchResultResponse
+from datum.schemas.search import (
+    SearchRequest,
+    SearchResponse,
+    SearchResultResponse,
+    SearchStreamEventResponse,
+)
 from datum.services.model_gateway import build_model_gateway
-from datum.services.search import search
+from datum.services.search import search, stream_search
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
 
@@ -34,3 +40,40 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
         result_count=len(results),
         latency_ms=int((time.monotonic() - started) * 1000),
     )
+
+
+@router.post("/search/stream")
+async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends(get_session)):
+    gateway = build_model_gateway()
+
+    async def stream():
+        try:
+            async for execution in stream_search(
+                session=session,
+                query=body.query,
+                gateway=gateway if gateway.embedding else None,
+                project_scope=body.project,
+                version_scope=body.version_scope,
+                limit=body.limit,
+            ):
+                payload = SearchStreamEventResponse(
+                    event="phase",
+                    phase=execution.phase,
+                    query=execution.query,
+                    results=[SearchResultResponse(**asdict(result)) for result in execution.results],
+                    result_count=len(execution.results),
+                    latency_ms=execution.latency_ms,
+                    semantic_enabled=execution.semantic_enabled,
+                )
+                yield payload.model_dump_json(exclude_none=True) + "\n"
+        except Exception as exc:
+            error_payload = SearchStreamEventResponse(
+                event="error",
+                query=body.query,
+                message=str(exc),
+            )
+            yield error_payload.model_dump_json(exclude_none=True) + "\n"
+        finally:
+            await gateway.close()
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")

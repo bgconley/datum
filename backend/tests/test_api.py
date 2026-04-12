@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from datum.config import settings
@@ -305,3 +307,63 @@ async def test_search_serializes_nonempty_results(client, monkeypatch):
     assert data["result_count"] == 1
     assert data["results"][0]["document_title"] == "Search Doc"
     assert data["results"][0]["matched_terms"] == ["DATABASE_URL"]
+
+
+@pytest.mark.asyncio
+async def test_search_stream_emits_phases(client, monkeypatch):
+    class StubGateway:
+        embedding = None
+
+        async def close(self):
+            return None
+
+    async def fake_stream_search(**kwargs):
+        yield type(
+            "Execution",
+            (),
+            {
+                "phase": "lexical",
+                "query": "DATABASE_URL",
+                "results": [],
+                "latency_ms": 4,
+                "semantic_enabled": False,
+            },
+        )()
+        yield type(
+            "Execution",
+            (),
+            {
+                "phase": "hybrid",
+                "query": "DATABASE_URL",
+                "results": [
+                    SearchResult(
+                        document_title="Search Doc",
+                        document_path="docs/search.md",
+                        project_slug="p",
+                        heading_path="Intro",
+                        snippet="Use DATABASE_URL on port 8001.",
+                        version_number=2,
+                        content_hash="sha256:abc",
+                        fused_score=0.42,
+                        matched_terms=["DATABASE_URL"],
+                        document_uid="doc_123",
+                        chunk_id="chunk_123",
+                        line_start=3,
+                        line_end=5,
+                        match_signals=["keyword", "exact-term"],
+                    )
+                ],
+                "latency_ms": 12,
+                "semantic_enabled": False,
+            },
+        )()
+
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.search.stream_search", fake_stream_search)
+
+    async with client.stream("POST", "/api/v1/search/stream", json={"query": "DATABASE_URL"}) as resp:
+        assert resp.status_code == 200
+        lines = [json.loads(line) async for line in resp.aiter_lines() if line]
+
+    assert [line["phase"] for line in lines] == ["lexical", "hybrid"]
+    assert lines[1]["results"][0]["match_signals"] == ["keyword", "exact-term"]

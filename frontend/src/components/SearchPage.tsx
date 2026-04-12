@@ -2,7 +2,13 @@ import { startTransition, useEffect, useEffectEvent, useState } from 'react'
 
 import { SearchBar, type SearchDraft } from './SearchBar'
 import { SearchResults } from './SearchResults'
-import { api, type Project, type SearchRequestParams, type SearchResultItem } from '@/lib/api'
+import {
+  api,
+  type Project,
+  type SearchRequestParams,
+  type SearchResultItem,
+  type SearchStreamEvent,
+} from '@/lib/api'
 
 const DEFAULT_SEARCH_DRAFT: SearchDraft = {
   query: '',
@@ -153,6 +159,8 @@ export function SearchPage({ route }: SearchPageProps) {
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [streamPhase, setStreamPhase] = useState<'idle' | 'lexical' | 'hybrid'>('idle')
+  const [semanticEnabled, setSemanticEnabled] = useState<boolean | null>(null)
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch((err) => {
@@ -168,6 +176,8 @@ export function SearchPage({ route }: SearchPageProps) {
         setResults([])
         setLatencyMs(null)
         setSearched(Boolean(nextDraft.query.trim()))
+        setStreamPhase('idle')
+        setSemanticEnabled(null)
         setError(
           nextDraft.versionMode === 'as_of'
             ? 'Choose a valid as-of timestamp before searching.'
@@ -181,21 +191,47 @@ export function SearchPage({ route }: SearchPageProps) {
     setSearched(true)
     setError(null)
     setQuery(request.query)
+    setStreamPhase('idle')
+    setSemanticEnabled(null)
 
     try {
-      const response = await api.search(request)
-      startTransition(() => {
-        setResults(response.results)
-        setLatencyMs(response.latency_ms)
-        setQuery(response.query)
+      await api.searchStream(request, async (event: SearchStreamEvent) => {
+        if (event.event === 'error') {
+          throw new Error(event.message || 'Search stream failed')
+        }
+
+        startTransition(() => {
+          setResults(event.results)
+          setLatencyMs(event.latency_ms)
+          setQuery(event.query)
+          setStreamPhase(event.phase ?? 'hybrid')
+          setSemanticEnabled(event.semantic_enabled)
+        })
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Search failed'
-      startTransition(() => {
-        setResults([])
-        setLatencyMs(null)
-        setError(message)
-      })
+      try {
+        const response = await api.search(request)
+        startTransition(() => {
+          setResults(response.results)
+          setLatencyMs(response.latency_ms)
+          setQuery(response.query)
+          setStreamPhase('hybrid')
+          setSemanticEnabled(null)
+        })
+      } catch (fallbackErr) {
+        const message = fallbackErr instanceof Error
+          ? fallbackErr.message
+          : err instanceof Error
+            ? err.message
+            : 'Search failed'
+        startTransition(() => {
+          setResults([])
+          setLatencyMs(null)
+          setStreamPhase('idle')
+          setSemanticEnabled(null)
+          setError(message)
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -215,6 +251,8 @@ export function SearchPage({ route }: SearchPageProps) {
       setResults([])
       setLatencyMs(null)
       setSearched(false)
+      setStreamPhase('idle')
+      setSemanticEnabled(null)
       setError(null)
     })
   }, [route, executeSearch])
@@ -236,6 +274,8 @@ export function SearchPage({ route }: SearchPageProps) {
         setResults([])
         setLatencyMs(null)
         setSearched(false)
+        setStreamPhase('idle')
+        setSemanticEnabled(null)
         setError(null)
       })
       return
@@ -300,6 +340,9 @@ export function SearchPage({ route }: SearchPageProps) {
           scopeSummary={scopeSummary}
           projectScope={draft.project || null}
           onProjectSelect={handleProjectFacet}
+          loading={loading}
+          streamPhase={streamPhase}
+          semanticEnabled={semanticEnabled}
         />
       )}
     </div>

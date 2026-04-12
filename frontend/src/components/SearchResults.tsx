@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,17 +12,61 @@ interface SearchResultsProps {
   scopeSummary: string
   projectScope: string | null
   onProjectSelect: (project: string) => void
+  loading: boolean
+  streamPhase: 'idle' | 'lexical' | 'hybrid'
+  semanticEnabled: boolean | null
 }
 
-function buildProjectFacets(results: SearchResultItem[]): Array<{ slug: string; count: number }> {
+function buildCountFacets(values: string[]): Array<{ value: string; count: number }> {
   const counts = new Map<string, number>()
-  for (const result of results) {
-    counts.set(result.project_slug, (counts.get(result.project_slug) ?? 0) + 1)
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1)
   }
 
   return [...counts.entries()]
-    .map(([slug, count]) => ({ slug, count }))
-    .sort((left, right) => right.count - left.count || left.slug.localeCompare(right.slug))
+    .map(([value, count]) => ({ value, count }))
+    .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value))
+}
+
+function buildProjectFacets(results: SearchResultItem[]): Array<{ slug: string; count: number }> {
+  return buildCountFacets(results.map((result) => result.project_slug)).map(({ value, count }) => ({
+    slug: value,
+    count,
+  }))
+}
+
+function buildSignalFacets(results: SearchResultItem[]): Array<{ value: string; count: number }> {
+  return buildCountFacets(results.flatMap((result) => result.match_signals))
+}
+
+function buildTermFacets(results: SearchResultItem[]): Array<{ value: string; count: number }> {
+  return buildCountFacets(results.flatMap((result) => result.matched_terms)).slice(0, 8)
+}
+
+function describePhase(
+  loading: boolean,
+  streamPhase: 'idle' | 'lexical' | 'hybrid',
+  semanticEnabled: boolean | null,
+): string | null {
+  if (loading && streamPhase === 'lexical') {
+    return semanticEnabled === false
+      ? 'Lexical results are ready. Semantic search is unavailable, so the final phase will confirm exact-term and keyword ranking.'
+      : 'Lexical results are ready. Refining the final hybrid ranking now.'
+  }
+
+  if (loading) {
+    return 'Searching lexical, exact-term, and semantic indices.'
+  }
+
+  if (streamPhase === 'hybrid' && semanticEnabled === false) {
+    return 'Hybrid search completed without semantic vectors because the embedding service was unavailable.'
+  }
+
+  if (streamPhase === 'hybrid') {
+    return 'Hybrid results combine keyword, exact-term, and semantic signals.'
+  }
+
+  return null
 }
 
 export function SearchResults({
@@ -30,8 +76,32 @@ export function SearchResults({
   scopeSummary,
   projectScope,
   onProjectSelect,
+  loading,
+  streamPhase,
+  semanticEnabled,
 }: SearchResultsProps) {
+  const [signalFacet, setSignalFacet] = useState<string | null>(null)
+  const [termFacet, setTermFacet] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSignalFacet(null)
+    setTermFacet(null)
+  }, [query, projectScope])
+
   const projectFacets = buildProjectFacets(results)
+  const signalFacets = buildSignalFacets(results)
+  const termFacets = buildTermFacets(results)
+  const phaseDescription = describePhase(loading, streamPhase, semanticEnabled)
+
+  const filteredResults = results.filter((result) => {
+    if (signalFacet && !result.match_signals.includes(signalFacet)) {
+      return false
+    }
+    if (termFacet && !result.matched_terms.includes(termFacet)) {
+      return false
+    }
+    return true
+  })
 
   if (results.length === 0) {
     return (
@@ -44,22 +114,30 @@ export function SearchResults({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border/70 bg-card/50 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-foreground">
-              {results.length} result{results.length === 1 ? '' : 's'} for "{query}"
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1">
+              <div className="text-sm font-medium text-foreground">
+                {filteredResults.length} visible result{filteredResults.length === 1 ? '' : 's'} for "{query}"
+                {filteredResults.length !== results.length ? ` (${results.length} total)` : ''}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Searching {scopeSummary}
+                {latencyMs != null ? ` in ${latencyMs}ms` : ''}
+              </div>
             </div>
-            <div className="text-sm text-muted-foreground">
-              Searching {scopeSummary}
-              {latencyMs != null ? ` in ${latencyMs}ms` : ''}
-            </div>
+            {phaseDescription && (
+              <div className="rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+                {phaseDescription}
+              </div>
+            )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-4">
             {!projectScope && projectFacets.length > 1 && (
-              <>
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Project facets
+                  Projects
                 </span>
                 {projectFacets.map((facet) => (
                   <Button
@@ -72,18 +150,70 @@ export function SearchResults({
                     {facet.slug} ({facet.count})
                   </Button>
                 ))}
-              </>
+              </div>
             )}
-            {projectScope && (
-              <Button type="button" variant="outline" size="xs" onClick={() => onProjectSelect('')}>
-                Clear project filter
-              </Button>
+
+            {signalFacets.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Signals
+                </span>
+                {signalFacets.map((facet) => (
+                  <Button
+                    key={facet.value}
+                    type="button"
+                    variant={signalFacet === facet.value ? 'secondary' : 'outline'}
+                    size="xs"
+                    onClick={() => setSignalFacet(signalFacet === facet.value ? null : facet.value)}
+                  >
+                    {facet.value} ({facet.count})
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {termFacets.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Exact Terms
+                </span>
+                {termFacets.map((facet) => (
+                  <Button
+                    key={facet.value}
+                    type="button"
+                    variant={termFacet === facet.value ? 'secondary' : 'outline'}
+                    size="xs"
+                    onClick={() => setTermFacet(termFacet === facet.value ? null : facet.value)}
+                  >
+                    {facet.value} ({facet.count})
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {(projectScope || signalFacet || termFacet) && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => {
+                    if (projectScope) {
+                      onProjectSelect('')
+                    }
+                    setSignalFacet(null)
+                    setTermFacet(null)
+                  }}
+                >
+                  Clear facets
+                </Button>
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      {results.map((result) => (
+      {filteredResults.map((result) => (
         <a
           key={result.chunk_id || `${result.project_slug}:${result.document_path}:${result.version_number}`}
           href={`#/${result.project_slug}/${result.document_path}`}

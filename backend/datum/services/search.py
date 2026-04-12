@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import logging
 import time
-from typing import Optional
+from typing import AsyncIterator, Optional
 from uuid import UUID
 
 from sqlalchemy import func, select, text
@@ -67,6 +67,25 @@ class SearchResult:
     match_signals: list[str] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class SearchExecutionContext:
+    query: str
+    parsed: ParsedQuery
+    retrieval_config_id: UUID | None
+    active_embedding_run_id: UUID | None
+    semantic_enabled: bool
+
+
+@dataclass(slots=True)
+class SearchExecution:
+    phase: str
+    query: str
+    results: list[SearchResult]
+    fused_results: list[FusedResult]
+    latency_ms: int
+    semantic_enabled: bool
+
+
 def parse_query(
     query: str,
     project_scope: Optional[str] = None,
@@ -114,23 +133,122 @@ async def search(
     version_scope: str = "current",
     limit: int = 20,
 ) -> list[SearchResult]:
-    started = time.monotonic()
+    context = await _prepare_search_context(
+        session,
+        query=query,
+        gateway=gateway,
+        project_scope=project_scope,
+        version_scope=version_scope,
+    )
+    execution = await _execute_search(
+        session,
+        context=context,
+        gateway=gateway,
+        version_scope=version_scope,
+        project_scope=project_scope,
+        limit=limit,
+        include_vector=True,
+        phase="hybrid",
+        log_search=True,
+    )
+    return execution.results
+
+
+async def stream_search(
+    session: AsyncSession,
+    query: str,
+    gateway=None,
+    project_scope: Optional[str] = None,
+    version_scope: str = "current",
+    limit: int = 20,
+) -> AsyncIterator[SearchExecution]:
+    context = await _prepare_search_context(
+        session,
+        query=query,
+        gateway=gateway,
+        project_scope=project_scope,
+        version_scope=version_scope,
+    )
+
+    yield await _execute_search(
+        session,
+        context=context,
+        gateway=gateway,
+        version_scope=version_scope,
+        project_scope=project_scope,
+        limit=limit,
+        include_vector=False,
+        phase="lexical",
+        log_search=False,
+    )
+
+    yield await _execute_search(
+        session,
+        context=context,
+        gateway=gateway,
+        version_scope=version_scope,
+        project_scope=project_scope,
+        limit=limit,
+        include_vector=True,
+        phase="hybrid",
+        log_search=True,
+    )
+
+
+async def _prepare_search_context(
+    session: AsyncSession,
+    *,
+    query: str,
+    gateway,
+    project_scope: Optional[str],
+    version_scope: str,
+) -> SearchExecutionContext:
     parsed = parse_query(query, project_scope, version_scope)
     retrieval_config = await get_retrieval_pipeline_config(session)
-    active_embedding_run = None
+    active_embedding_run_id = None
     if gateway and gateway.embedding:
         active_embedding_run = await get_active_embedding_model_run(session, gateway, create=False)
+        if active_embedding_run is not None:
+            active_embedding_run_id = active_embedding_run.id
+
+    return SearchExecutionContext(
+        query=query,
+        parsed=parsed,
+        retrieval_config_id=retrieval_config.id,
+        active_embedding_run_id=active_embedding_run_id,
+        semantic_enabled=active_embedding_run_id is not None,
+    )
+
+
+async def _execute_search(
+    session: AsyncSession,
+    *,
+    context: SearchExecutionContext,
+    gateway,
+    version_scope: str,
+    project_scope: Optional[str],
+    limit: int,
+    include_vector: bool,
+    phase: str,
+    log_search: bool,
+) -> SearchExecution:
+    started = time.monotonic()
+    parsed = context.parsed
 
     bm25_results = await _bm25_search(session, parsed, version_scope, limit=100)
+    term_results = await _term_search(session, parsed, version_scope, limit=100)
+
     vector_results: list[RankedCandidate] = []
-    if gateway and gateway.embedding and active_embedding_run is not None:
+    semantic_applied = False
+    if include_vector and gateway and gateway.embedding and context.active_embedding_run_id is not None:
         try:
-            vectors = await gateway.embed([query])
+            vectors = await gateway.embed([context.query])
             if vectors:
+                semantic_applied = True
                 vector_results = await _vector_search(
                     session,
                     query_embedding=vectors[0],
-                    embedding_model_run_id=active_embedding_run.id,
+                    embedding_model_run_id=context.active_embedding_run_id,
                     version_scope=version_scope,
                     project_scope=project_scope,
                     limit=100,
@@ -138,7 +256,6 @@ async def search(
         except Exception as exc:
             logger.warning("vector search unavailable: %s", exc)
 
-    term_results = await _term_search(session, parsed, version_scope, limit=100)
     fused = fuse_results(
         bm25_results=bm25_results,
         vector_results=vector_results,
@@ -151,19 +268,30 @@ async def search(
         if built is not None:
             results.append(built)
 
-    await _log_search_run(
-        session=session,
-        query=query,
-        parsed=parsed,
-        retrieval_config_id=retrieval_config.id,
-        embedding_model_run_id=active_embedding_run.id if active_embedding_run else None,
-        version_scope=version_scope,
-        project_scope=project_scope,
-        elapsed_ms=int((time.monotonic() - started) * 1000),
-        fused_results=fused[:limit],
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+
+    if log_search:
+        await _log_search_run(
+            session=session,
+            query=context.query,
+            parsed=parsed,
+            retrieval_config_id=context.retrieval_config_id,
+            embedding_model_run_id=context.active_embedding_run_id if include_vector else None,
+            version_scope=version_scope,
+            project_scope=project_scope,
+            elapsed_ms=elapsed_ms,
+            fused_results=fused[:limit],
+            results=results,
+        )
+
+    return SearchExecution(
+        phase=phase,
+        query=context.query,
         results=results,
+        fused_results=fused[:limit],
+        latency_ms=elapsed_ms,
+        semantic_enabled=context.semantic_enabled if phase == "lexical" else semantic_applied,
     )
-    return results
 
 
 def _build_scope_sql(version_scope: str, project_scope: Optional[str]) -> tuple[str, dict]:

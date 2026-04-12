@@ -59,6 +59,17 @@ export interface SearchRequestParams {
   limit?: number
 }
 
+export interface SearchStreamEvent {
+  event: 'phase' | 'error'
+  phase?: 'lexical' | 'hybrid'
+  query: string
+  results: SearchResultItem[]
+  result_count: number
+  latency_ms: number | null
+  semantic_enabled: boolean
+  message?: string
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, init)
   if (!resp.ok) {
@@ -105,4 +116,59 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     }),
+  searchStream: async (
+    params: SearchRequestParams,
+    onEvent: (event: SearchStreamEvent) => void | Promise<void>,
+  ) => {
+    const resp = await fetch(`${API_BASE}/search/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    if (!resp.ok) {
+      const body = await resp.text()
+      throw new Error(`${resp.status}: ${body}`)
+    }
+
+    if (!resp.body) {
+      const fallback = await api.search(params)
+      await onEvent({
+        event: 'phase',
+        phase: 'hybrid',
+        query: fallback.query,
+        results: fallback.results,
+        result_count: fallback.result_count,
+        latency_ms: fallback.latency_ms,
+        semantic_enabled: false,
+      })
+      return
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+
+      let newlineIndex = buffer.indexOf('\n')
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim()
+        buffer = buffer.slice(newlineIndex + 1)
+        if (line) {
+          await onEvent(JSON.parse(line) as SearchStreamEvent)
+        }
+        newlineIndex = buffer.indexOf('\n')
+      }
+
+      if (done) {
+        const line = buffer.trim()
+        if (line) {
+          await onEvent(JSON.parse(line) as SearchStreamEvent)
+        }
+        break
+      }
+    }
+  },
 }
