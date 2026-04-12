@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+TECHNICAL_TERMS_PIPELINE_NAME = "regex-technical-terms"
+TECHNICAL_TERMS_PIPELINE_VERSION = "regex-v1"
 
 @dataclass(slots=True)
 class TermMatch:

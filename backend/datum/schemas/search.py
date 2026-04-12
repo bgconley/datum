@@ -1,11 +1,18 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str = Field(min_length=1, max_length=500)
     project: str | None = None
     version_scope: str = "current"
-    limit: int = 20
+    limit: int = Field(default=20, ge=1, le=100)
+
+    @field_validator("version_scope")
+    @classmethod
+    def validate_version_scope(cls, value: str) -> str:
+        if value in {"current", "all"} or value.startswith("as_of:"):
+            return value
+        raise ValueError("version_scope must be current, all, or as_of:<timestamp>")
 
 
 class SearchResultResponse(BaseModel):
@@ -22,6 +29,7 @@ class SearchResultResponse(BaseModel):
     chunk_id: str = ""
     line_start: int = 0
     line_end: int = 0
+    match_signals: list[str] = []
 
 
 class SearchResponse(BaseModel):

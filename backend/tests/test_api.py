@@ -249,7 +249,19 @@ async def test_manifest_conflict_on_list_returns_503(client):
 
 
 @pytest.mark.asyncio
-async def test_search_returns_results(client):
+async def test_search_returns_results(client, monkeypatch):
+    class StubGateway:
+        embedding = None
+
+        async def close(self):
+            return None
+
+    async def fake_search(**kwargs):
+        return []
+
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.search.search", fake_search)
+
     resp = await client.post("/api/v1/search", json={"query": "test"})
     assert resp.status_code == 200
     data = resp.json()

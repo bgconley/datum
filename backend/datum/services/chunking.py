@@ -8,6 +8,10 @@ import re
 import tiktoken
 
 ENCODING = tiktoken.get_encoding("cl100k_base")
+CHUNKING_PIPELINE_NAME = "heading-aware-chunking"
+CHUNKING_PIPELINE_VERSION = "heading-aware-v1"
+DEFAULT_MAX_TOKENS = 512
+DEFAULT_OVERLAP_TOKENS = 50
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 
 
@@ -37,7 +41,11 @@ def count_tokens(text: str) -> int:
     return len(ENCODING.encode(text))
 
 
-def chunk_text(text: str, max_tokens: int = 512, overlap_tokens: int = 50) -> list[Chunk]:
+def chunk_text(
+    text: str,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
+) -> list[Chunk]:
     if not text.strip():
         return []
 

@@ -18,6 +18,10 @@ from datum.models.core import (
     VersionHeadEvent,
 )
 from datum.models.search import IngestionJob
+from datum.services.pipeline_configs import (
+    get_extraction_pipeline_config,
+    make_ingestion_job_idempotency_key,
+)
 from datum.services.versioning import VersionInfo
 
 
@@ -173,7 +177,14 @@ async def sync_document_version_to_db(
             indexed_at=now,
         ))
 
-    idem_key = f"{project_id}:{version.id}:extract:{content_hash}:default:none"
+    extraction_config = await get_extraction_pipeline_config(session)
+    idem_key = make_ingestion_job_idempotency_key(
+        project_id=project_id,
+        version_id=version.id,
+        job_type="extract",
+        content_hash=content_hash,
+        pipeline_config_hash=extraction_config.config_hash,
+    )
     existing_job = await session.execute(
         select(IngestionJob).where(IngestionJob.idempotency_key == idem_key)
     )
@@ -185,6 +196,7 @@ async def sync_document_version_to_db(
                 job_type="extract",
                 status="queued",
                 priority=1,
+                pipeline_config_id=extraction_config.id,
                 content_hash=content_hash,
                 idempotency_key=idem_key,
             )

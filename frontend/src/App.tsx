@@ -6,6 +6,7 @@ import { SearchPage } from './components/SearchPage'
 export function App() {
   // Simple hash-based routing, preserved until the Phase 4 router migration.
   const [route, setRoute] = useState(window.location.hash.slice(2) || '')
+  const routeBase = route.split('?')[0] || ''
 
   useEffect(() => {
     const handler = () => setRoute(window.location.hash.slice(2))
@@ -31,10 +32,10 @@ export function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  if (route === 'search') {
+  if (routeBase === 'search') {
     return (
       <Layout>
-        <SearchPage />
+        <SearchPage route={route} />
       </Layout>
     )
   }

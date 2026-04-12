@@ -304,8 +304,8 @@ SQL
         embeddings="${embeddings:-0}"
         jobs="${jobs:-0}"
 
-        if [ "$version_texts" -ge 1 ] && [ "$chunks" -ge 1 ] && [ "$technical_terms" -ge 1 ]; then
-            if [ "$require_embeddings" != "1" ] || { [ "$embeddings" -ge 1 ] && [ "$jobs" -eq 0 ]; }; then
+        if [ "$version_texts" -ge 1 ] && [ "$chunks" -ge 1 ] && [ "$technical_terms" -ge 1 ] && [ "$jobs" -eq 0 ]; then
+            if [ "$require_embeddings" != "1" ] || [ "$embeddings" -ge 1 ]; then
                 echo "    version_texts=$version_texts chunks=$chunks technical_terms=$technical_terms chunk_embeddings=$embeddings jobs=$jobs"
                 return 0
             fi

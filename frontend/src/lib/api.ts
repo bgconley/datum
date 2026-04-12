@@ -42,6 +42,7 @@ export interface SearchResultItem {
   chunk_id: string
   line_start: number
   line_end: number
+  match_signals: string[]
 }
 
 export interface SearchResponse {
@@ -49,6 +50,13 @@ export interface SearchResponse {
   query: string
   result_count: number
   latency_ms: number | null
+}
+
+export interface SearchRequestParams {
+  query: string
+  project?: string
+  version_scope?: string
+  limit?: number
 }
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
@@ -91,10 +99,10 @@ export const api = {
         body: JSON.stringify(data),
       }),
   },
-  search: (query: string, project?: string) =>
+  search: (params: SearchRequestParams) =>
     fetchJSON<SearchResponse>(`${API_BASE}/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, project }),
+      body: JSON.stringify(params),
     }),
 }

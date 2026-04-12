@@ -1,4 +1,52 @@
-from datum.services.search import ParsedQuery, RankedCandidate, fuse_results, parse_query
+from uuid import uuid4
+
+import pytest
+
+from datum.models.search import SearchRun, SearchRunResult
+from datum.services.search import (
+    FusedResult,
+    ParsedQuery,
+    RankedCandidate,
+    _log_search_run,
+    _vector_search,
+    fuse_results,
+    parse_query,
+)
+
+
+class _FakeExecuteResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeSession:
+    def __init__(self, rows=None):
+        self.rows = rows or []
+        self.executed = []
+        self.added = []
+        self.committed = False
+        self.rolled_back = False
+
+    async def execute(self, statement, params=None):
+        self.executed.append((statement, params or {}))
+        return _FakeExecuteResult(self.rows)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        for obj in self.added:
+            if isinstance(obj, SearchRun) and obj.id is None:
+                obj.id = uuid4()
+
+    async def commit(self):
+        self.committed = True
+
+    async def rollback(self):
+        self.rolled_back = True
 
 
 class TestParseQuery:
@@ -35,3 +83,59 @@ class TestFuseResults:
         vector = [RankedCandidate(chunk_id="a", rank=1)]
         fused = fuse_results(bm25_results=bm25, vector_results=vector)
         assert len(fused) == 1
+
+
+@pytest.mark.asyncio
+async def test_vector_search_scopes_to_active_model_run():
+    session = _FakeSession()
+    model_run_id = uuid4()
+
+    results = await _vector_search(
+        session,
+        query_embedding=[0.1, 0.2, 0.3],
+        embedding_model_run_id=model_run_id,
+        version_scope="current",
+        project_scope="alpha",
+        limit=10,
+    )
+
+    assert results == []
+    statement, params = session.executed[0]
+    assert "ce.model_run_id = :model_run_id" in str(statement)
+    assert params["model_run_id"] == model_run_id
+    assert params["project_scope"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_log_search_run_persists_config_references():
+    session = _FakeSession()
+    retrieval_config_id = uuid4()
+    embedding_model_run_id = uuid4()
+
+    await _log_search_run(
+        session=session,
+        query="DATABASE_URL",
+        parsed=ParsedQuery(
+            raw="DATABASE_URL",
+            bm25_query="DATABASE_URL",
+            detected_terms=[],
+            version_scope="all",
+            project_scope="alpha",
+        ),
+        retrieval_config_id=retrieval_config_id,
+        embedding_model_run_id=embedding_model_run_id,
+        version_scope="all",
+        project_scope="alpha",
+        elapsed_ms=12,
+        fused_results=[FusedResult(chunk_id=str(uuid4()), fused_score=1.0, rank_bm25=1)],
+        results=[],
+    )
+
+    search_run = next(obj for obj in session.added if isinstance(obj, SearchRun))
+    search_run_result = next(obj for obj in session.added if isinstance(obj, SearchRunResult))
+
+    assert search_run.retrieval_config_id == retrieval_config_id
+    assert search_run.embedding_model_run_id == embedding_model_run_id
+    assert search_run.parsed_query["version_scope"] == "all"
+    assert search_run_result.search_run_id == search_run.id
+    assert session.committed is True

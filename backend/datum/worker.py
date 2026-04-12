@@ -26,6 +26,13 @@ from datum.services.ingestion import (
     run_technical_terms,
 )
 from datum.services.model_gateway import ModelGateway, build_model_gateway
+from datum.services.pipeline_configs import (
+    get_active_embedding_model_run,
+    get_chunking_pipeline_config,
+    get_embedding_pipeline_config,
+    get_technical_terms_pipeline_config,
+    make_ingestion_job_idempotency_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +75,11 @@ async def process_job(session: AsyncSession, job: IngestionJob, gateway: ModelGa
 
         if job.status == "running":
             job.status = "completed"
+
+        if job.completed_at is None and job.status in {"completed", "skipped"}:
             job.completed_at = datetime.now(timezone.utc)
-            await session.commit()
+
+        await session.commit()
     except Exception as exc:
         job.status = "failed"
         job.error_message = str(exc)[:1000]
@@ -109,6 +119,7 @@ async def _handle_extract_job(
         await session.flush()
 
     if result.text_kind != "unsupported" and result.content.strip():
+        chunking_config = await get_chunking_pipeline_config(session)
         await _queue_job(
             session,
             project_id=job.project_id,
@@ -116,6 +127,8 @@ async def _handle_extract_job(
             job_type="chunk",
             content_hash=result.content_hash,
             priority=1,
+            pipeline_config_id=chunking_config.id,
+            pipeline_config_hash=chunking_config.config_hash,
         )
 
 
@@ -125,6 +138,7 @@ async def _handle_chunk_job(
     version: DocumentVersion,
     gateway: ModelGateway,
 ) -> None:
+    chunking_config = await get_chunking_pipeline_config(session)
     text_result = await session.execute(
         select(VersionText)
         .where(
@@ -155,11 +169,13 @@ async def _handle_chunk_job(
                 end_char=chunk.end_char,
                 token_count=chunk.token_count,
                 content_hash=compute_content_hash(chunk.content.encode("utf-8")),
+                chunking_run_id=chunking_config.id,
                 source_text_hash=source_text_hash,
             )
         )
     await session.flush()
 
+    technical_terms_config = await get_technical_terms_pipeline_config(session)
     await _queue_job(
         session,
         project_id=job.project_id,
@@ -167,7 +183,11 @@ async def _handle_chunk_job(
         job_type="technical_terms",
         content_hash=source_text_hash,
         priority=1,
+        pipeline_config_id=technical_terms_config.id,
+        pipeline_config_hash=technical_terms_config.config_hash,
     )
+    embedding_config = await get_embedding_pipeline_config(session, gateway)
+    embedding_model_run = await get_active_embedding_model_run(session, gateway, create=True)
     await _queue_job(
         session,
         project_id=job.project_id,
@@ -175,11 +195,14 @@ async def _handle_chunk_job(
         job_type="embed",
         content_hash=source_text_hash,
         priority=2,
-        pipeline_config_hash=_embedding_config_hash(gateway),
+        pipeline_config_id=embedding_config.id if embedding_config else None,
+        pipeline_config_hash=embedding_config.config_hash if embedding_config else "embedding-disabled",
+        model_run_id=embedding_model_run.id if embedding_model_run else None,
     )
 
 
 async def _handle_term_job(session: AsyncSession, job: IngestionJob, version: DocumentVersion) -> None:
+    technical_terms_config = await get_technical_terms_pipeline_config(session)
     chunk_result = await session.execute(
         select(DocumentChunk)
         .where(DocumentChunk.version_id == version.id)
@@ -215,6 +238,7 @@ async def _handle_term_job(session: AsyncSession, job: IngestionJob, version: Do
                     start_char=chunk.start_char + term.start_char,
                     end_char=chunk.start_char + term.end_char,
                     extraction_method="regex",
+                    pipeline_config_id=technical_terms_config.id,
                     confidence=term.confidence,
                     source_text_hash=source_text_hash,
                 )
@@ -262,7 +286,7 @@ async def _handle_embed_job(
         for row in chunk_rows
     ]
 
-    model_run = await _create_model_run(session, gateway)
+    model_run = await _resolve_embedding_model_run(session, job, gateway)
     vectors = await run_embedding(chunk_models, gateway)
 
     chunk_ids = [row.id for row in chunk_rows]
@@ -290,8 +314,7 @@ async def _handle_embed_job(
             },
         )
 
-    model_run.items_processed = len(vectors)
-    model_run.completed_at = datetime.now(timezone.utc)
+    model_run.items_processed = (model_run.items_processed or 0) + len(vectors)
     await session.flush()
 
 
@@ -303,11 +326,18 @@ async def _queue_job(
     job_type: str,
     content_hash: str,
     priority: int,
-    pipeline_config_hash: str = "default",
+    pipeline_config_hash: str,
+    pipeline_config_id: Optional[UUID] = None,
     model_run_id: Optional[UUID] = None,
 ) -> None:
-    model_part = str(model_run_id) if model_run_id else "none"
-    idem_key = f"{project_id}:{version_id}:{job_type}:{content_hash}:{pipeline_config_hash}:{model_part}"
+    idem_key = make_ingestion_job_idempotency_key(
+        project_id=project_id,
+        version_id=version_id,
+        job_type=job_type,
+        content_hash=content_hash,
+        pipeline_config_hash=pipeline_config_hash,
+        model_run_id=model_run_id,
+    )
 
     existing = await session.execute(
         select(IngestionJob).where(IngestionJob.idempotency_key == idem_key)
@@ -322,6 +352,7 @@ async def _queue_job(
             job_type=job_type,
             status="queued",
             priority=priority,
+            pipeline_config_id=pipeline_config_id,
             content_hash=content_hash,
             idempotency_key=idem_key,
             model_run_id=model_run_id,
@@ -330,33 +361,22 @@ async def _queue_job(
     await session.flush()
 
 
-async def _create_model_run(session: AsyncSession, gateway: ModelGateway) -> ModelRun:
-    config = gateway.embedding
-    if config is None:
+async def _resolve_embedding_model_run(
+    session: AsyncSession,
+    job: IngestionJob,
+    gateway: ModelGateway,
+) -> ModelRun:
+    if job.model_run_id is not None:
+        existing = await session.get(ModelRun, job.model_run_id)
+        if existing is not None:
+            return existing
+
+    model_run = await get_active_embedding_model_run(session, gateway, create=True)
+    if model_run is None:
         raise RuntimeError("embedding model config missing")
 
-    run = ModelRun(
-        model_name=config.name,
-        model_version=None,
-        task="embedding",
-        config={
-            "endpoint": config.endpoint,
-            "protocol": config.protocol,
-            "dimensions": config.dimensions,
-            "batch_size": config.batch_size,
-        },
-        started_at=datetime.now(timezone.utc),
-    )
-    session.add(run)
-    await session.flush()
-    return run
-
-
-def _embedding_config_hash(gateway: ModelGateway) -> str:
-    config = gateway.embedding
-    if config is None:
-        return "embedding-disabled"
-    return f"{config.name}:{config.protocol}:{config.dimensions}:{config.batch_size}:{config.endpoint}"
+    job.model_run_id = model_run.id
+    return model_run
 
 
 async def worker_loop() -> None:

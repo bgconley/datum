@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from datum.services.chunking import Chunk, chunk_text
+from datum.services.chunking import (
+    Chunk,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_OVERLAP_TOKENS,
+    chunk_text,
+)
 from datum.services.extraction import ExtractionResult, extract_text, extract_text_async
 from datum.services.technical_terms import TermMatch, extract_technical_terms
 
@@ -31,7 +36,11 @@ async def run_extraction_async(ctx: IngestionContext) -> Optional[ExtractionResu
     return await extract_text_async(file_path)
 
 
-def run_chunking(text: str, max_tokens: int = 512, overlap_tokens: int = 50) -> list[Chunk]:
+def run_chunking(
+    text: str,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
+) -> list[Chunk]:
     return chunk_text(text, max_tokens=max_tokens, overlap_tokens=overlap_tokens)
 
 

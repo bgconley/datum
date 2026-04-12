@@ -13,6 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.models.core import Document, DocumentVersion, Project
 from datum.models.search import ChunkEmbedding, DocumentChunk, SearchRun, SearchRunResult, TechnicalTerm
+from datum.services.pipeline_configs import (
+    RETRIEVAL_RRF_K,
+    RETRIEVAL_WEIGHTS,
+    get_active_embedding_model_run,
+    get_retrieval_pipeline_config,
+)
 from datum.services.technical_terms import TermMatch, extract_technical_terms
 
 logger = logging.getLogger(__name__)
@@ -58,13 +64,19 @@ class SearchResult:
     chunk_id: str = ""
     line_start: int = 0
     line_end: int = 0
+    match_signals: list[str] = field(default_factory=list)
 
 
-def parse_query(query: str, project_scope: Optional[str] = None) -> ParsedQuery:
+def parse_query(
+    query: str,
+    project_scope: Optional[str] = None,
+    version_scope: str = "current",
+) -> ParsedQuery:
     return ParsedQuery(
         raw=query,
         bm25_query=query,
         detected_terms=extract_technical_terms(query),
+        version_scope=version_scope,
         project_scope=project_scope,
     )
 
@@ -74,10 +86,10 @@ def fuse_results(
     bm25_results: Optional[list[RankedCandidate]] = None,
     vector_results: Optional[list[RankedCandidate]] = None,
     term_results: Optional[list[RankedCandidate]] = None,
-    k: int = 60,
-    w_bm25: float = 1.0,
-    w_vector: float = 1.0,
-    w_terms: float = 0.5,
+    k: int = RETRIEVAL_RRF_K,
+    w_bm25: float = RETRIEVAL_WEIGHTS["bm25"],
+    w_vector: float = RETRIEVAL_WEIGHTS["vector"],
+    w_terms: float = RETRIEVAL_WEIGHTS["terms"],
 ) -> list[FusedResult]:
     scores: dict[str, FusedResult] = {}
 
@@ -103,17 +115,22 @@ async def search(
     limit: int = 20,
 ) -> list[SearchResult]:
     started = time.monotonic()
-    parsed = parse_query(query, project_scope)
+    parsed = parse_query(query, project_scope, version_scope)
+    retrieval_config = await get_retrieval_pipeline_config(session)
+    active_embedding_run = None
+    if gateway and gateway.embedding:
+        active_embedding_run = await get_active_embedding_model_run(session, gateway, create=False)
 
     bm25_results = await _bm25_search(session, parsed, version_scope, limit=100)
     vector_results: list[RankedCandidate] = []
-    if gateway and gateway.embedding:
+    if gateway and gateway.embedding and active_embedding_run is not None:
         try:
             vectors = await gateway.embed([query])
             if vectors:
                 vector_results = await _vector_search(
                     session,
                     query_embedding=vectors[0],
+                    embedding_model_run_id=active_embedding_run.id,
                     version_scope=version_scope,
                     project_scope=project_scope,
                     limit=100,
@@ -138,6 +155,8 @@ async def search(
         session=session,
         query=query,
         parsed=parsed,
+        retrieval_config_id=retrieval_config.id,
+        embedding_model_run_id=active_embedding_run.id if active_embedding_run else None,
         version_scope=version_scope,
         project_scope=project_scope,
         elapsed_ms=int((time.monotonic() - started) * 1000),
@@ -210,11 +229,12 @@ async def _vector_search(
     session: AsyncSession,
     *,
     query_embedding: list[float],
+    embedding_model_run_id: UUID | None,
     version_scope: str,
     project_scope: Optional[str],
     limit: int,
 ) -> list[RankedCandidate]:
-    if not query_embedding:
+    if not query_embedding or embedding_model_run_id is None:
         return []
 
     scope_sql, params = _build_scope_sql(version_scope, project_scope)
@@ -230,6 +250,7 @@ async def _vector_search(
         JOIN documents d ON dv.document_id = d.id
         JOIN projects p ON d.project_id = p.id
         WHERE ce.dimensions = :dimensions
+          AND ce.model_run_id = :model_run_id
           AND {scope_sql}
         ORDER BY ce.embedding <=> CAST(:embedding AS halfvec(1024))
         LIMIT :limit
@@ -241,6 +262,7 @@ async def _vector_search(
             {
                 "embedding": embedding_literal,
                 "dimensions": dims,
+                "model_run_id": embedding_model_run_id,
                 "limit": limit,
                 **params,
             },
@@ -315,6 +337,13 @@ async def _build_search_result(
             snippet = snippet[:200].rstrip() + "..."
 
         matched_terms = await _matched_terms_for_chunk(session, chunk.id, parsed)
+        match_signals: list[str] = []
+        if fused.rank_bm25 is not None:
+            match_signals.append("keyword")
+        if fused.rank_vector is not None:
+            match_signals.append("semantic")
+        if fused.rank_terms is not None:
+            match_signals.append("exact-term")
 
         return SearchResult(
             document_title=document.title,
@@ -330,6 +359,7 @@ async def _build_search_result(
             chunk_id=str(chunk.id),
             line_start=chunk.start_line or 0,
             line_end=chunk.end_line or 0,
+            match_signals=match_signals,
         )
     except Exception as exc:
         logger.warning("failed to build search result: %s", exc)
@@ -364,6 +394,8 @@ async def _log_search_run(
     session: AsyncSession,
     query: str,
     parsed: ParsedQuery,
+    retrieval_config_id: UUID | None,
+    embedding_model_run_id: UUID | None,
     version_scope: str,
     project_scope: Optional[str],
     elapsed_ms: int,
@@ -376,9 +408,12 @@ async def _log_search_run(
             parsed_query={
                 "bm25_query": parsed.bm25_query,
                 "terms": [term.raw_text for term in parsed.detected_terms],
+                "version_scope": parsed.version_scope,
             },
             version_scope=version_scope,
             project_scope=project_scope,
+            retrieval_config_id=retrieval_config_id,
+            embedding_model_run_id=embedding_model_run_id,
             result_count=len(results),
             latency_ms=elapsed_ms,
         )
