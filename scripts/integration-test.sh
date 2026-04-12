@@ -9,9 +9,15 @@
 
 set -euo pipefail
 
+# Default to ZFS paths on GPU node; override with env vars for other environments
+export DATUM_PROJECTS_ROOT="${DATUM_PROJECTS_ROOT:-/tank/datum/projects}"
+export DATUM_PGDATA="${DATUM_PGDATA:-/tank/datum/pgdata}"
+
 echo "=== Datum Full-Stack Integration Tests ==="
 echo "Host: $(hostname)"
 echo "Date: $(date)"
+echo "Projects root: $DATUM_PROJECTS_ROOT"
+echo "PG data: $DATUM_PGDATA"
 echo ""
 
 # 1. Verify ZFS datasets exist
@@ -39,8 +45,8 @@ echo "  ParadeDB:"
 docker compose exec paradedb pg_isready -U datum && echo "    OK" || { echo "    FAIL"; exit 1; }
 echo "  datum-api:"
 curl -sf http://localhost:8001/api/v1/health | grep -q ok && echo "    OK" || { echo "    FAIL"; exit 1; }
-echo "  datum-frontend:"
-curl -sf http://localhost:3000/ | grep -q Datum && echo "    OK" || { echo "    FAIL"; exit 1; }
+echo "  datum-frontend (via Caddy :3080):"
+curl -sf http://localhost:3080/ | grep -q Datum && echo "    OK" || { echo "    FAIL"; exit 1; }
 echo ""
 
 # 3. Run migrations
