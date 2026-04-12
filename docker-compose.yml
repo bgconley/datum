@@ -1,0 +1,57 @@
+services:
+  paradedb:
+    image: paradedb/paradedb:latest
+    environment:
+      POSTGRES_USER: datum
+      POSTGRES_PASSWORD: ${DATUM_DB_PASSWORD:-datum_dev}
+      POSTGRES_DB: datum
+      TELEMETRY: "false"
+    volumes:
+      - ${DATUM_PGDATA:-./dev/pgdata}:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datum"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  datum-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
+      - ${DATUM_BLOBS_ROOT:-./dev/blobs}:/tank/datum/blobs
+      - ${DATUM_CACHE_ROOT:-./dev/cache}:/tank/datum/cache
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      DATUM_DATABASE_URL: postgresql+asyncpg://datum:${DATUM_DB_PASSWORD:-datum_dev}@paradedb:5432/datum
+      DATUM_PROJECTS_ROOT: /tank/datum/projects
+      DATUM_BLOBS_ROOT: /tank/datum/blobs
+      DATUM_CACHE_ROOT: /tank/datum/cache
+    depends_on:
+      paradedb:
+        condition: service_healthy
+
+  datum-watcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: python -m datum.watcher
+    volumes:
+      - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
+    environment:
+      DATUM_DATABASE_URL: postgresql+asyncpg://datum:${DATUM_DB_PASSWORD:-datum_dev}@paradedb:5432/datum
+      DATUM_PROJECTS_ROOT: /tank/datum/projects
+    depends_on:
+      paradedb:
+        condition: service_healthy
+
+  datum-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3000:3000"
