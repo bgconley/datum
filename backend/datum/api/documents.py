@@ -1,6 +1,12 @@
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import settings
+from datum.db import get_session
+from datum.models.core import Project
 from datum.schemas.document import (
     DocumentContentResponse,
     DocumentCreate,
@@ -14,7 +20,10 @@ from datum.services.document_manager import (
     list_documents,
     save_document,
 )
+from datum.services.db_sync import sync_document_version_to_db, log_audit_event
 from datum.services.project_manager import get_project
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/projects/{slug}/docs", tags=["documents"])
 
@@ -29,6 +38,16 @@ def _get_project_path(slug: str):
     return settings.projects_root / slug
 
 
+async def _get_project_db_id(slug: str, session: AsyncSession):
+    """Look up project DB id. Returns None if DB is unavailable or project not synced."""
+    try:
+        result = await session.execute(select(Project).where(Project.slug == slug))
+        project = result.scalar_one_or_none()
+        return project.id if project else None
+    except Exception:
+        return None
+
+
 @router.get("", response_model=list[DocumentResponse])
 async def api_list_documents(slug: str):
     project_path = _get_project_path(slug)
@@ -37,10 +56,12 @@ async def api_list_documents(slug: str):
 
 
 @router.post("", response_model=DocumentResponse, status_code=201)
-async def api_create_document(slug: str, body: DocumentCreate):
+async def api_create_document(
+    slug: str, body: DocumentCreate, session: AsyncSession = Depends(get_session)
+):
     project_path = _get_project_path(slug)
     try:
-        info = create_document(
+        doc_info = create_document(
             project_path=project_path,
             relative_path=body.relative_path,
             title=body.title,
@@ -53,7 +74,37 @@ async def api_create_document(slug: str, body: DocumentCreate):
         raise HTTPException(status_code=409, detail=f"Document '{body.relative_path}' already exists")
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return DocumentResponse(**info.__dict__)
+
+    # DB catch-up (best-effort)
+    try:
+        project_db_id = await _get_project_db_id(slug, session)
+        if project_db_id:
+            from datum.services.versioning import get_current_version
+            ver = get_current_version(project_path, body.relative_path)
+            if ver:
+                file_bytes = (project_path / body.relative_path).read_bytes()
+                await sync_document_version_to_db(
+                    session=session,
+                    project_id=project_db_id,
+                    version_info=ver,
+                    canonical_path=body.relative_path,
+                    title=doc_info.title,
+                    doc_type=doc_info.doc_type,
+                    status=doc_info.status,
+                    tags=doc_info.tags,
+                    change_source="web",
+                    content_hash=doc_info.content_hash,
+                    byte_size=len(file_bytes),
+                    filesystem_path=ver.version_file,
+                )
+                await log_audit_event(
+                    session, "web", "create_document", project_db_id,
+                    body.relative_path, new_hash=doc_info.content_hash,
+                )
+    except Exception:
+        logger.debug("DB sync skipped for document create", exc_info=True)
+
+    return DocumentResponse(**doc_info.__dict__)
 
 
 @router.get("/{doc_path:path}", response_model=DocumentContentResponse)
@@ -70,10 +121,14 @@ async def api_get_document(slug: str, doc_path: str):
 
 
 @router.put("/{doc_path:path}", response_model=DocumentResponse)
-async def api_save_document(slug: str, doc_path: str, body: DocumentSave):
+async def api_save_document(
+    slug: str, doc_path: str, body: DocumentSave,
+    session: AsyncSession = Depends(get_session),
+):
     project_path = _get_project_path(slug)
+    old_hash = body.base_hash
     try:
-        info = save_document(
+        doc_info = save_document(
             project_path=project_path,
             relative_path=doc_path,
             content=body.content,
@@ -89,4 +144,34 @@ async def api_save_document(slug: str, doc_path: str, body: DocumentSave):
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return DocumentResponse(**info.__dict__)
+
+    # DB catch-up (best-effort)
+    try:
+        project_db_id = await _get_project_db_id(slug, session)
+        if project_db_id:
+            from datum.services.versioning import get_current_version
+            ver = get_current_version(project_path, doc_path)
+            if ver:
+                file_bytes = (project_path / doc_path).read_bytes()
+                await sync_document_version_to_db(
+                    session=session,
+                    project_id=project_db_id,
+                    version_info=ver,
+                    canonical_path=doc_path,
+                    title=doc_info.title,
+                    doc_type=doc_info.doc_type,
+                    status=doc_info.status,
+                    tags=doc_info.tags,
+                    change_source="web",
+                    content_hash=doc_info.content_hash,
+                    byte_size=len(file_bytes),
+                    filesystem_path=ver.version_file,
+                )
+                await log_audit_event(
+                    session, "web", "save_document", project_db_id,
+                    doc_path, old_hash=old_hash, new_hash=doc_info.content_hash,
+                )
+    except Exception:
+        logger.debug("DB sync skipped for document save", exc_info=True)
+
+    return DocumentResponse(**doc_info.__dict__)
