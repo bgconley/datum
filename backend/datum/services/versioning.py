@@ -72,6 +72,26 @@ def create_version(
 
     branch_data = manifest.get("branches", {}).get(branch, {"head": None, "versions": []})
 
+    # Handle stale pending_commit from a prior crash.
+    # The reconciler owns full recovery, but we must not silently reuse a version
+    # slot that a pending_commit already claimed. If the pending_commit's version
+    # file exists on disk, the reconciler should complete it. If it doesn't exist,
+    # clear the stale pending_commit so we can proceed.
+    if "pending_commit" in manifest:
+        stale = manifest["pending_commit"]
+        stale_version_path = manifest_dir / stale["file"]
+        if stale_version_path.exists():
+            # Version file was written before the crash — reconciler must handle this.
+            # Refuse to create a new version until reconciler clears pending_commit.
+            raise RuntimeError(
+                f"Stale pending_commit for version {stale['version']} with existing "
+                f"version file at {stale_version_path}. Run reconciler to recover."
+            )
+        else:
+            # No version file — the crash happened before step f. Safe to clear.
+            del manifest["pending_commit"]
+            write_manifest(manifest_path, manifest)
+
     # Idempotency check: skip if content hash matches head
     if branch_data["versions"]:
         head_hash = branch_data["versions"][-1].get("content_hash")

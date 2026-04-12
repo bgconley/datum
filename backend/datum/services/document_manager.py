@@ -15,6 +15,7 @@ from datum.services.filesystem import (
     compute_content_hash,
     doc_manifest_dir,
     read_manifest,
+    validate_canonical_path,
 )
 from datum.services.versioning import (
     VersionInfo,
@@ -24,6 +25,10 @@ from datum.services.versioning import (
     read_version_content,
 )
 
+# Document paths must live under docs/ per design doc filesystem schema.
+# project.yaml, attachments/, and .piq/ have separate semantics.
+_ALLOWED_DOC_PREFIXES = ("docs/",)
+
 
 class ConflictError(Exception):
     """Raised when a save conflicts with the current file state."""
@@ -31,6 +36,15 @@ class ConflictError(Exception):
         self.current_hash = current_hash
         self.base_hash = base_hash
         super().__init__(f"Conflict: file changed (current={current_hash}, base={base_hash})")
+
+
+def _validate_document_path(relative_path: str) -> None:
+    """Enforce that document paths live under docs/ and pass traversal checks."""
+    validate_canonical_path(relative_path)
+    if not any(relative_path.startswith(prefix) for prefix in _ALLOWED_DOC_PREFIXES):
+        raise ValueError(
+            f"Document path must be under docs/, got: {relative_path}"
+        )
 
 
 @dataclass
@@ -56,7 +70,17 @@ def create_document(
     tags: Optional[list[str]] = None,
     status: str = "draft",
 ) -> DocumentInfo:
-    """Create a new document with frontmatter and initial version."""
+    """Create a new document with frontmatter and initial version.
+
+    Raises ValueError if path is not under docs/ or already exists.
+    """
+    _validate_document_path(relative_path)
+
+    # Reject if canonical file already exists
+    canonical_full = project_path / relative_path
+    if canonical_full.exists():
+        raise FileExistsError(f"Document already exists: {relative_path}")
+
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # Build frontmatter + content
@@ -109,6 +133,7 @@ def save_document(
 
     base_hash must match the current file's hash, or ConflictError is raised.
     """
+    _validate_document_path(relative_path)
     canonical_full = project_path / relative_path
 
     # Conflict check

@@ -67,3 +67,31 @@ class TestGetProject:
 
     def test_missing_returns_none(self, tmp_path):
         assert get_project(tmp_path, "nonexistent") is None
+
+
+class TestSlugValidation:
+    """Finding 3: slug must be a safe single path component."""
+
+    def test_rejects_path_traversal(self, tmp_path):
+        with pytest.raises(ValueError, match="Invalid project slug"):
+            create_project(tmp_path, "Escaped", "../escaped-project")
+
+    def test_rejects_slash(self, tmp_path):
+        with pytest.raises(ValueError, match="Invalid project slug"):
+            create_project(tmp_path, "Nested", "a/b")
+
+    def test_rejects_dot(self, tmp_path):
+        with pytest.raises(ValueError, match="Invalid project slug"):
+            create_project(tmp_path, "Dotted", ".hidden")
+
+    def test_rejects_empty(self, tmp_path):
+        with pytest.raises(ValueError, match="Invalid project slug"):
+            create_project(tmp_path, "Empty", "")
+
+    def test_rejects_uppercase(self, tmp_path):
+        with pytest.raises(ValueError, match="Invalid project slug"):
+            create_project(tmp_path, "Upper", "MyProject")
+
+    def test_get_project_validates_slug(self, tmp_path):
+        with pytest.raises(ValueError, match="Invalid project slug"):
+            get_project(tmp_path, "../escape")

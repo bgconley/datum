@@ -10,12 +10,29 @@ from typing import Optional
 
 import yaml
 
+import re
+
 from datum.services.filesystem import (
     atomic_write,
     ensure_piq_structure,
     generate_uid,
     write_manifest,
 )
+
+# Slug must be a single path component: lowercase alphanumeric, hyphens allowed,
+# no slashes, dots, or traversal characters.
+_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def _validate_slug(slug: str) -> None:
+    """Validate that a project slug is a safe single path component."""
+    if not slug or not _SLUG_PATTERN.match(slug):
+        raise ValueError(
+            f"Invalid project slug: '{slug}'. Must be lowercase alphanumeric "
+            f"with hyphens, starting with a letter or digit."
+        )
+    if slug.startswith("-") or slug.endswith("-") or "--" in slug:
+        raise ValueError(f"Invalid project slug: '{slug}'. No leading/trailing/double hyphens.")
 
 
 @dataclass
@@ -39,6 +56,7 @@ def create_project(
     status: str = "active",
 ) -> ProjectInfo:
     """Create a new project on disk with canonical directory structure."""
+    _validate_slug(slug)
     project_dir = projects_root / slug
     if project_dir.exists():
         raise FileExistsError(f"Project directory already exists: {project_dir}")
@@ -100,6 +118,7 @@ def list_projects(projects_root: Path) -> list[ProjectInfo]:
 
 def get_project(projects_root: Path, slug: str) -> Optional[ProjectInfo]:
     """Get a project by slug."""
+    _validate_slug(slug)
     project_dir = projects_root / slug
     if not project_dir.exists() or not (project_dir / "project.yaml").exists():
         return None

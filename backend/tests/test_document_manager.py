@@ -86,3 +86,36 @@ class TestListDocuments:
         docs = list_documents(project)
         titles = {d.title for d in docs}
         assert titles == {"A", "B"}
+
+
+class TestDocumentPathEnforcement:
+    """Finding 1: documents must live under docs/."""
+
+    def test_rejects_project_yaml_path(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            create_document(project, "project.yaml", "Bad", "plan", "# Bad")
+
+    def test_rejects_attachments_path(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            create_document(project, "attachments/not-a-doc.md", "Bad", "plan", "# Bad")
+
+    def test_rejects_piq_path(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            create_document(project, ".piq/records/bad.yaml", "Bad", "plan", "# Bad")
+
+    def test_rejects_bare_root_path(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            create_document(project, "escape.md", "Bad", "plan", "# Bad")
+
+    def test_save_rejects_non_docs_path(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            save_document(project, "project.yaml", "# Bad", "sha256:fake", "web")
+
+
+class TestDocumentDuplicateGuard:
+    """Finding 4: create_document must reject existing paths."""
+
+    def test_rejects_duplicate_path(self, project):
+        create_document(project, "docs/a.md", "A", "plan", "# A")
+        with pytest.raises(FileExistsError):
+            create_document(project, "docs/a.md", "A Again", "plan", "# A Again")

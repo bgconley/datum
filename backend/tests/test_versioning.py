@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from datum.services.filesystem import compute_content_hash, read_manifest
+from datum.services.filesystem import compute_content_hash, read_manifest, write_manifest, doc_manifest_dir
 from datum.services.versioning import create_version, get_current_version, VersionInfo
 
 
@@ -122,3 +122,67 @@ class TestGetCurrentVersion:
         info = get_current_version(project, canonical)
         assert info is not None
         assert info.version_number == 2
+
+
+class TestStalePendingCommit:
+    """Finding 2: stale pending_commit must not be silently overwritten."""
+
+    def test_stale_pending_with_version_file_raises(self, tmp_path):
+        """If pending_commit has a version file on disk, refuse to proceed."""
+        project = tmp_path / "my-project"
+        project.mkdir()
+        (project / ".piq").mkdir()
+
+        canonical = "docs/notes.md"
+        (project / canonical).parent.mkdir(parents=True, exist_ok=True)
+        (project / canonical).write_bytes(b"v1")
+        create_version(project, canonical, b"v1", "web")
+
+        # Simulate a crash that left pending_commit + version file
+        manifest_dir = doc_manifest_dir(project, canonical)
+        manifest = read_manifest(manifest_dir / "manifest.yaml")
+        manifest["pending_commit"] = {
+            "version": 2,
+            "branch": "main",
+            "file": "main/v002.md",
+            "content_hash": "sha256:fake",
+            "canonical_path": canonical,
+            "started": "2026-04-11T00:00:00+00:00",
+        }
+        write_manifest(manifest_dir / "manifest.yaml", manifest)
+        # Create the orphaned version file
+        (manifest_dir / "main" / "v002.md").write_bytes(b"orphaned content")
+
+        with pytest.raises(RuntimeError, match="Stale pending_commit"):
+            create_version(project, canonical, b"v2 new", "web")
+
+    def test_stale_pending_without_version_file_clears(self, tmp_path):
+        """If pending_commit has no version file, it's safe to clear and proceed."""
+        project = tmp_path / "my-project"
+        project.mkdir()
+        (project / ".piq").mkdir()
+
+        canonical = "docs/notes.md"
+        (project / canonical).parent.mkdir(parents=True, exist_ok=True)
+        (project / canonical).write_bytes(b"v1")
+        create_version(project, canonical, b"v1", "web")
+
+        # Simulate a crash that left pending_commit but NO version file
+        manifest_dir = doc_manifest_dir(project, canonical)
+        manifest = read_manifest(manifest_dir / "manifest.yaml")
+        manifest["pending_commit"] = {
+            "version": 2,
+            "branch": "main",
+            "file": "main/v002.md",
+            "content_hash": "sha256:fake",
+            "canonical_path": canonical,
+            "started": "2026-04-11T00:00:00+00:00",
+        }
+        write_manifest(manifest_dir / "manifest.yaml", manifest)
+
+        # Should clear stale pending_commit and create v002 normally
+        (project / canonical).write_bytes(b"v2 new")
+        info = create_version(project, canonical, b"v2 new", "web")
+        assert info.version_number == 2
+        manifest = read_manifest(manifest_dir / "manifest.yaml")
+        assert "pending_commit" not in manifest
