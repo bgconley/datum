@@ -44,6 +44,15 @@ class TestCreateProject:
         assert info.tags == ["a", "b"]
         assert info.uid is not None
 
+    def test_project_yaml_versioned_on_create(self, tmp_path):
+        """Task 14: project.yaml gets v001 in .piq/project/versions/ on create."""
+        create_project(tmp_path, "Test", "test-project")
+        v001 = tmp_path / "test-project" / ".piq" / "project" / "versions" / "v001.yaml"
+        assert v001.exists()
+        import yaml
+        data = yaml.safe_load(v001.read_text())
+        assert data["name"] == "Test"
+
 
 class TestListProjects:
     def test_empty(self, tmp_path):

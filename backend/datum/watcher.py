@@ -83,8 +83,17 @@ class DebouncedHandler(FileSystemEventHandler):
             if not (project_path / "project.yaml").exists():
                 continue  # Not a valid project
 
-            # Skip project.yaml itself for now (Task 14 adds project metadata versioning)
             if canonical_path == "project.yaml":
+                # Version project.yaml into .piq/project/versions/
+                from datum.services.filesystem import atomic_write as _atomic_write
+                versions_dir = project_path / ".piq" / "project" / "versions"
+                versions_dir.mkdir(parents=True, exist_ok=True)
+                existing = sorted(versions_dir.glob("v*.yaml"))
+                next_num = len(existing) + 1
+                version_file = versions_dir / f"v{next_num:03d}.yaml"
+                if not version_file.exists():
+                    _atomic_write(version_file, path.read_bytes())
+                    logger.info(f"Watcher: versioned project.yaml as v{next_num:03d}")
                 continue
 
             logger.info(f"Watcher: versioning {project_slug}/{canonical_path}")

@@ -134,6 +134,24 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                 result.errors.append(f"{canonical_path}: {e}")
                 logger.exception(f"Reconciler error: {canonical_path}")
 
+    # Phase 3: Check project.yaml versioning
+    project_yaml = project_path / "project.yaml"
+    if project_yaml.exists():
+        result.files_scanned += 1
+        versions_dir = project_path / ".piq" / "project" / "versions"
+        versions_dir.mkdir(parents=True, exist_ok=True)
+        current_hash = compute_content_hash(project_yaml.read_bytes())
+        existing = sorted(versions_dir.glob("v*.yaml"))
+        if existing:
+            latest_hash = compute_content_hash(existing[-1].read_bytes())
+            if latest_hash != current_hash:
+                next_num = len(existing) + 1
+                atomic_write(versions_dir / f"v{next_num:03d}.yaml", project_yaml.read_bytes())
+                result.versions_created += 1
+        else:
+            atomic_write(versions_dir / "v001.yaml", project_yaml.read_bytes())
+            result.versions_created += 1
+
     return result
 
 
