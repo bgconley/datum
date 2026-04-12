@@ -44,11 +44,17 @@ fi
 
 echo "Using Python: $PYTHON ($($PYTHON --version))"
 
-# Create venv parent directory if needed
+# Create venv parent directory if needed (may require sudo the first time)
 VENV_PARENT="$(dirname "$VENV_PATH")"
 if [ ! -d "$VENV_PARENT" ]; then
-    echo "Creating venv parent directory: $VENV_PARENT"
-    mkdir -p "$VENV_PARENT"
+    echo "Venv parent directory $VENV_PARENT does not exist."
+    echo "Create it with: sudo mkdir -p $VENV_PARENT && sudo chown \$(whoami) $VENV_PARENT"
+    exit 1
+fi
+if [ ! -w "$VENV_PARENT" ]; then
+    echo "Venv parent directory $VENV_PARENT is not writable by $(whoami)."
+    echo "Fix with: sudo chown $(whoami) $VENV_PARENT"
+    exit 1
 fi
 
 # Create or update venv
