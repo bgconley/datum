@@ -102,7 +102,7 @@ class ModelGateway:
         if not config or not config.endpoint:
             return False
         try:
-            await self._get(f"{config.endpoint}/health")
+            await self._get(f"{config.endpoint}/health", timeout=2.0)
             return True
         except Exception:
             return False
@@ -112,8 +112,8 @@ class ModelGateway:
         response.raise_for_status()
         return response.json()
 
-    async def _get(self, url: str) -> dict:
-        response = await self._client.get(url)
+    async def _get(self, url: str, timeout: float | None = None) -> dict:
+        response = await self._client.get(url, timeout=timeout)
         response.raise_for_status()
         return response.json()
 

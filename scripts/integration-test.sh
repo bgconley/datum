@@ -13,6 +13,18 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$REPO_DIR/backend"
+ENV_FILE="$REPO_DIR/.env"
+
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+fi
+
 # --- Configuration ---
 VENV_PATH="/tank/venvs/datum"
 export DATUM_UID="${DATUM_UID:-$(id -u)}"
@@ -23,10 +35,6 @@ export DATUM_CACHE_ROOT="${DATUM_CACHE_ROOT:-/tank/datum/cache}"
 export DATUM_PGDATA="${DATUM_PGDATA:-/tank/datum/pgdata}"
 export DATUM_EMBEDDING_ENDPOINT="${DATUM_EMBEDDING_ENDPOINT:-http://localhost:8010}"
 export DATUM_RERANKER_ENDPOINT="${DATUM_RERANKER_ENDPOINT:-http://localhost:8011}"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BACKEND_DIR="$REPO_DIR/backend"
 API_TEST_SLUG="api-test"
 
 cleanup_api_test_state() {
@@ -296,8 +304,8 @@ SQL
         embeddings="${embeddings:-0}"
         jobs="${jobs:-0}"
 
-        if [ "$version_texts" -ge 1 ] && [ "$chunks" -ge 1 ] && [ "$technical_terms" -ge 1 ] && [ "$jobs" -eq 0 ]; then
-            if [ "$require_embeddings" != "1" ] || [ "$embeddings" -ge 1 ]; then
+        if [ "$version_texts" -ge 1 ] && [ "$chunks" -ge 1 ] && [ "$technical_terms" -ge 1 ]; then
+            if [ "$require_embeddings" != "1" ] || { [ "$embeddings" -ge 1 ] && [ "$jobs" -eq 0 ]; }; then
                 echo "    version_texts=$version_texts chunks=$chunks technical_terms=$technical_terms chunk_embeddings=$embeddings jobs=$jobs"
                 return 0
             fi
