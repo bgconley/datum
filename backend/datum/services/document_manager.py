@@ -170,6 +170,7 @@ def save_document(
 
 def get_document(project_path: Path, relative_path: str) -> Optional[DocumentInfo]:
     """Get document info by reading its canonical file and manifest."""
+    _validate_document_path(relative_path)
     canonical_full = project_path / relative_path
     if not canonical_full.exists():
         return None

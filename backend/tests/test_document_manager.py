@@ -111,6 +111,10 @@ class TestDocumentPathEnforcement:
         with pytest.raises(ValueError, match="must be under docs/"):
             save_document(project, "project.yaml", "# Bad", "sha256:fake", "web")
 
+    def test_get_rejects_non_docs_path(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            get_document(project, "project.yaml")
+
 
 class TestDocumentDuplicateGuard:
     """Finding 4: create_document must reject existing paths."""
