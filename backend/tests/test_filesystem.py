@@ -1,7 +1,14 @@
 import pytest
 from pathlib import Path
 
-from datum.services.filesystem import compute_content_hash, atomic_write, read_manifest, write_manifest
+from datum.services.filesystem import (
+    compute_content_hash,
+    atomic_write,
+    read_manifest,
+    write_manifest,
+    doc_manifest_dir,
+    validate_canonical_path,
+)
 
 
 class TestContentHash:
@@ -83,3 +90,38 @@ class TestManifest:
         files = list(tmp_path.iterdir())
         assert len(files) == 1
         assert files[0].name == "manifest.yaml"
+
+
+class TestPathValidation:
+    def test_valid_relative_path(self):
+        result = validate_canonical_path("docs/requirements/auth.md")
+        assert str(result) == "docs/requirements/auth.md"
+
+    def test_rejects_absolute_path(self):
+        with pytest.raises(ValueError, match="must be relative"):
+            validate_canonical_path("/etc/passwd")
+
+    def test_rejects_parent_traversal(self):
+        with pytest.raises(ValueError, match="escapes project boundary"):
+            validate_canonical_path("../escape.md")
+
+    def test_rejects_nested_traversal(self):
+        with pytest.raises(ValueError, match="escapes project boundary"):
+            validate_canonical_path("docs/../../escape.md")
+
+    def test_normalizes_inner_dots(self):
+        result = validate_canonical_path("docs/./requirements/auth.md")
+        assert str(result) == "docs/requirements/auth.md"
+
+    def test_doc_manifest_dir_valid(self, tmp_path):
+        result = doc_manifest_dir(tmp_path, "docs/requirements/auth-req.md")
+        expected = tmp_path / ".piq" / "docs" / "requirements" / "auth-req"
+        assert result == expected
+
+    def test_doc_manifest_dir_rejects_traversal(self, tmp_path):
+        with pytest.raises(ValueError):
+            doc_manifest_dir(tmp_path, "../escape.md")
+
+    def test_doc_manifest_dir_rejects_absolute(self, tmp_path):
+        with pytest.raises(ValueError):
+            doc_manifest_dir(tmp_path, "/etc/passwd")

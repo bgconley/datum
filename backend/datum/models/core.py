@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ARRAY, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ARRAY, BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,7 +64,7 @@ class SourceFile(Base):
     canonical_path: Mapped[str] = mapped_column(String, nullable=False)
     object_kind: Mapped[str] = mapped_column(String, nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
-    byte_size: Mapped[Optional[int]] = mapped_column(Integer)
+    byte_size: Mapped[Optional[int]] = mapped_column(BigInteger)
     mtime: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     indexed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -113,7 +113,7 @@ class DocumentVersion(Base):
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     filesystem_path: Mapped[str] = mapped_column(String, nullable=False)
     content_type: Mapped[Optional[str]] = mapped_column(String)
-    byte_size: Mapped[Optional[int]] = mapped_column(Integer)
+    byte_size: Mapped[Optional[int]] = mapped_column(BigInteger)
     label: Mapped[Optional[str]] = mapped_column(String)
     change_source: Mapped[Optional[str]] = mapped_column(String)
     agent_name: Mapped[Optional[str]] = mapped_column(String)

@@ -71,13 +71,33 @@ def ensure_piq_structure(project_path: Path) -> None:
         (piq / subdir).mkdir(parents=True, exist_ok=True)
 
 
+def validate_canonical_path(canonical_path: str) -> Path:
+    """Validate that a canonical path is relative and doesn't escape project boundaries.
+
+    Raises ValueError if the path is absolute or contains traversal components.
+    """
+    rel = Path(canonical_path)
+    if rel.is_absolute():
+        raise ValueError(f"canonical_path must be relative, got: {canonical_path}")
+    # Resolve ".." and check the result stays relative
+    try:
+        resolved = Path(os.path.normpath(canonical_path))
+    except (ValueError, OSError) as e:
+        raise ValueError(f"Invalid canonical_path: {canonical_path}") from e
+    if resolved.is_absolute() or str(resolved).startswith(".."):
+        raise ValueError(f"canonical_path escapes project boundary: {canonical_path}")
+    return resolved
+
+
 def doc_manifest_dir(project_path: Path, canonical_path: str) -> Path:
     """Get the .piq manifest directory for a document.
 
     Example: canonical_path="docs/requirements/auth-req.md"
     Returns: project_path/.piq/docs/requirements/auth-req/
+
+    Raises ValueError if canonical_path is absolute or traverses outside the project.
     """
-    rel = Path(canonical_path)
+    rel = validate_canonical_path(canonical_path)
     stem = rel.stem  # "auth-req"
     parent = rel.parent  # "docs/requirements"
     return project_path / ".piq" / parent / stem
