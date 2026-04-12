@@ -64,6 +64,43 @@ SQL
     fi
 }
 
+cleanup_pytest_db_state() {
+    local quiet="${1:-0}"
+
+    if [ "$quiet" != "1" ]; then
+        echo "  Cleaning pytest temp DB state..."
+    fi
+
+    (
+        cd "$REPO_DIR"
+        docker compose exec -T paradedb psql -v ON_ERROR_STOP=1 -q -U datum -d datum >/dev/null <<SQL
+DELETE FROM version_head_events
+WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%')
+   OR document_id IN (
+       SELECT id FROM documents
+       WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%')
+   );
+DELETE FROM audit_events
+WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
+DELETE FROM document_versions
+WHERE document_id IN (
+    SELECT id FROM documents
+    WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%')
+);
+DELETE FROM source_files
+WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
+DELETE FROM documents
+WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
+DELETE FROM projects
+WHERE filesystem_path LIKE '/tmp/pytest-of-%';
+SQL
+    )
+
+    if [ "$quiet" != "1" ]; then
+        echo "    OK"
+    fi
+}
+
 trap 'cleanup_api_test_state "$API_TEST_SLUG" 1 || true' EXIT
 
 echo "=== Datum Full-Stack Integration Tests ==="
@@ -132,6 +169,7 @@ cd "$BACKEND_DIR"
 DATUM_DATABASE_URL="postgresql+asyncpg://datum:${DATUM_DB_PASSWORD:-datum_dev}@localhost:5432/datum" \
     pytest tests/ -v --tb=short
 cd "$REPO_DIR"
+cleanup_pytest_db_state
 echo ""
 
 # --- 5. Filesystem integration (direct service calls against real ZFS) ---
