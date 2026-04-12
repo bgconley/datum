@@ -15,6 +15,8 @@ set -euo pipefail
 
 # --- Configuration ---
 VENV_PATH="/tank/venvs/datum"
+export DATUM_UID="${DATUM_UID:-$(id -u)}"
+export DATUM_GID="${DATUM_GID:-$(id -g)}"
 export DATUM_PROJECTS_ROOT="${DATUM_PROJECTS_ROOT:-/tank/datum/projects}"
 export DATUM_BLOBS_ROOT="${DATUM_BLOBS_ROOT:-/tank/datum/blobs}"
 export DATUM_CACHE_ROOT="${DATUM_CACHE_ROOT:-/tank/datum/cache}"
@@ -109,6 +111,7 @@ echo "=== Datum Full-Stack Integration Tests ==="
 echo "Host: $(hostname)"
 echo "Date: $(date)"
 echo "Venv: $VENV_PATH"
+echo "UID:GID: ${DATUM_UID}:${DATUM_GID}"
 echo "Projects root: $DATUM_PROJECTS_ROOT"
 echo "PG data: $DATUM_PGDATA"
 echo ""

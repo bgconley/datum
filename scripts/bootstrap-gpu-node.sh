@@ -13,7 +13,9 @@ set -euo pipefail
 
 VENV_PATH="/tank/venvs/datum"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/../backend" && pwd)"
+ENV_FILE="$REPO_DIR/.env"
 
 echo "=== Datum GPU Node Bootstrap ==="
 echo "Host: $(hostname)"
@@ -74,12 +76,36 @@ pip install --upgrade pip --quiet
 echo "Installing datum backend[dev]..."
 pip install -e "$BACKEND_DIR[dev]" --quiet
 
+write_env_var() {
+    local key="$1"
+    local value="$2"
+    local tmp
+    tmp="$(mktemp)"
+
+    if [ -f "$ENV_FILE" ]; then
+        grep -v "^${key}=" "$ENV_FILE" > "$tmp" || true
+    fi
+
+    printf "%s=%s\n" "$key" "$value" >> "$tmp"
+    mv "$tmp" "$ENV_FILE"
+}
+
+echo "Writing GPU node compose env to $ENV_FILE..."
+write_env_var "DATUM_UID" "$(id -u)"
+write_env_var "DATUM_GID" "$(id -g)"
+write_env_var "DATUM_PROJECTS_ROOT" "/tank/datum/projects"
+write_env_var "DATUM_BLOBS_ROOT" "/tank/datum/blobs"
+write_env_var "DATUM_CACHE_ROOT" "/tank/datum/cache"
+write_env_var "DATUM_PGDATA" "/tank/datum/pgdata"
+
 echo ""
 echo "=== Bootstrap Complete ==="
 echo "Venv: $VENV_PATH"
+echo "Compose env: $ENV_FILE"
 echo "Python: $(python --version)"
 echo "Pip packages:"
 pip list --format=columns | grep -E "^(datum|fastapi|sqlalchemy|alembic|pytest|asyncpg|pydantic|watchdog|pyyaml)" || true
 echo ""
 echo "To activate manually: source $VENV_PATH/bin/activate"
 echo "To run tests: source $VENV_PATH/bin/activate && cd $BACKEND_DIR && pytest tests/ -v"
+echo "Compose will use: DATUM_UID=$(id -u) DATUM_GID=$(id -g)"

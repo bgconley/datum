@@ -20,6 +20,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    user: "${DATUM_UID:-0}:${DATUM_GID:-0}"
     volumes:
       - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
       - ${DATUM_BLOBS_ROOT:-./dev/blobs}:/tank/datum/blobs
@@ -39,6 +40,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    user: "${DATUM_UID:-0}:${DATUM_GID:-0}"
     command: python -m datum.watcher
     volumes:
       - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
