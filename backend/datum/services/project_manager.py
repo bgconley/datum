@@ -88,10 +88,9 @@ def create_project(
     project_yaml = yaml.dump(project_data, default_flow_style=False, sort_keys=False).encode()
     atomic_write(project_dir / "project.yaml", project_yaml)
 
-    # Version project.yaml (same versioning discipline as documents)
-    versions_dir = project_dir / ".piq" / "project" / "versions"
-    versions_dir.mkdir(parents=True, exist_ok=True)
-    atomic_write(versions_dir / "v001.yaml", project_yaml)
+    # Version project.yaml using shared helper (hash-checked, gap-safe numbering)
+    from datum.services.project_versioning import version_project_yaml
+    version_project_yaml(project_dir, content=project_yaml, change_source="create")
 
     # Write project-level .piq/manifest.yaml
     write_manifest(project_dir / ".piq" / "manifest.yaml", {"documents": []})

@@ -134,23 +134,42 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                 result.errors.append(f"{canonical_path}: {e}")
                 logger.exception(f"Reconciler error: {canonical_path}")
 
-    # Phase 3: Check project.yaml versioning
+    # Phase 3: Check project.yaml versioning (shared helper: hash-checked, gap-safe)
+    from datum.services.project_versioning import version_project_yaml, sync_project_yaml_to_db
     project_yaml = project_path / "project.yaml"
     if project_yaml.exists():
         result.files_scanned += 1
-        versions_dir = project_path / ".piq" / "project" / "versions"
-        versions_dir.mkdir(parents=True, exist_ok=True)
-        current_hash = compute_content_hash(project_yaml.read_bytes())
-        existing = sorted(versions_dir.glob("v*.yaml"))
-        if existing:
-            latest_hash = compute_content_hash(existing[-1].read_bytes())
-            if latest_hash != current_hash:
-                next_num = len(existing) + 1
-                atomic_write(versions_dir / f"v{next_num:03d}.yaml", project_yaml.read_bytes())
-                result.versions_created += 1
-        else:
-            atomic_write(versions_dir / "v001.yaml", project_yaml.read_bytes())
+        new_ver = version_project_yaml(project_path, change_source="reconciler")
+        if new_ver:
             result.versions_created += 1
+            # DB sync if session provided, otherwise best-effort standalone
+            if db_session:
+                try:
+                    import yaml
+                    from datum.services.db_sync import sync_project_to_db, log_audit_event
+                    content = project_yaml.read_bytes()
+                    data = yaml.safe_load(content)
+                    from sqlalchemy import select
+                    from datum.models.core import Project
+                    proj_result = await db_session.execute(
+                        select(Project).where(
+                            Project.filesystem_path == str(project_path)
+                        )
+                    )
+                    existing_proj = proj_result.scalar_one_or_none()
+                    if existing_proj:
+                        existing_proj.name = data.get("name", existing_proj.name)
+                        existing_proj.description = data.get("description")
+                        existing_proj.tags = data.get("tags", [])
+                        existing_proj.project_yaml_hash = compute_content_hash(content)
+                        await db_session.commit()
+                        await log_audit_event(
+                            db_session, "reconciler", "project_metadata_updated",
+                            existing_proj.id, "project.yaml",
+                            new_hash=compute_content_hash(content),
+                        )
+                except Exception:
+                    logger.debug("Reconciler project.yaml DB sync failed", exc_info=True)
 
     return result
 

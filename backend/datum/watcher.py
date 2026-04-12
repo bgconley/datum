@@ -84,16 +84,15 @@ class DebouncedHandler(FileSystemEventHandler):
                 continue  # Not a valid project
 
             if canonical_path == "project.yaml":
-                # Version project.yaml into .piq/project/versions/
-                from datum.services.filesystem import atomic_write as _atomic_write
-                versions_dir = project_path / ".piq" / "project" / "versions"
-                versions_dir.mkdir(parents=True, exist_ok=True)
-                existing = sorted(versions_dir.glob("v*.yaml"))
-                next_num = len(existing) + 1
-                version_file = versions_dir / f"v{next_num:03d}.yaml"
-                if not version_file.exists():
-                    _atomic_write(version_file, path.read_bytes())
-                    logger.info(f"Watcher: versioned project.yaml as v{next_num:03d}")
+                from datum.services.project_versioning import (
+                    version_project_yaml,
+                    sync_project_yaml_to_db,
+                )
+                new_ver = version_project_yaml(
+                    project_path, content=path.read_bytes(), change_source="watcher",
+                )
+                if new_ver:
+                    sync_project_yaml_to_db(project_slug, project_path)
                 continue
 
             logger.info(f"Watcher: versioning {project_slug}/{canonical_path}")
