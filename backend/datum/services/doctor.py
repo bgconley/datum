@@ -11,7 +11,12 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from datum.services.filesystem import compute_content_hash, doc_manifest_dir, read_manifest
+from datum.services.filesystem import (
+    compute_content_hash,
+    doc_manifest_dir,
+    _legacy_manifest_dir,
+    read_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +52,9 @@ def check_project(project_path: Path) -> DoctorReport:
         if manifest_path.parent == piq_root:
             continue
         _check_document_manifest(project_path, manifest_path, report)
+
+    # Check for legacy manifest layout conflicts
+    _check_legacy_layouts(project_path, piq_root, report)
 
     return report
 
@@ -148,4 +156,38 @@ def _check_document_manifest(
                 report.errors.append(
                     f"Head pointer {head_str} references nonexistent version "
                     f"(doc: {canonical_path})"
+                )
+
+
+def _check_legacy_layouts(project_path: Path, piq_root: Path, report: DoctorReport):
+    """Detect legacy manifest directories that need migration."""
+    for manifest_path in sorted(piq_root.rglob("manifest.yaml")):
+        if manifest_path.parent == piq_root:
+            continue
+        try:
+            manifest = read_manifest(manifest_path)
+        except Exception:
+            continue  # Already reported by _check_document_manifest
+        if not manifest:
+            continue
+        canonical_path = manifest.get("canonical_path", "")
+        if not canonical_path:
+            continue
+
+        # Check if this manifest dir uses the legacy (stem-only) naming
+        manifest_dir = manifest_path.parent
+        new_dir = doc_manifest_dir(project_path, canonical_path)
+        legacy_dir = _legacy_manifest_dir(project_path, canonical_path)
+
+        if manifest_dir == legacy_dir and manifest_dir != new_dir:
+            # This is a legacy layout — check if new dir also exists
+            if (new_dir / "manifest.yaml").exists():
+                report.errors.append(
+                    f"Both legacy ({legacy_dir.name}/) and new ({new_dir.name}/) "
+                    f"manifest dirs exist for {canonical_path} — run migration"
+                )
+            else:
+                report.warnings.append(
+                    f"Legacy manifest layout for {canonical_path}: "
+                    f"{legacy_dir.name}/ should be {new_dir.name}/ — run migration"
                 )

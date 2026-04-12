@@ -42,6 +42,7 @@ from datum.services.filesystem import (
     doc_manifest_dir,
     generate_uid,
     read_manifest,
+    resolve_manifest_dir,
     write_manifest,
 )
 
@@ -71,7 +72,7 @@ def create_version(
     is identical to the current head (idempotent skip).
     """
     content_hash = compute_content_hash(content)
-    manifest_dir = doc_manifest_dir(project_path, canonical_path)
+    manifest_dir = resolve_manifest_dir(project_path, canonical_path, for_write=True)
     manifest_path = manifest_dir / "manifest.yaml"
 
     # Read current manifest (may not exist for new documents)
@@ -215,7 +216,7 @@ def get_current_version(
     project_path: Path, canonical_path: str, branch: str = "main"
 ) -> Optional[VersionInfo]:
     """Get the current head version info for a document."""
-    manifest_dir = doc_manifest_dir(project_path, canonical_path)
+    manifest_dir = resolve_manifest_dir(project_path, canonical_path, for_write=False)
     manifest = read_manifest(manifest_dir / "manifest.yaml")
     if not manifest:
         return None
@@ -239,7 +240,7 @@ def list_versions(
     project_path: Path, canonical_path: str, branch: str = "main"
 ) -> list[VersionInfo]:
     """List all versions of a document on a branch."""
-    manifest_dir = doc_manifest_dir(project_path, canonical_path)
+    manifest_dir = resolve_manifest_dir(project_path, canonical_path, for_write=False)
     manifest = read_manifest(manifest_dir / "manifest.yaml")
     if not manifest:
         return []
@@ -265,7 +266,7 @@ def read_version_content(
     project_path: Path, canonical_path: str, version_number: int, branch: str = "main"
 ) -> Optional[bytes]:
     """Read the content of a specific version."""
-    manifest_dir = doc_manifest_dir(project_path, canonical_path)
+    manifest_dir = resolve_manifest_dir(project_path, canonical_path, for_write=False)
     manifest = read_manifest(manifest_dir / "manifest.yaml")
     if not manifest:
         return None

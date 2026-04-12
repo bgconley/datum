@@ -22,6 +22,7 @@ from datum.services.document_manager import (
 )
 from datum.services.db_sync import sync_document_version_to_db, log_audit_event
 from datum.services.project_manager import get_project
+from datum.services.filesystem import ManifestLayoutConflictError
 from datum.services.versioning import StalePendingCommitError
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,14 @@ async def api_create_document(
                 "message": "Document has a stale pending commit requiring reconciler recovery",
                 "canonical_path": e.canonical_path,
                 "stale_version": e.version,
+            },
+        )
+    except ManifestLayoutConflictError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Manifest layout conflict — run datum doctor or migration to resolve",
+                "canonical_path": e.canonical_path,
             },
         )
     except ValueError as e:
@@ -154,6 +163,14 @@ async def api_save_document(
                 "message": "Document has a stale pending commit requiring reconciler recovery",
                 "canonical_path": e.canonical_path,
                 "stale_version": e.version,
+            },
+        )
+    except ManifestLayoutConflictError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Manifest layout conflict — run datum doctor or migration to resolve",
+                "canonical_path": e.canonical_path,
             },
         )
     except ConflictError as e:

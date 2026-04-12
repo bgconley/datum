@@ -89,8 +89,20 @@ def validate_canonical_path(canonical_path: str) -> Path:
     return resolved
 
 
+class ManifestLayoutConflictError(Exception):
+    """Raised when both legacy and new manifest dirs exist for the same canonical path."""
+    def __init__(self, canonical_path: str, legacy_dir: Path, new_dir: Path):
+        self.canonical_path = canonical_path
+        self.legacy_dir = legacy_dir
+        self.new_dir = new_dir
+        super().__init__(
+            f"Both legacy ({legacy_dir.name}/) and new ({new_dir.name}/) manifest dirs "
+            f"exist for {canonical_path}. Run datum doctor or migration to resolve."
+        )
+
+
 def doc_manifest_dir(project_path: Path, canonical_path: str) -> Path:
-    """Get the .piq manifest directory for a document.
+    """Get the canonical .piq manifest directory for a document.
 
     Uses the full filename (including extension) as the directory name to avoid
     collisions between same-stem files with different extensions (e.g. foo.md
@@ -105,6 +117,71 @@ def doc_manifest_dir(project_path: Path, canonical_path: str) -> Path:
     name = rel.name  # "auth-req.md" (full filename with extension)
     parent = rel.parent  # "docs/requirements"
     return project_path / ".piq" / parent / name
+
+
+def _legacy_manifest_dir(project_path: Path, canonical_path: str) -> Path:
+    """Get the legacy (pre-fix) manifest directory path keyed by stem only."""
+    rel = validate_canonical_path(canonical_path)
+    return project_path / ".piq" / rel.parent / rel.stem
+
+
+def resolve_manifest_dir(
+    project_path: Path, canonical_path: str, for_write: bool = False
+) -> Path:
+    """Resolve the correct manifest directory, handling legacy layouts.
+
+    - If the new-style dir (keyed by full filename) exists, use it.
+    - If only the legacy dir (keyed by stem) exists AND its manifest's
+      canonical_path matches, use it. On write paths, migrate it first.
+    - If both exist for the same canonical_path, raise ManifestLayoutConflictError.
+    - If neither exists, return the new-style path (for initial creation).
+    """
+    new_dir = doc_manifest_dir(project_path, canonical_path)
+    legacy_dir = _legacy_manifest_dir(project_path, canonical_path)
+
+    new_exists = (new_dir / "manifest.yaml").exists()
+    legacy_exists = (legacy_dir / "manifest.yaml").exists() and legacy_dir != new_dir
+
+    if new_exists and legacy_exists:
+        # Both exist — check if legacy actually belongs to this canonical_path
+        legacy_manifest = read_manifest(legacy_dir / "manifest.yaml")
+        if legacy_manifest.get("canonical_path") == canonical_path:
+            raise ManifestLayoutConflictError(canonical_path, legacy_dir, new_dir)
+        # Legacy belongs to a different file (e.g. foo.sql vs foo.md) — use new
+        return new_dir
+
+    if new_exists:
+        return new_dir
+
+    if legacy_exists:
+        # Verify the legacy manifest actually belongs to this canonical_path
+        legacy_manifest = read_manifest(legacy_dir / "manifest.yaml")
+        if legacy_manifest.get("canonical_path") != canonical_path:
+            # Legacy dir belongs to a different file — return new path for creation
+            return new_dir
+
+        if for_write:
+            # Migrate: atomic rename legacy dir to new dir
+            _migrate_legacy_manifest(legacy_dir, new_dir)
+            return new_dir
+        else:
+            # Read from legacy location without migrating
+            return legacy_dir
+
+    # Neither exists — return new-style path for initial creation
+    return new_dir
+
+
+def _migrate_legacy_manifest(legacy_dir: Path, new_dir: Path) -> None:
+    """Atomically migrate a legacy manifest directory to the new layout."""
+    import shutil
+    import logging
+    logger = logging.getLogger(__name__)
+
+    new_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Use shutil.move for cross-device safety (ZFS datasets could differ)
+    shutil.move(str(legacy_dir), str(new_dir))
+    logger.info(f"Migrated legacy manifest: {legacy_dir.name}/ -> {new_dir.name}/")
 
 
 def generate_uid(prefix: str = "doc") -> str:
