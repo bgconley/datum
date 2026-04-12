@@ -33,6 +33,7 @@ cleanup_api_test_state() {
 
     (
         cd "$REPO_DIR"
+        docker compose exec -T datum-api sh -lc "rm -rf '/tank/datum/projects/${slug}'" >/dev/null 2>&1 || true
         docker compose exec -T paradedb psql -v ON_ERROR_STOP=1 -q -U datum -d datum >/dev/null <<SQL
 DELETE FROM version_head_events
 WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
