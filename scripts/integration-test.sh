@@ -141,6 +141,16 @@ echo ""
 echo "--- 6. REST API integration ---"
 API="http://localhost:8001/api/v1"
 
+# Clean up test data from previous runs (DB persists on ZFS)
+echo "  Cleaning previous test data..."
+docker compose exec paradedb psql -U datum -d datum -c \
+    "DELETE FROM document_versions WHERE document_id IN (SELECT id FROM documents WHERE project_id IN (SELECT id FROM projects WHERE slug = 'api-test'));
+     DELETE FROM source_files WHERE project_id IN (SELECT id FROM projects WHERE slug = 'api-test');
+     DELETE FROM documents WHERE project_id IN (SELECT id FROM projects WHERE slug = 'api-test');
+     DELETE FROM projects WHERE slug = 'api-test';" 2>/dev/null || true
+rm -rf "${DATUM_PROJECTS_ROOT}/api-test" 2>/dev/null || true
+echo "    OK"
+
 # Create project via API
 echo "  Creating project via API..."
 PROJECT=$(curl -sf -X POST "$API/projects" \
