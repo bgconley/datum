@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from datum.api.documents import router as documents_router
+from datum.api.projects import router as projects_router
 from datum.config import settings
 
 
@@ -19,6 +21,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(projects_router)
+app.include_router(documents_router)
 
 
 @app.get("/api/v1/health")
