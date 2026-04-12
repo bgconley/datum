@@ -1,21 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { api, type Project, type DocumentMeta } from '@/lib/api'
+import { CreateProjectDialog } from './CreateProjectDialog'
+import { CreateDocumentDialog } from './CreateDocumentDialog'
 
 export function Sidebar() {
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProject, setSelectedProject] = useState<string | null>(null)
   const [docs, setDocs] = useState<DocumentMeta[]>([])
 
-  useEffect(() => {
+  const loadProjects = useCallback(() => {
     api.projects.list().then(setProjects).catch(console.error)
   }, [])
 
-  useEffect(() => {
+  const loadDocs = useCallback(() => {
     if (selectedProject) {
       api.documents.list(selectedProject).then(setDocs).catch(console.error)
     }
   }, [selectedProject])
+
+  useEffect(() => { loadProjects() }, [loadProjects])
+  useEffect(() => { loadDocs() }, [loadDocs])
 
   return (
     <aside className="w-[280px] border-r border-border bg-card flex flex-col">
@@ -38,8 +43,11 @@ export function Sidebar() {
               {p.name}
             </button>
           ))}
+          <div className="mt-2 px-1">
+            <CreateProjectDialog onCreated={loadProjects} />
+          </div>
         </div>
-        {selectedProject && docs.length > 0 && (
+        {selectedProject && (
           <div className="p-2 border-t border-border">
             <h2 className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase">
               Documents
@@ -53,6 +61,9 @@ export function Sidebar() {
                 {d.title}
               </a>
             ))}
+            <div className="mt-2 px-1">
+              <CreateDocumentDialog projectSlug={selectedProject} onCreated={loadDocs} />
+            </div>
           </div>
         )}
       </ScrollArea>
