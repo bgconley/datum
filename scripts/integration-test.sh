@@ -21,6 +21,49 @@ export DATUM_PGDATA="${DATUM_PGDATA:-/tank/datum/pgdata}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_DIR/backend"
+API_TEST_SLUG="api-test"
+
+cleanup_api_test_state() {
+    local slug="${1:-$API_TEST_SLUG}"
+    local quiet="${2:-0}"
+
+    if [ "$quiet" != "1" ]; then
+        echo "  Cleaning previous test data..."
+    fi
+
+    (
+        cd "$REPO_DIR"
+        docker compose exec -T paradedb psql -v ON_ERROR_STOP=1 -q -U datum -d datum >/dev/null <<SQL
+DELETE FROM version_head_events
+WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
+   OR document_id IN (
+       SELECT id FROM documents
+       WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
+   );
+DELETE FROM audit_events
+WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
+DELETE FROM document_versions
+WHERE document_id IN (
+    SELECT id FROM documents
+    WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
+);
+DELETE FROM source_files
+WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
+DELETE FROM documents
+WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
+DELETE FROM projects
+WHERE slug = '${slug}';
+SQL
+    )
+
+    rm -rf "${DATUM_PROJECTS_ROOT}/${slug}" 2>/dev/null || true
+
+    if [ "$quiet" != "1" ]; then
+        echo "    OK"
+    fi
+}
+
+trap 'cleanup_api_test_state "$API_TEST_SLUG" 1 || true' EXIT
 
 echo "=== Datum Full-Stack Integration Tests ==="
 echo "Host: $(hostname)"
@@ -66,7 +109,7 @@ sleep 10
 
 # Verify each service is up
 echo "  ParadeDB:"
-docker compose exec paradedb pg_isready -U datum && echo "    OK" || { echo "    FAIL"; exit 1; }
+docker compose exec -T paradedb pg_isready -U datum && echo "    OK" || { echo "    FAIL"; exit 1; }
 echo "  datum-api:"
 curl -sf http://localhost:8001/api/v1/health | grep -q ok && echo "    OK" || { echo "    FAIL"; exit 1; }
 echo "  datum-frontend (via Caddy :3080):"
@@ -142,20 +185,13 @@ echo "--- 6. REST API integration ---"
 API="http://localhost:8001/api/v1"
 
 # Clean up test data from previous runs (DB persists on ZFS)
-echo "  Cleaning previous test data..."
-docker compose exec paradedb psql -U datum -d datum -c \
-    "DELETE FROM document_versions WHERE document_id IN (SELECT id FROM documents WHERE project_id IN (SELECT id FROM projects WHERE slug = 'api-test'));
-     DELETE FROM source_files WHERE project_id IN (SELECT id FROM projects WHERE slug = 'api-test');
-     DELETE FROM documents WHERE project_id IN (SELECT id FROM projects WHERE slug = 'api-test');
-     DELETE FROM projects WHERE slug = 'api-test';" 2>/dev/null || true
-rm -rf "${DATUM_PROJECTS_ROOT}/api-test" 2>/dev/null || true
-echo "    OK"
+cleanup_api_test_state "$API_TEST_SLUG"
 
 # Create project via API
 echo "  Creating project via API..."
-PROJECT=$(curl -sf -X POST "$API/projects" \
+PROJECT=$(curl --fail-with-body -sS -X POST "$API/projects" \
   -H "Content-Type: application/json" \
-  -d '{"name":"API Test Project","slug":"api-test"}')
+  -d "{\"name\":\"API Test Project\",\"slug\":\"${API_TEST_SLUG}\"}")
 echo "    Response: $(echo $PROJECT | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["slug"])')"
 
 # List projects
@@ -166,7 +202,7 @@ echo "    Count: $COUNT"
 
 # Create document via API
 echo "  Creating document via API..."
-DOC=$(curl -sf -X POST "$API/projects/api-test/docs" \
+DOC=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/docs" \
   -H "Content-Type: application/json" \
   -d '{"relative_path":"docs/api-test.md","title":"API Test Doc","doc_type":"plan","content":"# API Test"}')
 VERSION=$(echo $DOC | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])')
@@ -174,7 +210,7 @@ echo "    Version: $VERSION"
 
 # Get document
 echo "  Getting document via API..."
-CONTENT=$(curl -sf "$API/projects/api-test/docs/docs/api-test.md")
+CONTENT=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/docs/docs/api-test.md")
 TITLE=$(echo $CONTENT | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"]["title"])')
 HASH=$(echo $CONTENT | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"]["content_hash"])')
 FULL_CONTENT=$(echo $CONTENT | python3 -c 'import sys,json;print(json.load(sys.stdin)["content"])')
@@ -183,7 +219,7 @@ echo "    Title: $TITLE"
 # Save document (full content round-trip)
 echo "  Saving document via API..."
 MODIFIED=$(echo "$FULL_CONTENT" | sed 's/# API Test/# Updated via API/')
-SAVED=$(curl -sf -X PUT "$API/projects/api-test/docs/docs/api-test.md" \
+SAVED=$(curl --fail-with-body -sS -X PUT "$API/projects/${API_TEST_SLUG}/docs/docs/api-test.md" \
   -H "Content-Type: application/json" \
   -d "{\"content\":$(echo "$MODIFIED" | python3 -c 'import sys,json;print(json.dumps(sys.stdin.read()))'),\"base_hash\":\"$HASH\"}")
 NEW_VERSION=$(echo $SAVED | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])')
@@ -192,7 +228,7 @@ echo "    New version: $NEW_VERSION"
 
 # Conflict test
 echo "  Testing conflict detection..."
-CONFLICT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/projects/api-test/docs/docs/api-test.md" \
+CONFLICT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/projects/${API_TEST_SLUG}/docs/docs/api-test.md" \
   -H "Content-Type: application/json" \
   -d '{"content":"# Should conflict","base_hash":"sha256:wrong"}')
 echo "    Conflict status: $CONFLICT (expected 409)"
@@ -222,7 +258,7 @@ echo ""
 
 # --- 9. Cleanup ---
 echo "--- 9. Cleanup ---"
-rm -rf "${DATUM_PROJECTS_ROOT}/api-test" 2>/dev/null || true
+cleanup_api_test_state "$API_TEST_SLUG"
 echo "  Done"
 echo ""
 
