@@ -28,6 +28,17 @@ export function Sidebar() {
         <h1 className="text-lg font-bold">Datum</h1>
       </div>
       <ScrollArea className="flex-1">
+        <div className="p-2 border-b border-border">
+          <a
+            href="#/search"
+            className="flex items-center gap-2 rounded px-2 py-2 text-sm hover:bg-accent"
+          >
+            <span>Search</span>
+            <kbd className="ml-auto rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              /
+            </kbd>
+          </a>
+        </div>
         <div className="p-2">
           <h2 className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase">
             Projects

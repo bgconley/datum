@@ -28,6 +28,29 @@ export interface DocumentContent {
   metadata: DocumentMeta
 }
 
+export interface SearchResultItem {
+  document_title: string
+  document_path: string
+  project_slug: string
+  heading_path: string
+  snippet: string
+  version_number: number
+  content_hash: string
+  fused_score: number
+  matched_terms: string[]
+  document_uid: string
+  chunk_id: string
+  line_start: number
+  line_end: number
+}
+
+export interface SearchResponse {
+  results: SearchResultItem[]
+  query: string
+  result_count: number
+  latency_ms: number | null
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, init)
   if (!resp.ok) {
@@ -68,4 +91,10 @@ export const api = {
         body: JSON.stringify(data),
       }),
   },
+  search: (query: string, project?: string) =>
+    fetchJSON<SearchResponse>(`${API_BASE}/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, project }),
+    }),
 }

@@ -9,3 +9,12 @@ from datum.models.core import (
     SourceFile,
     VersionHeadEvent,
 )
+from datum.models.search import (
+    ChunkEmbedding,
+    DocumentChunk,
+    IngestionJob,
+    SearchRun,
+    SearchRunResult,
+    TechnicalTerm,
+    VersionText,
+)

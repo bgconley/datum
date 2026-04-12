@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from datum.api.documents import router as documents_router
 from datum.api.projects import router as projects_router
+from datum.api.search import router as search_router
 from datum.config import settings
 
 
@@ -25,6 +26,7 @@ app.add_middleware(
 
 app.include_router(projects_router)
 app.include_router(documents_router)
+app.include_router(search_router)
 
 
 @app.get("/api/v1/health")

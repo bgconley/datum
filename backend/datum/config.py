@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     cache_root: Path = Path("/tank/datum/cache")
     frontend_port: int = 3000
     api_port: int = 8001
+    embedding_endpoint: str = "http://localhost:8010"
+    embedding_model: str = "Qwen3-Embedding-4B"
+    embedding_dimensions: int = 1024
+    embedding_protocol: str = "openai"
+    embedding_batch_size: int = 64
+    reranker_endpoint: str = "http://localhost:8011"
+    reranker_model: str = "Qwen3-Reranker-0.6B"
+    reranker_protocol: str = "openai"
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}

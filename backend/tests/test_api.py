@@ -1,6 +1,7 @@
 import pytest
 
 from datum.config import settings
+from datum.services.search import SearchResult
 
 
 @pytest.fixture(autouse=True)
@@ -245,3 +246,50 @@ async def test_manifest_conflict_on_list_returns_503(client):
     resp = await client.get("/api/v1/projects/conflict2/docs")
     assert resp.status_code == 503
     assert "layout conflict" in resp.json()["detail"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_search_returns_results(client):
+    resp = await client.post("/api/v1/search", json={"query": "test"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "results" in data
+    assert data["result_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_search_serializes_nonempty_results(client, monkeypatch):
+    class StubGateway:
+        embedding = None
+
+        async def close(self):
+            return None
+
+    async def fake_search(**kwargs):
+        return [
+            SearchResult(
+                document_title="Search Doc",
+                document_path="docs/search.md",
+                project_slug="p",
+                heading_path="Intro",
+                snippet="Use DATABASE_URL on port 8001.",
+                version_number=2,
+                content_hash="sha256:abc",
+                fused_score=0.42,
+                matched_terms=["DATABASE_URL"],
+                document_uid="doc_123",
+                chunk_id="chunk_123",
+                line_start=3,
+                line_end=5,
+            )
+        ]
+
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.search.search", fake_search)
+
+    resp = await client.post("/api/v1/search", json={"query": "DATABASE_URL", "project": "p"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["result_count"] == 1
+    assert data["results"][0]["document_title"] == "Search Doc"
+    assert data["results"][0]["matched_terms"] == ["DATABASE_URL"]

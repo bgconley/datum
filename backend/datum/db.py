@@ -4,6 +4,7 @@ from datum.config import settings
 
 engine = create_async_engine(settings.database_url, echo=False)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
+async_session_factory = async_session
 
 
 async def get_session():

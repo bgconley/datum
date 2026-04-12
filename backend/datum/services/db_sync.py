@@ -17,6 +17,7 @@ from datum.models.core import (
     SourceFile,
     VersionHeadEvent,
 )
+from datum.models.search import IngestionJob
 from datum.services.versioning import VersionInfo
 
 
@@ -171,6 +172,23 @@ async def sync_document_version_to_db(
             last_seen_at=now,
             indexed_at=now,
         ))
+
+    idem_key = f"{project_id}:{version.id}:extract:{content_hash}:default:none"
+    existing_job = await session.execute(
+        select(IngestionJob).where(IngestionJob.idempotency_key == idem_key)
+    )
+    if existing_job.scalar_one_or_none() is None:
+        session.add(
+            IngestionJob(
+                project_id=project_id,
+                version_id=version.id,
+                job_type="extract",
+                status="queued",
+                priority=1,
+                content_hash=content_hash,
+                idempotency_key=idem_key,
+            )
+        )
 
     await session.commit()
 
