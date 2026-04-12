@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 
 from datum.services.filesystem import compute_content_hash, read_manifest, write_manifest, doc_manifest_dir
-from datum.services.versioning import create_version, get_current_version, VersionInfo
+from datum.services.versioning import create_version, get_current_version, VersionInfo, StalePendingCommitError
 
 
 class TestCreateVersion:
@@ -29,11 +29,11 @@ class TestCreateVersion:
         assert info.branch == "main"
         assert info.content_hash == compute_content_hash(content)
         # Version file exists on disk
-        version_file = project / ".piq" / "docs" / "notes" / "main" / "v001.md"
+        version_file = project / ".piq" / "docs" / "notes.md" / "main" / "v001.md"
         assert version_file.exists()
         assert version_file.read_bytes() == content
         # Manifest updated
-        manifest = read_manifest(project / ".piq" / "docs" / "notes" / "manifest.yaml")
+        manifest = read_manifest(project / ".piq" / "docs" / "notes.md" / "manifest.yaml")
         assert manifest["branches"]["main"]["head"] == "v001"
         assert len(manifest["branches"]["main"]["versions"]) == 1
 
@@ -58,10 +58,10 @@ class TestCreateVersion:
         info = create_version(project, canonical, content_v2, "web")
 
         assert info.version_number == 2
-        v2_file = project / ".piq" / "docs" / "notes" / "main" / "v002.md"
+        v2_file = project / ".piq" / "docs" / "notes.md" / "main" / "v002.md"
         assert v2_file.exists()
         assert v2_file.read_bytes() == content_v2
-        manifest = read_manifest(project / ".piq" / "docs" / "notes" / "manifest.yaml")
+        manifest = read_manifest(project / ".piq" / "docs" / "notes.md" / "manifest.yaml")
         assert manifest["branches"]["main"]["head"] == "v002"
         assert len(manifest["branches"]["main"]["versions"]) == 2
 
@@ -95,7 +95,7 @@ class TestCreateVersion:
 
         create_version(project, canonical, b"content", "web")
 
-        manifest = read_manifest(project / ".piq" / "docs" / "notes" / "manifest.yaml")
+        manifest = read_manifest(project / ".piq" / "docs" / "notes.md" / "manifest.yaml")
         assert "pending_commit" not in manifest
 
 
@@ -153,7 +153,7 @@ class TestStalePendingCommit:
         # Create the orphaned version file
         (manifest_dir / "main" / "v002.md").write_bytes(b"orphaned content")
 
-        with pytest.raises(RuntimeError, match="Stale pending_commit"):
+        with pytest.raises(StalePendingCommitError):
             create_version(project, canonical, b"v2 new", "web")
 
     def test_stale_pending_without_version_file_clears(self, tmp_path):

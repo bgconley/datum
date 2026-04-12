@@ -144,3 +144,47 @@ async def test_put_missing_document_returns_404(client):
         "base_hash": "sha256:fake",
     })
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_stale_pending_commit_returns_503(client, tmp_path):
+    """Stale pending_commit on save should return 503, not 500."""
+    from datum.config import settings
+    await client.post("/api/v1/projects", json={"name": "P2", "slug": "p2"})
+    await client.post("/api/v1/projects/p2/docs", json={
+        "relative_path": "docs/stale.md",
+        "title": "Stale",
+        "doc_type": "plan",
+        "content": "# Stale test",
+    })
+
+    # Inject stale pending_commit with existing version file
+    from datum.services.filesystem import read_manifest, write_manifest, doc_manifest_dir
+    project_path = settings.projects_root / "p2"
+    manifest_dir = doc_manifest_dir(project_path, "docs/stale.md")
+    manifest_path = manifest_dir / "manifest.yaml"
+    manifest = read_manifest(manifest_path)
+    manifest["pending_commit"] = {
+        "version": 2,
+        "branch": "main",
+        "file": "main/v002.md",
+        "content_hash": "sha256:fake",
+        "canonical_path": "docs/stale.md",
+        "started": "2026-04-12T00:00:00+00:00",
+    }
+    write_manifest(manifest_path, manifest)
+    # Create the orphaned version file so StalePendingCommitError triggers
+    (manifest_dir / "main" / "v002.md").write_bytes(b"orphaned")
+
+    # Get current hash for a valid save attempt
+    resp = await client.get("/api/v1/projects/p2/docs/docs/stale.md")
+    current_hash = resp.json()["metadata"]["content_hash"]
+    full_content = resp.json()["content"]
+    modified = full_content.replace("# Stale test", "# Modified")
+
+    resp = await client.put("/api/v1/projects/p2/docs/docs/stale.md", json={
+        "content": modified,
+        "base_hash": current_hash,
+    })
+    assert resp.status_code == 503
+    assert "stale pending commit" in resp.json()["detail"]["message"]

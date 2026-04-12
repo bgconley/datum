@@ -53,5 +53,15 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    # No published port — access through caddy at :3080
+    # For isolated dev: docker compose run --service-ports -p 3000:3000 datum-frontend
+
+  caddy:
+    image: caddy:2-alpine
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3080:3080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - datum-api
+      - datum-frontend

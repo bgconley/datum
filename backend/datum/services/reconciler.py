@@ -142,7 +142,7 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
         new_ver = version_project_yaml(project_path, change_source="reconciler")
         if new_ver:
             result.versions_created += 1
-            # DB sync if session provided, otherwise best-effort standalone
+            # DB sync: use provided session if available, otherwise best-effort standalone
             if db_session:
                 try:
                     import yaml
@@ -170,6 +170,9 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                         )
                 except Exception:
                     logger.debug("Reconciler project.yaml DB sync failed", exc_info=True)
+            else:
+                # No session provided — use standalone best-effort sync
+                sync_project_yaml_to_db(project_path.name, project_path)
 
     return result
 

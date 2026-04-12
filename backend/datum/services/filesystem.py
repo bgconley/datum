@@ -92,15 +92,19 @@ def validate_canonical_path(canonical_path: str) -> Path:
 def doc_manifest_dir(project_path: Path, canonical_path: str) -> Path:
     """Get the .piq manifest directory for a document.
 
+    Uses the full filename (including extension) as the directory name to avoid
+    collisions between same-stem files with different extensions (e.g. foo.md
+    and foo.sql must have separate manifests and version histories).
+
     Example: canonical_path="docs/requirements/auth-req.md"
-    Returns: project_path/.piq/docs/requirements/auth-req/
+    Returns: project_path/.piq/docs/requirements/auth-req.md/
 
     Raises ValueError if canonical_path is absolute or traverses outside the project.
     """
     rel = validate_canonical_path(canonical_path)
-    stem = rel.stem  # "auth-req"
+    name = rel.name  # "auth-req.md" (full filename with extension)
     parent = rel.parent  # "docs/requirements"
-    return project_path / ".piq" / parent / stem
+    return project_path / ".piq" / parent / name
 
 
 def generate_uid(prefix: str = "doc") -> str:

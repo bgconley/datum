@@ -33,7 +33,7 @@ class TestCreateDocument:
         assert info.version == 1
         assert (project / "docs" / "requirements" / "auth.md").exists()
         # Version file exists
-        assert (project / ".piq" / "docs" / "requirements" / "auth" / "main" / "v001.md").exists()
+        assert (project / ".piq" / "docs" / "requirements" / "auth.md" / "main" / "v001.md").exists()
 
     def test_frontmatter_written(self, project):
         create_document(
@@ -65,7 +65,7 @@ class TestSaveDocument:
             change_source="web",
         )
         assert info.version == 2
-        assert (project / ".piq" / "docs" / "a" / "main" / "v002.md").exists()
+        assert (project / ".piq" / "docs" / "a.md" / "main" / "v002.md").exists()
 
     def test_save_conflict(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# V1")
@@ -124,9 +124,30 @@ class TestDocumentPathEnforcement:
 
 
 class TestDocumentDuplicateGuard:
-    """Finding 4: create_document must reject existing paths."""
-
     def test_rejects_duplicate_path(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# A")
         with pytest.raises(FileExistsError):
             create_document(project, "docs/a.md", "A Again", "plan", "# A Again")
+
+
+class TestSameStemDifferentExtension:
+    """Blocker regression: same-stem files must have separate version histories."""
+
+    def test_separate_versions_and_uids(self, project):
+        md_info = create_document(project, "docs/foo.md", "Foo MD", "plan", "# Markdown")
+        sql_info = create_document(project, "docs/foo.sql", "Foo SQL", "schema", "CREATE TABLE foo;")
+
+        assert md_info.document_uid != sql_info.document_uid
+        assert md_info.version == 1
+        assert sql_info.version == 1
+
+        # Each has its own manifest
+        md_manifest = (project / ".piq" / "docs" / "foo.md" / "manifest.yaml")
+        sql_manifest = (project / ".piq" / "docs" / "foo.sql" / "manifest.yaml")
+        assert md_manifest.exists()
+        assert sql_manifest.exists()
+
+        from datum.services.filesystem import read_manifest
+        md_data = read_manifest(md_manifest)
+        sql_data = read_manifest(sql_manifest)
+        assert md_data["document_uid"] != sql_data["document_uid"]

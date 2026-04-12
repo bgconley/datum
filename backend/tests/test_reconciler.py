@@ -28,7 +28,7 @@ class TestReconciler:
         result = await reconcile_project(project)
         assert result.versions_created == 1
         # Manifest should now exist
-        manifest = read_manifest(project / ".piq" / "docs" / "manual" / "manifest.yaml")
+        manifest = read_manifest(project / ".piq" / "docs" / "manual.md" / "manifest.yaml")
         assert manifest["branches"]["main"]["head"] == "v001"
 
     @pytest.mark.asyncio
@@ -38,7 +38,7 @@ class TestReconciler:
         (project / "docs" / "a.md").write_text("---\ntitle: A\ntype: plan\n---\n# V2 modified")
         result = await reconcile_project(project)
         assert result.versions_created == 1
-        manifest = read_manifest(project / ".piq" / "docs" / "a" / "manifest.yaml")
+        manifest = read_manifest(project / ".piq" / "docs" / "a.md" / "manifest.yaml")
         assert manifest["branches"]["main"]["head"] == "v002"
 
     @pytest.mark.asyncio
@@ -51,7 +51,7 @@ class TestReconciler:
     async def test_handles_pending_commit_cleanup(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# A")
         # Manually inject a stale pending_commit with no version file
-        manifest_path = project / ".piq" / "docs" / "a" / "manifest.yaml"
+        manifest_path = project / ".piq" / "docs" / "a.md" / "manifest.yaml"
         manifest = read_manifest(manifest_path)
         manifest["pending_commit"] = {
             "version": 99,
@@ -79,7 +79,7 @@ class TestReconciler:
         assert result.files_scanned >= 1
         # The metadata.yaml should have been versioned
         manifest = read_manifest(
-            project / ".piq" / "attachments" / "diagram" / "metadata" / "manifest.yaml"
+            project / ".piq" / "attachments" / "diagram" / "metadata.yaml" / "manifest.yaml"
         )
         assert manifest.get("branches", {}).get("main", {}).get("head") == "v001"
 
@@ -96,7 +96,7 @@ class TestReconciler:
 
         # Inject stale pending_commit with no version file
         manifest_path = (
-            project / ".piq" / "attachments" / "diagram" / "metadata" / "manifest.yaml"
+            project / ".piq" / "attachments" / "diagram" / "metadata.yaml" / "manifest.yaml"
         )
         manifest = read_manifest(manifest_path)
         manifest["pending_commit"] = {

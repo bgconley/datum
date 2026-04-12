@@ -115,7 +115,7 @@ class TestPathValidation:
 
     def test_doc_manifest_dir_valid(self, tmp_path):
         result = doc_manifest_dir(tmp_path, "docs/requirements/auth-req.md")
-        expected = tmp_path / ".piq" / "docs" / "requirements" / "auth-req"
+        expected = tmp_path / ".piq" / "docs" / "requirements" / "auth-req.md"
         assert result == expected
 
     def test_doc_manifest_dir_rejects_traversal(self, tmp_path):
@@ -125,3 +125,11 @@ class TestPathValidation:
     def test_doc_manifest_dir_rejects_absolute(self, tmp_path):
         with pytest.raises(ValueError):
             doc_manifest_dir(tmp_path, "/etc/passwd")
+
+    def test_same_stem_different_extension_separate_manifests(self, tmp_path):
+        """Blocker regression: foo.md and foo.sql must have separate manifest dirs."""
+        dir_md = doc_manifest_dir(tmp_path, "docs/foo.md")
+        dir_sql = doc_manifest_dir(tmp_path, "docs/foo.sql")
+        assert dir_md != dir_sql
+        assert dir_md.name == "foo.md"
+        assert dir_sql.name == "foo.sql"

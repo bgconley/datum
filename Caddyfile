@@ -1,14 +1,16 @@
-# For GPU node production deployment
+# Caddy reverse proxy — single-origin entrypoint at :3080
+# Routes API and WebSocket to datum-api, everything else to frontend.
+# In compose, service names resolve to container IPs.
 :3080 {
     handle /api/* {
-        reverse_proxy localhost:8001
+        reverse_proxy datum-api:8001
     }
 
     handle /ws/* {
-        reverse_proxy localhost:8001
+        reverse_proxy datum-api:8001
     }
 
     handle {
-        reverse_proxy localhost:3000
+        reverse_proxy datum-frontend:3000
     }
 }

@@ -18,6 +18,21 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+
+class StalePendingCommitError(Exception):
+    """Raised when a stale pending_commit with an existing version file blocks versioning.
+
+    The reconciler must resolve this state before new versions can be created.
+    """
+    def __init__(self, canonical_path: str, version: int, version_file: str):
+        self.canonical_path = canonical_path
+        self.version = version
+        self.version_file = version_file
+        super().__init__(
+            f"Stale pending_commit for version {version} with existing "
+            f"version file at {version_file}. Run reconciler to recover."
+        )
 from pathlib import Path
 from typing import Optional
 
@@ -83,9 +98,10 @@ def create_version(
         if stale_version_path.exists():
             # Version file was written before the crash — reconciler must handle this.
             # Refuse to create a new version until reconciler clears pending_commit.
-            raise RuntimeError(
-                f"Stale pending_commit for version {stale['version']} with existing "
-                f"version file at {stale_version_path}. Run reconciler to recover."
+            raise StalePendingCommitError(
+                canonical_path=canonical_path,
+                version=stale["version"],
+                version_file=str(stale_version_path),
             )
         else:
             # No version file — the crash happened before step f. Safe to clear.

@@ -21,7 +21,7 @@ class TestDoctor:
     def test_missing_version_file(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# A")
         # Delete the version file
-        v001 = project / ".piq" / "docs" / "a" / "main" / "v001.md"
+        v001 = project / ".piq" / "docs" / "a.md" / "main" / "v001.md"
         v001.unlink()
         report = check_project(project)
         assert not report.is_healthy
@@ -30,7 +30,7 @@ class TestDoctor:
     def test_hash_mismatch(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# A")
         # Corrupt the version file
-        v001 = project / ".piq" / "docs" / "a" / "main" / "v001.md"
+        v001 = project / ".piq" / "docs" / "a.md" / "main" / "v001.md"
         v001.write_bytes(b"corrupted content")
         report = check_project(project)
         assert not report.is_healthy
@@ -46,7 +46,7 @@ class TestDoctor:
     def test_orphan_version_file(self, project):
         create_document(project, "docs/a.md", "A", "plan", "# A")
         # Create an orphan version file
-        orphan = project / ".piq" / "docs" / "a" / "main" / "v099.md"
+        orphan = project / ".piq" / "docs" / "a.md" / "main" / "v099.md"
         orphan.write_bytes(b"orphan")
         report = check_project(project)
         assert any("orphan" in w.lower() for w in report.warnings)
@@ -54,7 +54,7 @@ class TestDoctor:
     def test_malformed_yaml_does_not_crash(self, project):
         """Finding 3: doctor should report, not crash, on invalid YAML."""
         create_document(project, "docs/a.md", "A", "plan", "# A")
-        manifest_path = project / ".piq" / "docs" / "a" / "manifest.yaml"
+        manifest_path = project / ".piq" / "docs" / "a.md" / "manifest.yaml"
         manifest_path.write_text("invalid: yaml: [unterminated")
         report = check_project(project)
         assert not report.is_healthy
@@ -72,7 +72,7 @@ class TestDoctor:
         save_document(project, "docs/a.md", full.replace("# V1", "# V2"), base_hash, "web")
 
         # Corrupt head pointer to point at v001 instead of v002
-        manifest_path = project / ".piq" / "docs" / "a" / "manifest.yaml"
+        manifest_path = project / ".piq" / "docs" / "a.md" / "manifest.yaml"
         manifest = read_manifest(manifest_path)
         manifest["branches"]["main"]["head"] = "v001"
         write_manifest(manifest_path, manifest)

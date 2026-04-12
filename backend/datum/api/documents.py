@@ -22,6 +22,7 @@ from datum.services.document_manager import (
 )
 from datum.services.db_sync import sync_document_version_to_db, log_audit_event
 from datum.services.project_manager import get_project
+from datum.services.versioning import StalePendingCommitError
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,15 @@ async def api_create_document(
         )
     except FileExistsError:
         raise HTTPException(status_code=409, detail=f"Document '{body.relative_path}' already exists")
+    except StalePendingCommitError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Document has a stale pending commit requiring reconciler recovery",
+                "canonical_path": e.canonical_path,
+                "stale_version": e.version,
+            },
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -137,6 +147,15 @@ async def api_save_document(
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
+    except StalePendingCommitError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Document has a stale pending commit requiring reconciler recovery",
+                "canonical_path": e.canonical_path,
+                "stale_version": e.version,
+            },
+        )
     except ConflictError as e:
         raise HTTPException(
             status_code=409,
