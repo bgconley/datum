@@ -80,7 +80,23 @@ echo ""
 echo "=== Dataset status ==="
 zfs list -o name,mountpoint,recordsize,compression,sync -r tank/datum tank/repos
 
+# Set ownership on data directories so the datum user can write directly.
+# Postgres directories stay root-owned (container manages them).
+DATUM_USER="${SUDO_USER:-$(whoami)}"
+echo ""
+echo "=== Setting ownership to $DATUM_USER ==="
+chown "$DATUM_USER" /tank/datum/projects /tank/datum/blobs /tank/datum/cache /tank/datum/backups
+echo "  OK"
+
+# Create venv parent if it doesn't exist
+if [ ! -d /tank/venvs ]; then
+    mkdir -p /tank/venvs
+    chown "$DATUM_USER" /tank/venvs
+    echo "  Created /tank/venvs (owned by $DATUM_USER)"
+fi
+
 echo ""
 echo "=== Done. Next steps: ==="
 echo "1. Clone datum repo: cd /tank/repos && git clone https://github.com/bgconley/datum.git"
-echo "2. Set ownership: sudo chown -R $(whoami):$(whoami) /tank/datum/projects /tank/datum/blobs /tank/datum/cache /tank/datum/backups"
+echo "2. Bootstrap venv: cd /tank/repos/datum && bash scripts/bootstrap-gpu-node.sh"
+echo "3. Run integration tests: bash scripts/integration-test.sh"
