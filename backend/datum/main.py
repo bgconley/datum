@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from datum.api.documents import router as documents_router
 from datum.api.evaluation import router as evaluation_router
+from datum.api.inbox import router as inbox_router
 from datum.api.projects import router as projects_router
 from datum.api.projects import ws_router as projects_ws_router
 from datum.api.search import router as search_router
@@ -31,6 +32,7 @@ app.include_router(projects_router)
 app.include_router(projects_ws_router)
 app.include_router(versions_router)
 app.include_router(documents_router)
+app.include_router(inbox_router)
 app.include_router(search_router)
 app.include_router(evaluation_router)
 

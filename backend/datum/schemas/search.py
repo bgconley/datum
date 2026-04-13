@@ -43,11 +43,24 @@ class SearchResultResponse(BaseModel):
     chunk_id: str = ""
     line_start: int = 0
     line_end: int = 0
-    match_signals: list[str] = []
+    match_signals: list[str] = Field(default_factory=list)
+    entities: list["SearchResultEntityResponse"] = Field(default_factory=list)
+
+
+class SearchResultEntityResponse(BaseModel):
+    canonical_name: str
+    entity_type: str
+
+
+class SearchEntityFacetResponse(BaseModel):
+    canonical_name: str
+    entity_type: str
+    count: int
 
 
 class SearchResponse(BaseModel):
     results: list[SearchResultResponse]
+    entity_facets: list[SearchEntityFacetResponse] = Field(default_factory=list)
     query: str
     result_count: int
     latency_ms: int | None = None
@@ -57,7 +70,8 @@ class SearchStreamEventResponse(BaseModel):
     event: Literal["phase", "error"]
     phase: Literal["lexical", "reranked"] | None = None
     query: str
-    results: list[SearchResultResponse] = []
+    results: list[SearchResultResponse] = Field(default_factory=list)
+    entity_facets: list[SearchEntityFacetResponse] = Field(default_factory=list)
     result_count: int = 0
     latency_ms: int | None = None
     semantic_enabled: bool = False

@@ -53,10 +53,23 @@ export interface SearchResultItem {
   line_start: number
   line_end: number
   match_signals: string[]
+  entities: SearchResultEntity[]
+}
+
+export interface SearchResultEntity {
+  canonical_name: string
+  entity_type: string
+}
+
+export interface SearchEntityFacet {
+  canonical_name: string
+  entity_type: string
+  count: number
 }
 
 export interface SearchResponse {
   results: SearchResultItem[]
+  entity_facets: SearchEntityFacet[]
   query: string
   result_count: number
   latency_ms: number | null
@@ -90,11 +103,48 @@ export interface SearchStreamEvent {
   phase?: 'lexical' | 'reranked'
   query: string
   results: SearchResultItem[]
+  entity_facets: SearchEntityFacet[]
   result_count: number
   latency_ms: number | null
   semantic_enabled: boolean
   rerank_applied: boolean
   message?: string
+}
+
+export interface Candidate {
+  id: string
+  candidate_type: 'decision' | 'requirement' | 'open_question'
+  title: string
+  context: string | null
+  severity: 'high' | 'medium' | 'low'
+  decision: string | null
+  consequences: string | null
+  description: string | null
+  priority: string | null
+  resolution: string | null
+  curation_status: string
+  extraction_method: string | null
+  confidence: number | null
+  source_doc_path: string | null
+  source_version: number | null
+  created_at: string | null
+}
+
+export interface CandidateAction {
+  id: string
+  curation_status: string
+  canonical_record_path: string | null
+}
+
+export interface IntelligenceEntitySummary {
+  entity_type: string
+  canonical_name: string
+  count: number
+}
+
+export interface ProjectIntelligenceSummary {
+  pending_candidate_count: number
+  key_entities: IntelligenceEntitySummary[]
 }
 
 export interface VersionInfo {
@@ -268,6 +318,7 @@ export const api = {
         phase: 'reranked',
         query: fallback.query,
         results: fallback.results,
+        entity_facets: fallback.entity_facets,
         result_count: fallback.result_count,
         latency_ms: fallback.latency_ms,
         semantic_enabled: false,
@@ -302,5 +353,27 @@ export const api = {
         break
       }
     }
+  },
+  inbox: {
+    list: (slug: string) => fetchJSON<Candidate[]>(`${API_BASE}/projects/${slug}/inbox`),
+    accept: (
+      slug: string,
+      type: Candidate['candidate_type'],
+      id: string,
+      edits?: Record<string, string>,
+    ) =>
+      fetchJSON<CandidateAction>(`${API_BASE}/projects/${slug}/inbox/${type}/${id}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(edits ?? {}),
+      }),
+    reject: (slug: string, type: Candidate['candidate_type'], id: string) =>
+      fetchJSON<CandidateAction>(`${API_BASE}/projects/${slug}/inbox/${type}/${id}/reject`, {
+        method: 'POST',
+      }),
+  },
+  intelligence: {
+    summary: (slug: string) =>
+      fetchJSON<ProjectIntelligenceSummary>(`${API_BASE}/projects/${slug}/intelligence/summary`),
   },
 }

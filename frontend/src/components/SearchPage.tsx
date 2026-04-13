@@ -3,6 +3,7 @@ import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState }
 import {
   api,
   type Project,
+  type SearchEntityFacet,
   type SearchRequestParams,
   type SearchResultItem,
   type SearchStreamEvent,
@@ -74,6 +75,7 @@ interface SearchPageProps {
 export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
   const [draft, setDraft] = useState<SearchDraft>(() => draftFromRouteSearch(routeSearch))
   const [results, setResults] = useState<SearchResultItem[]>([])
+  const [entityFacets, setEntityFacets] = useState<SearchEntityFacet[]>([])
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -105,6 +107,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       startTransition(() => {
         setQuery(nextDraft.query.trim())
         setResults([])
+        setEntityFacets([])
         setLatencyMs(null)
         setSearched(Boolean(nextDraft.query.trim()))
         setStreamPhase('idle')
@@ -126,6 +129,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     setStreamPhase('idle')
     setSemanticEnabled(null)
     setRerankApplied(null)
+    setEntityFacets([])
 
     try {
       await api.searchStream(request, async (event: SearchStreamEvent) => {
@@ -135,6 +139,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
 
         startTransition(() => {
           setResults(event.results)
+          setEntityFacets(event.entity_facets)
           setLatencyMs(event.latency_ms)
           setQuery(event.query)
           setStreamPhase(event.phase ?? 'reranked')
@@ -147,6 +152,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         const response = await api.search(request)
         startTransition(() => {
           setResults(response.results)
+          setEntityFacets(response.entity_facets)
           setLatencyMs(response.latency_ms)
           setQuery(response.query)
           setStreamPhase('reranked')
@@ -161,6 +167,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
             : 'Search failed'
         startTransition(() => {
           setResults([])
+          setEntityFacets([])
           setLatencyMs(null)
           setStreamPhase('idle')
           setSemanticEnabled(null)
@@ -188,6 +195,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     startTransition(() => {
       setQuery('')
       setResults([])
+      setEntityFacets([])
       setLatencyMs(null)
       setSearched(false)
       setStreamPhase('idle')
@@ -213,6 +221,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       startTransition(() => {
         setQuery('')
         setResults([])
+        setEntityFacets([])
         setLatencyMs(null)
         setSearched(false)
         setStreamPhase('idle')
@@ -299,6 +308,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
           projectScope={draft.project || null}
           searchMode={draft.mode}
           onProjectSelect={handleProjectFacet}
+          entityFacets={entityFacets}
           loading={loading}
           streamPhase={streamPhase}
           semanticEnabled={semanticEnabled}

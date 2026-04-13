@@ -41,6 +41,9 @@ services:
       DATUM_RERANKER_ENDPOINT: ${DATUM_RERANKER_ENDPOINT:-http://host.docker.internal:8011}
       DATUM_RERANKER_MODEL: ${DATUM_RERANKER_MODEL:-Qwen3-Reranker-0.6B}
       DATUM_RERANKER_PROTOCOL: ${DATUM_RERANKER_PROTOCOL:-qwen3_reranker}
+      DATUM_NER_ENDPOINT: ${DATUM_NER_ENDPOINT:-http://host.docker.internal:8012}
+      DATUM_NER_MODEL: ${DATUM_NER_MODEL:-knowledgator/gliner-bi-large-v2.0}
+      DATUM_NER_PROTOCOL: ${DATUM_NER_PROTOCOL:-gliner_http}
     depends_on:
       paradedb:
         condition: service_healthy
@@ -84,6 +87,9 @@ services:
       DATUM_RERANKER_ENDPOINT: ${DATUM_RERANKER_ENDPOINT:-http://host.docker.internal:8011}
       DATUM_RERANKER_MODEL: ${DATUM_RERANKER_MODEL:-Qwen3-Reranker-0.6B}
       DATUM_RERANKER_PROTOCOL: ${DATUM_RERANKER_PROTOCOL:-qwen3_reranker}
+      DATUM_NER_ENDPOINT: ${DATUM_NER_ENDPOINT:-http://host.docker.internal:8012}
+      DATUM_NER_MODEL: ${DATUM_NER_MODEL:-knowledgator/gliner-bi-large-v2.0}
+      DATUM_NER_PROTOCOL: ${DATUM_NER_PROTOCOL:-gliner_http}
     depends_on:
       paradedb:
         condition: service_healthy

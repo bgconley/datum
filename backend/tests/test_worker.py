@@ -6,7 +6,7 @@ import pytest
 from datum.models.core import Document, DocumentVersion, Project
 from datum.models.search import ChunkEmbedding, DocumentChunk, IngestionJob, VersionText
 from datum.services.chunking import Chunk
-from datum.worker import _handle_chunk_job, _handle_embed_job, process_job
+from datum.worker import _handle_chunk_job, _handle_embed_job, _handle_extract_job, process_job
 
 
 class _FakeSession:
@@ -75,6 +75,23 @@ class _EmbedJobSession:
         self.executed_statements.append(rendered)
         if "FROM document_chunks" in rendered:
             return _ScalarListResult(self.chunks)
+        return _ScalarOneResult(None)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        return None
+
+
+class _ExtractJobSession:
+    def __init__(self):
+        self.executed_statements: list[str] = []
+        self.added = []
+
+    async def execute(self, statement, params=None):
+        del params
+        self.executed_statements.append(str(statement))
         return _ScalarOneResult(None)
 
     def add(self, obj):
@@ -303,6 +320,75 @@ async def test_embed_job_persists_typed_chunk_embeddings(monkeypatch):
     assert persisted[0].model_run_id == model_run_id
     assert len(persisted[0].embedding) == 1024
     assert all("INSERT INTO chunk_embeddings" not in stmt for stmt in session.executed_statements)
+
+
+@pytest.mark.asyncio
+async def test_extract_job_queues_candidate_and_ner_stages(monkeypatch, tmp_path: Path):
+    version = DocumentVersion(
+        id=uuid4(),
+        document_id=uuid4(),
+        version_number=1,
+        branch="main",
+        content_hash="sha256:test",
+        filesystem_path=str(tmp_path / "docs/adr.md"),
+    )
+    job = IngestionJob(
+        id=uuid4(),
+        project_id=uuid4(),
+        version_id=version.id,
+        job_type="extract",
+        status="queued",
+    )
+    session = _ExtractJobSession()
+    queued_job_types: list[str] = []
+
+    async def fake_run_extraction_async(ctx):
+        del ctx
+        return type(
+            "ExtractionResult",
+            (),
+            {
+                "text_kind": "raw",
+                "content": "# ADR\n\n## Decision\nUse ParadeDB.",
+                "content_hash": "sha256:content",
+            },
+        )()
+
+    async def fake_queue_job(session, **kwargs):
+        del session
+        queued_job_types.append(kwargs["job_type"])
+
+    async def fake_chunking_config(*args, **kwargs):
+        del args, kwargs
+        return type("Config", (), {"id": uuid4(), "config_hash": "chunk-config"})()
+
+    async def fake_candidate_config(*args, **kwargs):
+        del args, kwargs
+        return type("Config", (), {"id": uuid4(), "config_hash": "candidate-config"})()
+
+    async def fake_ner_config(*args, **kwargs):
+        del args, kwargs
+        return type("Config", (), {"id": uuid4(), "config_hash": "ner-config"})()
+
+    monkeypatch.setattr("datum.worker.run_extraction_async", fake_run_extraction_async)
+    monkeypatch.setattr("datum.worker._queue_job", fake_queue_job)
+    monkeypatch.setattr("datum.worker.get_chunking_pipeline_config", fake_chunking_config)
+    monkeypatch.setattr(
+        "datum.worker.get_candidate_extraction_pipeline_config",
+        fake_candidate_config,
+    )
+    monkeypatch.setattr("datum.worker.get_ner_pipeline_config", fake_ner_config)
+
+    await _handle_extract_job(
+        session,
+        job,
+        version,
+        ctx=type("Ctx", (), {"project_path": tmp_path, "canonical_path": "docs/adr.md"})(),
+        gateway=type("Gateway", (), {"ner": object()})(),
+    )
+
+    assert isinstance(session.added[0], VersionText)
+    assert queued_job_types == ["chunk", "extract_candidates", "ner_gliner"]
 
 
 @pytest.mark.asyncio

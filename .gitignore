@@ -28,3 +28,6 @@ dev/
 # Env
 .env
 .env.local
+
+# Local tooling artifacts
+.playwright-cli/

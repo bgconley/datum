@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -34,6 +35,7 @@ class ModelConfig:
 class ModelGateway:
     embedding: ModelConfig | None = None
     reranker: ModelConfig | None = None
+    ner: ModelConfig | None = None
     _client: httpx.AsyncClient = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -145,6 +147,33 @@ class ModelGateway:
             return [(item["index"], item["score"]) for item in response[:top_n]]
         raise ValueError(f"Unknown protocol: {config.protocol}")
 
+    async def extract_entities(
+        self,
+        text: str,
+        *,
+        labels: list[str],
+        threshold: float,
+    ) -> list[dict[str, Any]]:
+        if not self.ner:
+            raise RuntimeError("No NER model configured")
+
+        config = self.ner
+        if config.protocol != "gliner_http":
+            raise ValueError(f"Unknown protocol: {config.protocol}")
+
+        response = await self._post(
+            f"{config.endpoint}/extract",
+            {
+                "text": text,
+                "labels": labels,
+                "threshold": threshold,
+                "model": config.name,
+            },
+        )
+        if not isinstance(response, list):
+            raise ValueError("NER endpoint returned non-list payload")
+        return response
+
     async def check_health(self, model_type: str) -> bool:
         config = getattr(self, model_type, None)
         if not config or not config.endpoint:
@@ -155,7 +184,7 @@ class ModelGateway:
         except Exception:
             return False
 
-    async def _post(self, url: str, payload: dict) -> dict:
+    async def _post(self, url: str, payload: dict) -> Any:
         response = await self._client.post(url, json=payload)
         response.raise_for_status()
         return response.json()
@@ -184,5 +213,12 @@ def build_model_gateway() -> ModelGateway:
             endpoint=settings.reranker_endpoint,
             protocol=settings.reranker_protocol,
         )
+    ner = None
+    if settings.ner_endpoint:
+        ner = ModelConfig(
+            name=settings.ner_model,
+            endpoint=settings.ner_endpoint,
+            protocol=settings.ner_protocol,
+        )
 
-    return ModelGateway(embedding=embedding, reranker=reranker)
+    return ModelGateway(embedding=embedding, reranker=reranker, ner=ner)

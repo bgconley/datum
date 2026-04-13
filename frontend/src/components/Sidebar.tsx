@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import { Copy, Files, FolderPlus, LayoutGrid, MoveRight, Search, ShieldAlert } from 'lucide-react'
 
@@ -44,6 +44,12 @@ export function Sidebar() {
   const project = workspaceQuery.data?.project ?? null
   const docs = workspaceQuery.data?.documents ?? EMPTY_DOCUMENTS
   const generatedFiles = workspaceQuery.data?.generated_files ?? EMPTY_GENERATED_FILES
+  const intelligenceQuery = useQuery({
+    queryKey: selectedProject ? queryKeys.intelligenceSummary(selectedProject) : ['projects', 'intelligence', 'idle'],
+    queryFn: () => api.intelligence.summary(selectedProject!),
+    enabled: Boolean(selectedProject),
+  })
+  const pendingCandidateCount = intelligenceQuery.data?.pending_candidate_count ?? 0
 
   const selectedDocMeta = useMemo(
     () => docs.find((document) => document.relative_path === selectedDocument) ?? null,
@@ -189,9 +195,10 @@ export function Sidebar() {
             </Link>
 
             <Link
-              to="/projects/$slug/review"
+              to="/projects/$slug/inbox"
               params={{ slug: selectedProject }}
               className={`mt-2 flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
+                location.pathname === `/projects/${selectedProject}/inbox` ||
                 location.pathname === `/projects/${selectedProject}/review`
                   ? 'bg-accent text-foreground'
                   : 'hover:bg-accent/70'
@@ -199,6 +206,11 @@ export function Sidebar() {
             >
               <ShieldAlert className="size-4 text-muted-foreground" />
               Review inbox
+              {pendingCandidateCount > 0 && (
+                <span className="ml-auto rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[11px]">
+                  {pendingCandidateCount}
+                </span>
+              )}
             </Link>
 
             <div className="mt-2 space-y-1">

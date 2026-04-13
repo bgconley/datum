@@ -35,6 +35,7 @@ export DATUM_CACHE_ROOT="${DATUM_CACHE_ROOT:-/tank/datum/cache}"
 export DATUM_PGDATA="${DATUM_PGDATA:-/tank/datum/pgdata}"
 export DATUM_EMBEDDING_ENDPOINT="${DATUM_EMBEDDING_ENDPOINT:-http://localhost:8010}"
 export DATUM_RERANKER_ENDPOINT="${DATUM_RERANKER_ENDPOINT:-http://localhost:8011}"
+export DATUM_NER_ENDPOINT="${DATUM_NER_ENDPOINT:-http://localhost:8012}"
 API_TEST_SLUG="api-test"
 
 cleanup_api_test_state() {
@@ -60,6 +61,28 @@ WHERE chunk_id IN (
 );
 DELETE FROM search_runs
 WHERE project_scope = '${slug}';
+DELETE FROM entity_mentions
+WHERE chunk_id IN (
+    SELECT dc.id
+    FROM document_chunks dc
+    JOIN document_versions dv ON dc.version_id = dv.id
+    JOIN documents d ON dv.document_id = d.id
+    JOIN projects p ON d.project_id = p.id
+    WHERE p.slug = '${slug}'
+)
+   OR version_id IN (
+    SELECT dv.id
+    FROM document_versions dv
+    JOIN documents d ON dv.document_id = d.id
+    JOIN projects p ON d.project_id = p.id
+    WHERE p.slug = '${slug}'
+);
+DELETE FROM open_questions
+WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
+DELETE FROM requirements
+WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
+DELETE FROM decisions
+WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
 DELETE FROM chunk_embeddings
 WHERE chunk_id IN (
     SELECT dc.id
@@ -129,6 +152,10 @@ DELETE FROM documents
 WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
 DELETE FROM projects
 WHERE slug = '${slug}';
+DELETE FROM entities e
+WHERE NOT EXISTS (
+    SELECT 1 FROM entity_mentions em WHERE em.entity_id = e.id
+);
 SQL
     )
 
@@ -216,6 +243,28 @@ WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/py
    );
 DELETE FROM audit_events
 WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
+DELETE FROM entity_mentions
+WHERE chunk_id IN (
+    SELECT dc.id
+    FROM document_chunks dc
+    JOIN document_versions dv ON dc.version_id = dv.id
+    JOIN documents d ON dv.document_id = d.id
+    JOIN projects p ON d.project_id = p.id
+    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
+)
+   OR version_id IN (
+    SELECT dv.id
+    FROM document_versions dv
+    JOIN documents d ON dv.document_id = d.id
+    JOIN projects p ON d.project_id = p.id
+    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
+);
+DELETE FROM open_questions
+WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
+DELETE FROM requirements
+WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
+DELETE FROM decisions
+WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
 DELETE FROM document_versions
 WHERE document_id IN (
     SELECT id FROM documents
@@ -227,6 +276,10 @@ DELETE FROM documents
 WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
 DELETE FROM projects
 WHERE filesystem_path LIKE '/tmp/pytest-of-%';
+DELETE FROM entities e
+WHERE NOT EXISTS (
+    SELECT 1 FROM entity_mentions em WHERE em.entity_id = e.id
+);
 SQL
     )
 
@@ -241,6 +294,10 @@ embedding_endpoint_healthy() {
 
 reranker_endpoint_healthy() {
     curl -sf --max-time 2 "${DATUM_RERANKER_ENDPOINT}/health" >/dev/null 2>&1
+}
+
+ner_endpoint_healthy() {
+    curl -sf --max-time 2 "${DATUM_NER_ENDPOINT}/health" >/dev/null 2>&1
 }
 
 wait_for_search_pipeline() {
@@ -578,8 +635,48 @@ echo "    Query 'DATABASE_URL' results: $TERM_COUNT"
 echo "    Matched terms: ${MATCHED_TERMS:-none}"
 echo ""
 
-# --- 6.6. Evaluation harness integration ---
-echo "--- 6.6. Evaluation harness ---"
+# --- 6.6. Intelligence pipeline integration ---
+echo "--- 6.6. Intelligence pipeline ---"
+if ner_endpoint_healthy; then
+    echo "  NER endpoint: OK (${DATUM_NER_ENDPOINT})"
+else
+    echo "  FAIL: NER endpoint unavailable (${DATUM_NER_ENDPOINT})"
+    exit 1
+fi
+
+echo "  Creating ADR document for candidate extraction..."
+ADR_CONTENT="# ADR-0001: Use ParadeDB\n\n## Status\nAccepted\n\n## Context\nNeed hybrid search.\n\n## Decision\nUse ParadeDB for BM25 plus pgvector.\n\n## Consequences\nSingle database for search."
+curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/docs" \
+  -H "Content-Type: application/json" \
+  -d "{\"relative_path\":\"docs/decisions/adr-0001.md\",\"title\":\"ADR-0001\",\"doc_type\":\"decision\",\"content\":\"$ADR_CONTENT\"}" >/dev/null
+
+wait_for_search_pipeline "$API_TEST_SLUG" 45 "$REQUIRE_EMBEDDINGS"
+
+echo "  Checking inbox..."
+INBOX=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/inbox")
+INBOX_COUNT=$(echo "$INBOX" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+HAS_DECISION=$(echo "$INBOX" | python3 -c 'import sys,json;items=json.load(sys.stdin);print(any(item["candidate_type"]=="decision" for item in items))')
+echo "    Inbox candidates: $INBOX_COUNT"
+[ "$INBOX_COUNT" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected inbox candidates"; exit 1; }
+[ "$HAS_DECISION" = "True" ] || { echo "    FAIL: expected decision candidate from ADR"; exit 1; }
+
+echo "  Checking extracted entities..."
+ENTITY_COUNT="$(
+  cd "$REPO_DIR" && docker compose exec -T paradedb psql -tA -U datum -d datum <<SQL
+SELECT count(*)
+FROM entity_mentions em
+JOIN document_versions dv ON em.version_id = dv.id
+JOIN documents d ON dv.document_id = d.id
+JOIN projects p ON d.project_id = p.id
+WHERE p.slug = '${API_TEST_SLUG}';
+SQL
+)"
+echo "    Entity mentions: ${ENTITY_COUNT:-0}"
+[ "${ENTITY_COUNT:-0}" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected entity mentions from GLiNER"; exit 1; }
+echo ""
+
+# --- 6.7. Evaluation harness integration ---
+echo "--- 6.7. Evaluation harness ---"
 echo "  Creating evaluation set..."
 EVAL_SET=$(curl --fail-with-body -sS -X POST "$API/eval/sets" \
   -H "Content-Type: application/json" \

@@ -35,6 +35,10 @@ RETRIEVAL_WEIGHTS = {
     "vector": 1.0,
     "terms": 0.5,
 }
+NER_PIPELINE_NAME = "gliner-entity-extraction"
+NER_PIPELINE_VERSION = "phase5-gliner-v1"
+CANDIDATE_EXTRACTION_PIPELINE_NAME = "candidate-extraction"
+CANDIDATE_EXTRACTION_PIPELINE_VERSION = "phase5-deterministic-v1"
 
 
 def stable_config_hash(config: dict[str, Any]) -> str:
@@ -91,6 +95,32 @@ def retrieval_pipeline_payload() -> dict[str, Any]:
         "rrf_k": RETRIEVAL_RRF_K,
         "weights": RETRIEVAL_WEIGHTS,
         "signals": ["bm25", "vector", "technical_terms"],
+    }
+
+
+def ner_pipeline_payload(gateway: ModelGateway) -> dict[str, Any] | None:
+    config = gateway.ner
+    if config is None:
+        return None
+    return {
+        "version": NER_PIPELINE_VERSION,
+        "model_name": config.name,
+        "endpoint": config.endpoint,
+        "protocol": config.protocol,
+    }
+
+
+def candidate_extraction_pipeline_payload() -> dict[str, Any]:
+    return {
+        "version": CANDIDATE_EXTRACTION_PIPELINE_VERSION,
+        "strategy": "deterministic",
+        "signals": [
+            "structured_adr",
+            "regex_req_id",
+            "regex_shall_must",
+            "regex_question_mark",
+            "regex_todo_marker",
+        ],
     }
 
 
@@ -198,6 +228,30 @@ async def get_embedding_pipeline_config(
     )
 
 
+async def get_ner_pipeline_config(
+    session: AsyncSession,
+    gateway: ModelGateway,
+) -> PipelineConfig | None:
+    payload = ner_pipeline_payload(gateway)
+    if payload is None:
+        return None
+    return await get_or_create_pipeline_config(
+        session,
+        stage="ner_gliner",
+        name=NER_PIPELINE_NAME,
+        config=payload,
+    )
+
+
+async def get_candidate_extraction_pipeline_config(session: AsyncSession) -> PipelineConfig:
+    return await get_or_create_pipeline_config(
+        session,
+        stage="extract_candidates",
+        name=CANDIDATE_EXTRACTION_PIPELINE_NAME,
+        config=candidate_extraction_pipeline_payload(),
+    )
+
+
 async def get_active_embedding_model_run(
     session: AsyncSession,
     gateway: ModelGateway,
@@ -264,6 +318,43 @@ async def get_active_reranker_model_run(
         model_name=payload["model_name"],
         model_version=config_hash,
         task="reranker",
+        config=payload,
+        started_at=datetime.now(UTC),
+    )
+    session.add(model_run)
+    await session.flush()
+    return model_run
+
+
+async def get_active_ner_model_run(
+    session: AsyncSession,
+    gateway: ModelGateway,
+    *,
+    create: bool,
+) -> ModelRun | None:
+    payload = ner_pipeline_payload(gateway)
+    if payload is None:
+        return None
+
+    config_hash = stable_config_hash(payload)
+    result = await session.execute(
+        select(ModelRun)
+        .where(
+            ModelRun.task == "ner",
+            ModelRun.model_name == payload["model_name"],
+            ModelRun.model_version == config_hash,
+        )
+        .order_by(ModelRun.started_at.desc().nullslast())
+        .limit(1)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None or not create:
+        return existing
+
+    model_run = ModelRun(
+        model_name=payload["model_name"],
+        model_version=config_hash,
+        task="ner",
         config=payload,
         started_at=datetime.now(UTC),
     )

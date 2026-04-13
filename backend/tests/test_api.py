@@ -1,10 +1,16 @@
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from datum.config import settings
-from datum.services.search import SearchResult
+from datum.services.search import (
+    SearchEntityFacet,
+    SearchExecution,
+    SearchResult,
+    SearchResultEntity,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -369,6 +375,132 @@ async def test_save_document_db_sync_uses_normalized_canonical_path(client, monk
 
 
 @pytest.mark.asyncio
+async def test_intelligence_inbox_and_summary_endpoints(client, monkeypatch):
+    async def fake_list_candidates(session, slug):
+        del session
+        assert slug == "intel"
+        return [
+            SimpleNamespace(
+                id="dec-1",
+                candidate_type="decision",
+                title="Use ParadeDB",
+                context="Need hybrid search.",
+                severity="high",
+                decision="Use ParadeDB for BM25 plus pgvector.",
+                consequences="Single database.",
+                description=None,
+                priority=None,
+                resolution=None,
+                curation_status="candidate",
+                extraction_method="structured_adr",
+                confidence=1.0,
+                source_doc_path="docs/decisions/adr-0001.md",
+                source_version=1,
+                created_at="2026-04-13T00:00:00+00:00",
+            ),
+            SimpleNamespace(
+                id="req-1",
+                candidate_type="requirement",
+                title="The UI must show inbox counts.",
+                context="Surface pending candidate counts in navigation.",
+                severity="high",
+                decision=None,
+                consequences=None,
+                description="Surface pending candidate counts in navigation.",
+                priority="must",
+                resolution=None,
+                curation_status="candidate",
+                extraction_method="regex_req_id",
+                confidence=0.95,
+                source_doc_path="docs/decisions/adr-0001.md",
+                source_version=1,
+                created_at="2026-04-13T00:00:00+00:00",
+            ),
+        ]
+
+    async def fake_summary(session, slug):
+        del session
+        assert slug == "intel"
+        return SimpleNamespace(
+            pending_candidate_count=2,
+            key_entities=[
+                SimpleNamespace(
+                    entity_type="technology",
+                    canonical_name="paradedb",
+                    count=2,
+                )
+            ],
+        )
+
+    monkeypatch.setattr("datum.api.inbox.list_candidates", fake_list_candidates)
+    monkeypatch.setattr(
+        "datum.api.inbox.get_project_intelligence_summary",
+        fake_summary,
+    )
+
+    inbox = await client.get("/api/v1/projects/intel/inbox")
+    assert inbox.status_code == 200
+    items = inbox.json()
+    assert [item["candidate_type"] for item in items] == ["decision", "requirement"]
+    assert items[0]["severity"] == "high"
+    assert items[0]["source_doc_path"] == "docs/decisions/adr-0001.md"
+
+    summary = await client.get("/api/v1/projects/intel/intelligence/summary")
+    assert summary.status_code == 200
+    summary_payload = summary.json()
+    assert summary_payload["pending_candidate_count"] == 2
+    assert summary_payload["key_entities"][0]["canonical_name"] == "paradedb"
+    assert summary_payload["key_entities"][0]["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_inbox_accept_and_reject_actions_persist_curated_records(client, monkeypatch):
+    async def fake_accept_candidate(session, *, slug, candidate_type, candidate_id, body):
+        del session, body
+        assert slug == "inbox"
+        assert candidate_type == "decision"
+        assert candidate_id == "dec-1"
+        return SimpleNamespace(
+            id="dec-1",
+            curation_status="edited",
+            canonical_record_path=".piq/records/decisions/dec_test.yaml",
+        )
+
+    async def fake_reject_candidate(session, *, slug, candidate_type, candidate_id):
+        del session
+        assert slug == "inbox"
+        assert candidate_type == "open_question"
+        assert candidate_id == "oq-1"
+        return SimpleNamespace(
+            id="oq-1",
+            curation_status="rejected",
+            canonical_record_path=None,
+        )
+
+    monkeypatch.setattr("datum.api.inbox.accept_candidate", fake_accept_candidate)
+    monkeypatch.setattr("datum.api.inbox.reject_candidate", fake_reject_candidate)
+
+    accepted = await client.post(
+        "/api/v1/projects/inbox/inbox/decision/dec-1/accept",
+        json={
+            "title": "Use a preflight write barrier",
+            "decision": "Require get_project_context before mutating state.",
+            "consequences": "Agent writes become explicitly gated.",
+        },
+    )
+    assert accepted.status_code == 200
+    accepted_payload = accepted.json()
+    assert accepted_payload["curation_status"] == "edited"
+    assert accepted_payload["canonical_record_path"] == ".piq/records/decisions/dec_test.yaml"
+
+    rejected = await client.post(
+        "/api/v1/projects/inbox/inbox/open_question/oq-1/reject"
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["curation_status"] == "rejected"
+
+
+@pytest.mark.asyncio
 async def test_create_project_rejects_bad_slug(client):
     resp = await client.post("/api/v1/projects", json={
         "name": "Bad", "slug": "../escape"
@@ -534,10 +666,20 @@ async def test_search_returns_results(client, monkeypatch):
             return None
 
     async def fake_search(**kwargs):
-        return []
+        del kwargs
+        return SearchExecution(
+            phase="hybrid",
+            query="test",
+            results=[],
+            fused_results=[],
+            latency_ms=4,
+            semantic_enabled=False,
+            rerank_applied=False,
+            entity_facets=[],
+        )
 
     monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
-    monkeypatch.setattr("datum.api.search.search", fake_search)
+    monkeypatch.setattr("datum.api.search.search_execution", fake_search)
 
     resp = await client.post("/api/v1/search", json={"query": "test"})
     assert resp.status_code == 200
@@ -565,28 +707,50 @@ async def test_search_serializes_nonempty_results(client, monkeypatch):
             return None
 
     async def fake_search(**kwargs):
-        return [
-            SearchResult(
-                document_title="Search Doc",
-                document_path="docs/search.md",
-                document_type="note",
-                document_status="draft",
-                project_slug="p",
-                heading_path="Intro",
-                snippet="Use DATABASE_URL on port 8001.",
-                version_number=2,
-                content_hash="sha256:abc",
-                fused_score=0.42,
-                matched_terms=["DATABASE_URL"],
-                document_uid="doc_123",
-                chunk_id="chunk_123",
-                line_start=3,
-                line_end=5,
-            )
-        ]
+        del kwargs
+        return SearchExecution(
+            phase="hybrid",
+            query="DATABASE_URL",
+            results=[
+                SearchResult(
+                    document_title="Search Doc",
+                    document_path="docs/search.md",
+                    document_type="note",
+                    document_status="draft",
+                    project_slug="p",
+                    heading_path="Intro",
+                    snippet="Use DATABASE_URL on port 8001.",
+                    version_number=2,
+                    content_hash="sha256:abc",
+                    fused_score=0.42,
+                    matched_terms=["DATABASE_URL"],
+                    document_uid="doc_123",
+                    chunk_id="chunk_123",
+                    line_start=3,
+                    line_end=5,
+                    entities=[
+                        SearchResultEntity(
+                            canonical_name="database_url",
+                            entity_type="api endpoint",
+                        )
+                    ],
+                )
+            ],
+            fused_results=[],
+            latency_ms=6,
+            semantic_enabled=False,
+            rerank_applied=False,
+            entity_facets=[
+                SearchEntityFacet(
+                    canonical_name="database_url",
+                    entity_type="api endpoint",
+                    count=1,
+                )
+            ],
+        )
 
     monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
-    monkeypatch.setattr("datum.api.search.search", fake_search)
+    monkeypatch.setattr("datum.api.search.search_execution", fake_search)
 
     resp = await client.post("/api/v1/search", json={"query": "DATABASE_URL", "project": "p"})
     assert resp.status_code == 200
@@ -594,6 +758,8 @@ async def test_search_serializes_nonempty_results(client, monkeypatch):
     assert data["result_count"] == 1
     assert data["results"][0]["document_title"] == "Search Doc"
     assert data["results"][0]["matched_terms"] == ["DATABASE_URL"]
+    assert data["results"][0]["entities"][0]["canonical_name"] == "database_url"
+    assert data["entity_facets"][0]["canonical_name"] == "database_url"
 
 
 @pytest.mark.asyncio
@@ -613,6 +779,7 @@ async def test_search_stream_emits_phases(client, monkeypatch):
                 "phase": "lexical",
                 "query": "DATABASE_URL",
                 "results": [],
+                "entity_facets": [],
                 "latency_ms": 4,
                 "semantic_enabled": False,
                 "rerank_applied": False,
@@ -642,6 +809,19 @@ async def test_search_stream_emits_phases(client, monkeypatch):
                         line_start=3,
                         line_end=5,
                         match_signals=["keyword", "exact-term"],
+                        entities=[
+                            SearchResultEntity(
+                                canonical_name="database_url",
+                                entity_type="api endpoint",
+                            )
+                        ],
+                    )
+                ],
+                "entity_facets": [
+                    SearchEntityFacet(
+                        canonical_name="database_url",
+                        entity_type="api endpoint",
+                        count=1,
                     )
                 ],
                 "latency_ms": 12,
@@ -663,6 +843,7 @@ async def test_search_stream_emits_phases(client, monkeypatch):
 
     assert [line["phase"] for line in lines] == ["lexical", "reranked"]
     assert lines[1]["results"][0]["match_signals"] == ["keyword", "exact-term"]
+    assert lines[1]["entity_facets"][0]["canonical_name"] == "database_url"
     assert lines[1]["rerank_applied"] is True
 
 

@@ -7,8 +7,8 @@ export const queryKeys = {
     ['projects', slug, 'docs', docPath, 'versions'] as const,
   versionDiff: (slug: string, docPath: string, versionA: number, versionB: number) =>
     ['projects', slug, 'docs', docPath, 'versions', 'diff', versionA, versionB] as const,
-  dashboardEntities: (slug: string, seed: string) =>
-    ['projects', slug, 'dashboard', 'entities', seed] as const,
+  inbox: (slug: string) => ['projects', slug, 'inbox'] as const,
+  intelligenceSummary: (slug: string) => ['projects', slug, 'intelligence', 'summary'] as const,
   commandPaletteEntities: (projectSlug: string | null, seed: string) =>
     ['command-palette', 'entities', projectSlug ?? 'all', seed] as const,
 }

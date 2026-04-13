@@ -4,7 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { SearchResultItem } from '@/lib/api'
+import type { SearchEntityFacet, SearchResultItem } from '@/lib/api'
 import type { SearchMode } from '@/lib/search-route'
 
 interface SearchResultsProps {
@@ -15,6 +15,7 @@ interface SearchResultsProps {
   projectScope: string | null
   searchMode: SearchMode
   onProjectSelect: (project: string) => void
+  entityFacets: SearchEntityFacet[]
   loading: boolean
   streamPhase: 'idle' | 'lexical' | 'reranked'
   semanticEnabled: boolean | null
@@ -75,13 +76,16 @@ export function SearchResults({
   streamPhase,
   semanticEnabled,
   rerankApplied,
+  entityFacets,
 }: SearchResultsProps) {
   const [signalFacet, setSignalFacet] = useState<string | null>(null)
   const [termFacet, setTermFacet] = useState<string | null>(null)
+  const [entityFacet, setEntityFacet] = useState<string | null>(null)
 
   useEffect(() => {
     setSignalFacet(null)
     setTermFacet(null)
+    setEntityFacet(null)
   }, [query, projectScope, searchMode])
 
   const modeFilteredResults = useMemo(() => {
@@ -107,6 +111,12 @@ export function SearchResults({
       return false
     }
     if (termFacet && !result.matched_terms.includes(termFacet)) {
+      return false
+    }
+    if (
+      entityFacet &&
+      !result.entities.some((entity) => entity.canonical_name === entityFacet)
+    ) {
       return false
     }
     return true
@@ -206,7 +216,32 @@ export function SearchResults({
               </div>
             )}
 
-            {(projectScope || signalFacet || termFacet) && (
+            {entityFacets.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Entities
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {entityFacets.map((facet) => (
+                    <Button
+                      key={`${facet.entity_type}:${facet.canonical_name}`}
+                      type="button"
+                      variant={entityFacet === facet.canonical_name ? 'secondary' : 'outline'}
+                      size="xs"
+                      onClick={() =>
+                        setEntityFacet(
+                          entityFacet === facet.canonical_name ? null : facet.canonical_name,
+                        )
+                      }
+                    >
+                      {facet.canonical_name} ({facet.count})
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(projectScope || signalFacet || termFacet || entityFacet) && (
               <Button
                 type="button"
                 variant="outline"
@@ -217,6 +252,7 @@ export function SearchResults({
                   }
                   setSignalFacet(null)
                   setTermFacet(null)
+                  setEntityFacet(null)
                 }}
               >
                 Clear facets
@@ -294,6 +330,20 @@ export function SearchResults({
                 </div>
               )}
 
+              {result.entities.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {result.entities.map((entity) => (
+                    <Badge
+                      key={`${entity.entity_type}:${entity.canonical_name}`}
+                      variant="outline"
+                      className="text-xs"
+                    >
+                      {entity.canonical_name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-3">
                 <Link
                   to="/projects/$slug/docs/$"
@@ -340,6 +390,27 @@ export function SearchResults({
                             ))
                           ) : (
                             <span className="text-sm text-muted-foreground">No exact-term matches surfaced.</span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                          Entities
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {result.entities.length > 0 ? (
+                            result.entities.map((entity) => (
+                              <Badge
+                                key={`${entity.entity_type}:${entity.canonical_name}`}
+                                variant="outline"
+                              >
+                                {entity.canonical_name}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="text-sm text-muted-foreground">
+                              No entities surfaced from this chunk.
+                            </span>
                           )}
                         </div>
                       </div>

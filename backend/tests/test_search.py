@@ -8,6 +8,9 @@ from datum.services.search import (
     ParsedQuery,
     RankedCandidate,
     SearchOptions,
+    SearchResult,
+    SearchResultEntity,
+    _build_entity_facets,
     _log_search_run,
     _prepare_search_context,
     _term_search,
@@ -87,6 +90,49 @@ class TestFuseResults:
         vector = [RankedCandidate(chunk_id="a", rank=1)]
         fused = fuse_results(bm25_results=bm25, vector_results=vector)
         assert len(fused) == 1
+
+
+def test_build_entity_facets_counts_unique_result_entities():
+    facets = _build_entity_facets(
+        [
+            SearchResult(
+                document_title="A",
+                document_path="docs/a.md",
+                document_type="plan",
+                document_status="draft",
+                project_slug="p",
+                heading_path="",
+                snippet="",
+                version_number=1,
+                content_hash="sha256:a",
+                fused_score=1.0,
+                entities=[
+                    SearchResultEntity(canonical_name="postgresql", entity_type="technology"),
+                    SearchResultEntity(canonical_name="redis", entity_type="technology"),
+                ],
+            ),
+            SearchResult(
+                document_title="B",
+                document_path="docs/b.md",
+                document_type="plan",
+                document_status="draft",
+                project_slug="p",
+                heading_path="",
+                snippet="",
+                version_number=1,
+                content_hash="sha256:b",
+                fused_score=0.9,
+                entities=[
+                    SearchResultEntity(canonical_name="postgresql", entity_type="technology"),
+                ],
+            ),
+        ]
+    )
+
+    assert [(facet.canonical_name, facet.count) for facet in facets] == [
+        ("postgresql", 2),
+        ("redis", 1),
+    ]
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,6 @@ import { useLocation, useNavigate } from '@tanstack/react-router'
 import { openTemplateDialog } from '@/components/CreateDocumentDialog'
 import { api, type DocumentMeta } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
-import { extractTechnicalTerms, stripFrontmatter, uniqueTechnicalTerms } from '@/lib/technical-terms'
 import { useProjectsQuery } from '@/lib/workspace-query'
 
 interface CommandDocument extends DocumentMeta {
@@ -85,47 +84,36 @@ export function CommandPalette() {
 
   const entitySeed = useMemo(
     () =>
-      documents
-        .slice(0, 10)
-        .map((document) => `${document.project_slug}:${document.relative_path}`)
+      visibleProjects
+        .map((project) => project.slug)
         .join('|'),
-    [documents],
+    [visibleProjects],
   )
 
   const entitiesQuery = useQuery({
     queryKey: queryKeys.commandPaletteEntities(selectedProject, entitySeed),
-    enabled: open && documents.length > 0,
+    enabled: open && visibleProjects.length > 0,
     queryFn: async () => {
-      const scopedDocuments = selectedProject
-        ? documents.filter((document) => document.project_slug === selectedProject).slice(0, 10)
-        : documents.slice(0, 10)
-
-      const items = await Promise.all(
-        scopedDocuments.map(async (document) => {
-          const fullDocument = await api.documents.get(document.project_slug, document.relative_path)
-          return {
-            projectSlug: document.project_slug,
-            terms: uniqueTechnicalTerms(
-              extractTechnicalTerms(stripFrontmatter(fullDocument.content)),
-              8,
-            ),
-          }
-        }),
+      const summaries = await Promise.all(
+        visibleProjects.map(async (project) => ({
+          projectSlug: project.slug,
+          summary: await api.intelligence.summary(project.slug),
+        })),
       )
 
       const nextEntities: CommandEntity[] = []
       const seen = new Set<string>()
-      for (const item of items) {
-        for (const term of item.terms) {
-          const key = `${item.projectSlug}:${term.termType}:${term.rawText}`
+      for (const item of summaries) {
+        for (const entity of item.summary.key_entities) {
+          const key = `${item.projectSlug}:${entity.entity_type}:${entity.canonical_name}`
           if (seen.has(key)) {
             continue
           }
           seen.add(key)
           nextEntities.push({
             projectSlug: item.projectSlug,
-            rawText: term.rawText,
-            termType: term.termType,
+            rawText: entity.canonical_name,
+            termType: entity.entity_type,
           })
         }
       }
@@ -188,7 +176,7 @@ export function CommandPalette() {
                     value={`review inbox ${selectedProject}`}
                     onSelect={() => {
                       close()
-                      navigate({ to: '/projects/$slug/review', params: { slug: selectedProject } })
+                      navigate({ to: '/projects/$slug/inbox', params: { slug: selectedProject } })
                     }}
                     className="rounded-xl px-3 py-2 text-sm data-[selected=true]:bg-accent"
                   >

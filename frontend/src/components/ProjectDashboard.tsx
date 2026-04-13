@@ -7,9 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { useContextPanel } from '@/lib/context-panel'
-import { api, type DocumentMeta, type Project } from '@/lib/api'
+import { api, type Candidate, type DocumentMeta, type Project } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
-import { extractTechnicalTerms, stripFrontmatter, uniqueTechnicalTerms } from '@/lib/technical-terms'
 import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
 function sortByRecency(documents: DocumentMeta[]) {
@@ -18,7 +17,7 @@ function sortByRecency(documents: DocumentMeta[]) {
   )
 }
 
-function buildAttentionAlerts(documents: DocumentMeta[]) {
+function buildAttentionAlerts(documents: DocumentMeta[], pendingCandidateCount: number) {
   const alerts: string[] = []
   const draftCount = documents.filter((document) => document.status === 'draft').length
   const decisionCount = documents.filter((document) => document.doc_type === 'decision').length
@@ -39,6 +38,9 @@ function buildAttentionAlerts(documents: DocumentMeta[]) {
   if (staleDocs.length > 0) {
     alerts.push(`${staleDocs.length} document${staleDocs.length === 1 ? '' : 's'} look stale`)
   }
+  if (pendingCandidateCount > 0) {
+    alerts.push(`${pendingCandidateCount} inbox item${pendingCandidateCount === 1 ? '' : 's'} need review`)
+  }
   if (documents.length === 0) {
     alerts.push('Project has no cabinet documents yet')
   }
@@ -50,10 +52,12 @@ function DashboardContextPanel({
   project,
   documents,
   keyEntities,
+  pendingCandidateCount,
 }: {
   project: Project
   documents: DocumentMeta[]
   keyEntities: string[]
+  pendingCandidateCount: number
 }) {
   const byType = documents.reduce<Record<string, number>>((accumulator, document) => {
     accumulator[document.doc_type] = (accumulator[document.doc_type] ?? 0) + 1
@@ -84,6 +88,10 @@ function DashboardContextPanel({
           <div>
             <div className="text-muted-foreground">Documents</div>
             <div className="mt-1 font-medium">{documents.length}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Inbox</div>
+            <div className="mt-1 font-medium">{pendingCandidateCount}</div>
           </div>
         </div>
       </div>
@@ -146,42 +154,41 @@ interface ProjectDashboardProps {
 
 const EMPTY_DOCUMENTS: DocumentMeta[] = []
 const EMPTY_ENTITIES: string[] = []
+const EMPTY_CANDIDATES: Candidate[] = []
 
 export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
   const { setContent } = useContextPanel()
   const workspaceQuery = useProjectWorkspaceQuery(projectSlug)
   const project = workspaceQuery.data?.project ?? null
   const documents = workspaceQuery.data?.documents ?? EMPTY_DOCUMENTS
-
-  const entitySeed = sortByRecency(documents)
-    .slice(0, 8)
-    .map((document) => document.relative_path)
-    .join('|')
-
-  const keyEntitiesQuery = useQuery({
-    queryKey: queryKeys.dashboardEntities(projectSlug, entitySeed),
-    enabled: documents.length > 0,
-    queryFn: async () => {
-      const entitySeedDocuments = sortByRecency(documents).slice(0, 8)
-      const loadedDocuments = await Promise.all(
-        entitySeedDocuments.map((document) => api.documents.get(projectSlug, document.relative_path)),
-      )
-      const terms = loadedDocuments.flatMap((document) =>
-        uniqueTechnicalTerms(extractTechnicalTerms(stripFrontmatter(document.content)), 6),
-      )
-      return [...new Set(terms.map((term) => term.rawText))].slice(0, 10)
-    },
+  const intelligenceQuery = useQuery({
+    queryKey: queryKeys.intelligenceSummary(projectSlug),
+    queryFn: () => api.intelligence.summary(projectSlug),
+    enabled: Boolean(projectSlug),
   })
-  const keyEntities = keyEntitiesQuery.data ?? EMPTY_ENTITIES
+  const inboxQuery = useQuery({
+    queryKey: queryKeys.inbox(projectSlug),
+    queryFn: () => api.inbox.list(projectSlug),
+    enabled: Boolean(projectSlug),
+  })
+  const keyEntities =
+    intelligenceQuery.data?.key_entities.map((entity) => entity.canonical_name) ?? EMPTY_ENTITIES
+  const pendingCandidateCount = intelligenceQuery.data?.pending_candidate_count ?? 0
+  const inboxCandidates = inboxQuery.data ?? EMPTY_CANDIDATES
 
   useEffect(() => {
     if (project) {
       setContent(
-        <DashboardContextPanel project={project} documents={documents} keyEntities={keyEntities} />,
+        <DashboardContextPanel
+          project={project}
+          documents={documents}
+          keyEntities={keyEntities}
+          pendingCandidateCount={pendingCandidateCount}
+        />,
       )
     }
     return () => setContent(null)
-  }, [documents, keyEntities, project, setContent])
+  }, [documents, keyEntities, pendingCandidateCount, project, setContent])
 
   if (workspaceQuery.isLoading) {
     return <div className="p-8 text-muted-foreground">Loading project dashboard…</div>
@@ -196,12 +203,14 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
     accumulator[document.doc_type] = (accumulator[document.doc_type] ?? 0) + 1
     return accumulator
   }, {})
-  const alerts = buildAttentionAlerts(documents)
+  const alerts = buildAttentionAlerts(documents, pendingCandidateCount)
+  const decisionCandidates = inboxCandidates
+    .filter((candidate) => candidate.candidate_type === 'decision')
+    .slice(0, 5)
+  const openQuestionCandidates = inboxCandidates
+    .filter((candidate) => candidate.candidate_type === 'open_question')
+    .slice(0, 5)
   const decisionDocs = documents.filter((document) => document.doc_type === 'decision').slice(0, 5)
-  const questionDocs = documents.filter((document) => {
-    const lowerTitle = document.title.toLowerCase()
-    return lowerTitle.includes('question') || document.title.includes('?') || document.doc_type === 'brainstorm'
-  }).slice(0, 5)
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
@@ -221,6 +230,7 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{project.status}</Badge>
             <Badge variant="secondary">{documents.length} docs</Badge>
+            {pendingCandidateCount > 0 && <Badge variant="outline">{pendingCandidateCount} inbox</Badge>}
             {project.tags.map((tag) => (
               <Badge key={tag} variant="outline">
                 {tag}
@@ -277,19 +287,32 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {decisionDocs.length === 0 ? (
+                {decisionDocs.length === 0 && decisionCandidates.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No recorded decisions yet.</div>
                 ) : (
-                  decisionDocs.map((document) => (
-                    <Link
-                      key={document.relative_path}
-                      to="/projects/$slug/docs/$"
-                      params={{ slug: projectSlug, _splat: document.relative_path }}
-                      className="block rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
-                    >
-                      {document.title}
-                    </Link>
-                  ))
+                  <>
+                    {decisionDocs.map((document) => (
+                      <Link
+                        key={document.relative_path}
+                        to="/projects/$slug/docs/$"
+                        params={{ slug: projectSlug, _splat: document.relative_path }}
+                        className="block rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
+                      >
+                        {document.title}
+                      </Link>
+                    ))}
+                    {decisionDocs.length === 0 &&
+                      decisionCandidates.map((candidate) => (
+                        <Link
+                          key={candidate.id}
+                          to="/projects/$slug/inbox"
+                          params={{ slug: projectSlug }}
+                          className="block rounded-xl border border-dashed border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
+                        >
+                          {candidate.title}
+                        </Link>
+                      ))}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -302,17 +325,19 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {questionDocs.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No open-question docs surfaced yet.</div>
+                {openQuestionCandidates.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    No open questions surfaced from the intelligence layer yet.
+                  </div>
                 ) : (
-                  questionDocs.map((document) => (
+                  openQuestionCandidates.map((candidate) => (
                     <Link
-                      key={document.relative_path}
-                      to="/projects/$slug/docs/$"
-                      params={{ slug: projectSlug, _splat: document.relative_path }}
+                      key={candidate.id}
+                      to="/projects/$slug/inbox"
+                      params={{ slug: projectSlug }}
                       className="block rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
                     >
-                      {document.title}
+                      {candidate.title}
                     </Link>
                   ))
                 )}

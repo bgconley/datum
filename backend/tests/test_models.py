@@ -78,6 +78,18 @@ def test_evaluation_models_registered():
     assert expected.issubset(table_names)
 
 
+def test_intelligence_models_registered():
+    table_names = set(Base.metadata.tables.keys())
+    expected = {
+        "entities",
+        "entity_mentions",
+        "decisions",
+        "requirements",
+        "open_questions",
+    }
+    assert expected.issubset(table_names)
+
+
 def test_asyncpg_halfvec_preserves_native_bind_values():
     dialect = PGDialect_asyncpg()
     typ = AsyncpgHalfVec(4)

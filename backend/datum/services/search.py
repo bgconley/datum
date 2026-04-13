@@ -15,6 +15,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from datum.config import settings
 from datum.models.core import Document, DocumentVersion, PipelineConfig, Project, VersionHeadEvent
+from datum.models.intelligence import Entity, EntityMention
 from datum.models.search import (
     ChunkEmbedding,
     DocumentChunk,
@@ -78,6 +79,20 @@ class SearchResult:
     line_start: int = 0
     line_end: int = 0
     match_signals: list[str] = field(default_factory=list)
+    entities: list[SearchResultEntity] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SearchResultEntity:
+    canonical_name: str
+    entity_type: str
+
+
+@dataclass(slots=True)
+class SearchEntityFacet:
+    canonical_name: str
+    entity_type: str
+    count: int
 
 
 @dataclass(slots=True)
@@ -114,6 +129,7 @@ class SearchExecution:
     latency_ms: int
     semantic_enabled: bool
     rerank_applied: bool
+    entity_facets: list[SearchEntityFacet] = field(default_factory=list)
 
 
 def parse_query(
@@ -198,7 +214,7 @@ def fuse_results(
     return sorted(scores.values(), key=lambda item: item.fused_score, reverse=True)
 
 
-async def search(
+async def search_execution(
     session: AsyncSession,
     query: str,
     gateway=None,
@@ -206,7 +222,7 @@ async def search(
     version_scope: str = "current",
     limit: int = 20,
     search_options: SearchOptions | None = None,
-) -> list[SearchResult]:
+) -> SearchExecution:
     context = await _prepare_search_context(
         session,
         query=query,
@@ -215,7 +231,7 @@ async def search(
         version_scope=version_scope,
         search_options=search_options,
     )
-    execution = await _execute_search(
+    return await _execute_search(
         session,
         context=context,
         gateway=gateway,
@@ -225,6 +241,26 @@ async def search(
         include_vector=True,
         phase="hybrid",
         log_search=True,
+        search_options=search_options,
+    )
+
+
+async def search(
+    session: AsyncSession,
+    query: str,
+    gateway=None,
+    project_scope: str | None = None,
+    version_scope: str = "current",
+    limit: int = 20,
+    search_options: SearchOptions | None = None,
+) -> list[SearchResult]:
+    execution = await search_execution(
+        session=session,
+        query=query,
+        gateway=gateway,
+        project_scope=project_scope,
+        version_scope=version_scope,
+        limit=limit,
         search_options=search_options,
     )
     return execution.results
@@ -402,6 +438,7 @@ async def _execute_search(
             search_options.max_results_per_document if search_options is not None else 3
         ),
     )
+    entity_facets = _build_entity_facets(results)
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
 
@@ -428,6 +465,7 @@ async def _execute_search(
         latency_ms=elapsed_ms,
         semantic_enabled=context.semantic_enabled if phase == "lexical" else semantic_applied,
         rerank_applied=rerank_applied,
+        entity_facets=entity_facets,
     )
 
 
@@ -584,6 +622,31 @@ def _build_term_scope_filters(
     return filters
 
 
+def _build_entity_facets(
+    results: list[SearchResult],
+    *,
+    limit: int = 20,
+) -> list[SearchEntityFacet]:
+    counts: dict[tuple[str, str], int] = {}
+    for result in results:
+        for entity in result.entities:
+            key = (entity.canonical_name, entity.entity_type)
+            counts[key] = counts.get(key, 0) + 1
+
+    ranked = sorted(
+        counts.items(),
+        key=lambda item: (-item[1], item[0][1], item[0][0]),
+    )
+    return [
+        SearchEntityFacet(
+            canonical_name=canonical_name,
+            entity_type=entity_type,
+            count=count,
+        )
+        for (canonical_name, entity_type), count in ranked[:limit]
+    ]
+
+
 async def _bm25_search(
     session: AsyncSession,
     parsed: ParsedQuery,
@@ -727,6 +790,7 @@ async def _build_search_result(
             snippet = snippet[:200].rstrip() + "..."
 
         matched_terms = await _matched_terms_for_chunk(session, chunk.id, parsed)
+        entities = await _entities_for_chunk(session, chunk.id)
         match_signals: list[str] = []
         if fused.rank_bm25 is not None:
             match_signals.append("keyword")
@@ -752,6 +816,7 @@ async def _build_search_result(
             line_start=chunk.start_line or 0,
             line_end=chunk.end_line or 0,
             match_signals=match_signals,
+            entities=entities,
         )
     except Exception as exc:
         logger.warning("failed to build search result: %s", exc)
@@ -779,6 +844,33 @@ async def _matched_terms_for_chunk(
     if matched:
         return matched
     return [term.raw_text for term in parsed.detected_terms]
+
+
+async def _entities_for_chunk(
+    session: AsyncSession,
+    chunk_id: UUID,
+) -> list[SearchResultEntity]:
+    result = await session.execute(
+        select(Entity.canonical_name, Entity.entity_type)
+        .select_from(EntityMention)
+        .join(Entity, EntityMention.entity_id == Entity.id)
+        .where(EntityMention.chunk_id == chunk_id)
+        .order_by(Entity.entity_type.asc(), Entity.canonical_name.asc())
+    )
+    seen: set[tuple[str, str]] = set()
+    entities: list[SearchResultEntity] = []
+    for canonical_name, entity_type in result.fetchall():
+        key = (canonical_name, entity_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        entities.append(
+            SearchResultEntity(
+                canonical_name=canonical_name,
+                entity_type=entity_type,
+            )
+        )
+    return entities
 
 
 async def _log_search_run(

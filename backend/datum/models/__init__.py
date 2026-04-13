@@ -29,6 +29,21 @@ from datum.models.evaluation import (
 from datum.models.evaluation import (
     EvaluationSet as EvaluationSet,
 )
+from datum.models.intelligence import (
+    Decision as Decision,
+)
+from datum.models.intelligence import (
+    Entity as Entity,
+)
+from datum.models.intelligence import (
+    EntityMention as EntityMention,
+)
+from datum.models.intelligence import (
+    OpenQuestion as OpenQuestion,
+)
+from datum.models.intelligence import (
+    Requirement as Requirement,
+)
 from datum.models.search import (
     ChunkEmbedding as ChunkEmbedding,
 )
@@ -58,12 +73,17 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "DocumentVersion",
+    "Decision",
     "EvaluationRun",
     "EvaluationSet",
+    "Entity",
+    "EntityMention",
     "IngestionJob",
     "ModelRun",
+    "OpenQuestion",
     "PipelineConfig",
     "Project",
+    "Requirement",
     "SearchRun",
     "SearchRunResult",
     "SourceFile",

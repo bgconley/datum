@@ -7,13 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.db import get_session
 from datum.schemas.search import (
+    SearchEntityFacetResponse,
     SearchRequest,
     SearchResponse,
     SearchResultResponse,
     SearchStreamEventResponse,
 )
 from datum.services.model_gateway import build_model_gateway
-from datum.services.search import search, stream_search
+from datum.services.search import search_execution, stream_search
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
 
@@ -23,7 +24,7 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
     started = time.monotonic()
     gateway = build_model_gateway()
     try:
-        results = await search(
+        execution = await search_execution(
             session=session,
             query=body.query,
             gateway=gateway if (gateway.embedding or gateway.reranker) else None,
@@ -35,9 +36,13 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
         await gateway.close()
 
     return SearchResponse(
-        results=[SearchResultResponse(**asdict(result)) for result in results],
+        results=[SearchResultResponse(**asdict(result)) for result in execution.results],
+        entity_facets=[
+            SearchEntityFacetResponse(**asdict(facet))
+            for facet in execution.entity_facets
+        ],
         query=body.query,
-        result_count=len(results),
+        result_count=len(execution.results),
         latency_ms=int((time.monotonic() - started) * 1000),
     )
 
@@ -63,6 +68,10 @@ async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends
                     results=[
                         SearchResultResponse(**asdict(result))
                         for result in execution.results
+                    ],
+                    entity_facets=[
+                        SearchEntityFacetResponse(**asdict(facet))
+                        for facet in execution.entity_facets
                     ],
                     result_count=len(execution.results),
                     latency_ms=execution.latency_ms,

@@ -34,6 +34,10 @@ class Settings(BaseSettings):
         "config keys, file paths, schema or migration details, and direct evidence over "
         "general discussion."
     )
+    ner_endpoint: str = "http://localhost:8012"
+    ner_model: str = "knowledgator/gliner-bi-large-v2.0"
+    ner_protocol: str = "gliner_http"
+    ner_threshold: float = 0.5
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}

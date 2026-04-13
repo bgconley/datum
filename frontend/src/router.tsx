@@ -146,13 +146,22 @@ function DocumentRouteComponent() {
   )
 }
 
-function ReviewInboxRouteComponent() {
-  const { slug } = reviewInboxRoute.useParams()
+function renderReviewInbox(slug: string) {
   return (
     <Suspense fallback={<div className="p-8 text-muted-foreground">Loading review inbox…</div>}>
       <ReviewInbox projectSlug={slug} />
     </Suspense>
   )
+}
+
+function InboxRouteComponent() {
+  const { slug } = inboxRoute.useParams()
+  return renderReviewInbox(slug)
+}
+
+function LegacyReviewRouteComponent() {
+  const { slug } = reviewAliasRoute.useParams()
+  return renderReviewInbox(slug)
 }
 
 const rootRoute = createRootRoute({
@@ -239,10 +248,16 @@ const documentRoute = createRoute({
   component: DocumentRouteComponent,
 })
 
-const reviewInboxRoute = createRoute({
+const inboxRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'inbox',
+  component: InboxRouteComponent,
+})
+
+const reviewAliasRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: 'review',
-  component: ReviewInboxRouteComponent,
+  component: LegacyReviewRouteComponent,
 })
 
 const routeTree = rootRoute.addChildren([
@@ -250,7 +265,8 @@ const routeTree = rootRoute.addChildren([
   searchRoute,
   projectRoute.addChildren([
     projectIndexRoute,
-    reviewInboxRoute,
+    inboxRoute,
+    reviewAliasRoute,
     projectDocsRoute.addChildren([
       documentRoute,
     ]),
