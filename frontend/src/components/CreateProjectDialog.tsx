@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,6 +16,7 @@ export function CreateProjectDialog({ onCreated }: Props) {
   const [slug, setSlug] = useState('')
   const [description, setDescription] = useState('')
   const [saving, setSaving] = useState(false)
+  const navigate = useNavigate()
 
   const handleNameChange = (v: string) => {
     setName(v)
@@ -23,12 +26,17 @@ export function CreateProjectDialog({ onCreated }: Props) {
   const handleSubmit = async () => {
     setSaving(true)
     try {
-      await api.projects.create({ name, slug, description: description || undefined })
+      const project = await api.projects.create({
+        name,
+        slug,
+        description: description || undefined,
+      })
       setOpen(false)
       setName('')
       setSlug('')
       setDescription('')
       onCreated()
+      navigate({ to: '/projects/$slug', params: { slug: project.slug } })
     } catch (e) {
       alert(String(e))
     } finally {

@@ -52,6 +52,9 @@ class VersionInfo:
     version_file: str
     document_uid: str
     created_at: datetime
+    label: str | None = None
+    change_source: str | None = None
+    restored_from: int | None = None
 
 
 def create_version(
@@ -170,6 +173,7 @@ def create_version(
         "file": version_rel_path,
         "content_hash": content_hash,
         "created": now.isoformat(),
+        "change_source": change_source,
     }
     if label:
         version_entry["label"] = label
@@ -189,6 +193,9 @@ def create_version(
         version_file=version_rel_path,
         document_uid=manifest["document_uid"],
         created_at=now,
+        label=label,
+        change_source=change_source,
+        restored_from=restored_from,
     )
 
 
@@ -231,6 +238,9 @@ def get_current_version(
         version_file=latest["file"],
         document_uid=manifest["document_uid"],
         created_at=datetime.fromisoformat(latest["created"]),
+        label=latest.get("label"),
+        change_source=latest.get("change_source"),
+        restored_from=latest.get("restored_from"),
     )
 
 
@@ -255,6 +265,9 @@ def list_versions(
             version_file=v["file"],
             document_uid=manifest["document_uid"],
             created_at=datetime.fromisoformat(v["created"]),
+            label=v.get("label"),
+            change_source=v.get("change_source"),
+            restored_from=v.get("restored_from"),
         )
         for v in branch_data["versions"]
     ]

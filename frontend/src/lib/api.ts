@@ -1,5 +1,12 @@
 const API_BASE = '/api/v1'
 
+function encodeDocumentPath(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+}
+
 export interface Project {
   uid: string
   slug: string
@@ -71,6 +78,32 @@ export interface SearchStreamEvent {
   message?: string
 }
 
+export interface VersionInfo {
+  version_number: number
+  branch: string
+  content_hash: string
+  version_file: string
+  document_uid: string
+  created_at: string
+  label?: string
+  change_source?: string
+  restored_from?: number
+}
+
+export interface VersionContent {
+  version_number: number
+  content: string
+  content_hash: string
+}
+
+export interface VersionDiff {
+  version_a: number
+  version_b: number
+  diff_text: string
+  additions: number
+  deletions: number
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, init)
   if (!resp.ok) {
@@ -95,7 +128,9 @@ export const api = {
     list: (projectSlug: string) =>
       fetchJSON<DocumentMeta[]>(`${API_BASE}/projects/${projectSlug}/docs`),
     get: (projectSlug: string, docPath: string) =>
-      fetchJSON<DocumentContent>(`${API_BASE}/projects/${projectSlug}/docs/${docPath}`),
+      fetchJSON<DocumentContent>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}`,
+      ),
     create: (projectSlug: string, data: {
       relative_path: string; title: string; doc_type: string; content: string; tags?: string[]
     }) =>
@@ -105,11 +140,28 @@ export const api = {
         body: JSON.stringify(data),
       }),
     save: (projectSlug: string, docPath: string, data: { content: string; base_hash: string }) =>
-      fetchJSON<DocumentMeta>(`${API_BASE}/projects/${projectSlug}/docs/${docPath}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }),
+      fetchJSON<DocumentMeta>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        },
+      ),
+  },
+  versions: {
+    list: (projectSlug: string, docPath: string) =>
+      fetchJSON<VersionInfo[]>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/versions`,
+      ),
+    getContent: (projectSlug: string, docPath: string, version: number) =>
+      fetchJSON<VersionContent>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/versions/${version}`,
+      ),
+    diff: (projectSlug: string, docPath: string, versionA: number, versionB: number) =>
+      fetchJSON<VersionDiff>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/versions/diff/${versionA}/${versionB}`,
+      ),
   },
   search: (params: SearchRequestParams) =>
     fetchJSON<SearchResponse>(`${API_BASE}/search`, {

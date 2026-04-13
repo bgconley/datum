@@ -1,7 +1,5 @@
 import { startTransition, useEffect, useEffectEvent, useState } from 'react'
 
-import { SearchBar, type SearchDraft } from './SearchBar'
-import { SearchResults } from './SearchResults'
 import {
   api,
   type Project,
@@ -9,94 +7,15 @@ import {
   type SearchResultItem,
   type SearchStreamEvent,
 } from '@/lib/api'
-
-const DEFAULT_SEARCH_DRAFT: SearchDraft = {
-  query: '',
-  project: '',
-  versionMode: 'current',
-  asOf: '',
-  limit: 20,
-}
-
-function toDatetimeLocalValue(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-
-  const pad = (part: number) => String(part).padStart(2, '0')
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-  ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function draftsEqual(left: SearchDraft, right: SearchDraft): boolean {
-  return (
-    left.query === right.query &&
-    left.project === right.project &&
-    left.versionMode === right.versionMode &&
-    left.asOf === right.asOf &&
-    left.limit === right.limit
-  )
-}
-
-function parseDraftFromRoute(route: string): SearchDraft {
-  const [routeName, search = ''] = route.split('?', 2)
-  if (routeName !== 'search' || !search) {
-    return DEFAULT_SEARCH_DRAFT
-  }
-
-  const params = new URLSearchParams(search)
-  const scope = params.get('scope') ?? 'current'
-  const legacyVersionScope = params.get('version_scope')
-  const effectiveScope = legacyVersionScope ?? scope
-  const parsedLimit = Number(params.get('limit') ?? DEFAULT_SEARCH_DRAFT.limit)
-  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : DEFAULT_SEARCH_DRAFT.limit
-
-  if (effectiveScope.startsWith('as_of:')) {
-    return {
-      query: params.get('query') ?? '',
-      project: params.get('project') ?? '',
-      versionMode: 'as_of',
-      asOf: toDatetimeLocalValue(effectiveScope.slice(6)),
-      limit,
-    }
-  }
-
-  return {
-    query: params.get('query') ?? '',
-    project: params.get('project') ?? '',
-    versionMode:
-      effectiveScope === 'all' || effectiveScope === 'as_of' ? effectiveScope : 'current',
-    asOf: params.get('as_of') ?? '',
-    limit,
-  }
-}
-
-function buildSearchHash(draft: SearchDraft): string {
-  const params = new URLSearchParams()
-  const query = draft.query.trim()
-  if (query) {
-    params.set('query', query)
-  }
-  if (draft.project) {
-    params.set('project', draft.project)
-  }
-  if (draft.versionMode !== DEFAULT_SEARCH_DRAFT.versionMode) {
-    params.set('scope', draft.versionMode)
-  }
-  if (draft.versionMode === 'as_of' && draft.asOf) {
-    params.set('as_of', draft.asOf)
-  }
-  if (draft.limit !== DEFAULT_SEARCH_DRAFT.limit) {
-    params.set('limit', String(draft.limit))
-  }
-
-  const queryString = params.toString()
-  return queryString ? `#/search?${queryString}` : '#/search'
-}
+import {
+  DEFAULT_SEARCH_DRAFT,
+  draftFromRouteSearch,
+  draftsEqual,
+  type SearchDraft,
+  type SearchRouteState,
+} from '@/lib/search-route'
+import { SearchBar } from './SearchBar'
+import { SearchResults } from './SearchResults'
 
 function buildSearchRequest(draft: SearchDraft): SearchRequestParams | null {
   const query = draft.query.trim()
@@ -147,12 +66,13 @@ function describeScope(draft: SearchDraft, projects: Project[]): string {
 }
 
 interface SearchPageProps {
-  route: string
+  routeSearch: SearchRouteState
+  navigateToSearch: (draft: SearchDraft) => void
 }
 
-export function SearchPage({ route }: SearchPageProps) {
+export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
   const [projects, setProjects] = useState<Project[]>([])
-  const [draft, setDraft] = useState<SearchDraft>(() => parseDraftFromRoute(route))
+  const [draft, setDraft] = useState<SearchDraft>(() => draftFromRouteSearch(routeSearch))
   const [results, setResults] = useState<SearchResultItem[]>([])
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const [query, setQuery] = useState('')
@@ -183,7 +103,7 @@ export function SearchPage({ route }: SearchPageProps) {
         setError(
           nextDraft.versionMode === 'as_of'
             ? 'Choose a valid as-of timestamp before searching.'
-            : null
+            : null,
         )
       })
       return
@@ -244,7 +164,7 @@ export function SearchPage({ route }: SearchPageProps) {
   })
 
   useEffect(() => {
-    const nextDraft = parseDraftFromRoute(route)
+    const nextDraft = draftFromRouteSearch(routeSearch)
     setDraft((current) => (draftsEqual(current, nextDraft) ? current : nextDraft))
 
     if (nextDraft.query.trim()) {
@@ -259,22 +179,24 @@ export function SearchPage({ route }: SearchPageProps) {
       setSearched(false)
       setStreamPhase('idle')
       setSemanticEnabled(null)
+      setRerankApplied(null)
       setError(null)
     })
-  }, [route, executeSearch])
+  }, [executeSearch, routeSearch])
 
   const handleSearch = async () => {
-    const nextHash = buildSearchHash(draft)
-    if (window.location.hash === nextHash) {
+    const currentDraft = draftFromRouteSearch(routeSearch)
+    if (draftsEqual(currentDraft, draft)) {
       await executeSearch(draft)
       return
     }
-    window.location.hash = nextHash
+    navigateToSearch(draft)
   }
 
   const handleReset = () => {
     setDraft(DEFAULT_SEARCH_DRAFT)
-    if (window.location.hash === '#/search') {
+    const currentDraft = draftFromRouteSearch(routeSearch)
+    if (draftsEqual(currentDraft, DEFAULT_SEARCH_DRAFT)) {
       startTransition(() => {
         setQuery('')
         setResults([])
@@ -282,35 +204,38 @@ export function SearchPage({ route }: SearchPageProps) {
         setSearched(false)
         setStreamPhase('idle')
         setSemanticEnabled(null)
+        setRerankApplied(null)
         setError(null)
       })
       return
     }
-    window.location.hash = '#/search'
+    navigateToSearch(DEFAULT_SEARCH_DRAFT)
   }
 
   const handleProjectFacet = (project: string) => {
     const nextDraft = { ...draft, project }
     setDraft(nextDraft)
-    const nextHash = buildSearchHash(nextDraft)
-    if (window.location.hash === nextHash) {
+    const currentDraft = draftFromRouteSearch(routeSearch)
+    if (draftsEqual(currentDraft, nextDraft)) {
       void executeSearch(nextDraft)
       return
     }
-    window.location.hash = nextHash
+    navigateToSearch(nextDraft)
   }
 
   const scopeSummary = describeScope(draft, projects)
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-      <div>
-        <div className="text-sm uppercase tracking-[0.24em] text-muted-foreground">Phase 3</div>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight">Search</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+      <div className="rounded-[2rem] border border-border/80 bg-card/80 p-8 shadow-sm">
+        <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+          Search workspace
+        </div>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight">Search</h1>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground">
           Streaming retrieval across indexed documents: lexical hits land first, then exact-term
-          and semantic signals are fused and reranked. Search state stays in the URL so scoped
-          queries remain durable and shareable.
+          and semantic signals are fused and reranked. Search state lives in the routed URL so
+          scoped queries remain durable and shareable.
         </p>
       </div>
 

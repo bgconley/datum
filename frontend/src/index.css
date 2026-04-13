@@ -120,11 +120,99 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
-    }
+  }
+}
+
+@layer components {
+  .datum-prose {
+    color: var(--color-foreground);
+    line-height: 1.8;
+  }
+
+  .datum-prose > * + * {
+    margin-top: 1rem;
+  }
+
+  .datum-prose h1,
+  .datum-prose h2,
+  .datum-prose h3,
+  .datum-prose h4 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  .datum-prose h1 {
+    font-size: 2rem;
+  }
+
+  .datum-prose h2 {
+    font-size: 1.45rem;
+  }
+
+  .datum-prose h3 {
+    font-size: 1.15rem;
+  }
+
+  .datum-prose p,
+  .datum-prose li {
+    color: color-mix(in oklab, var(--color-foreground) 88%, transparent);
+  }
+
+  .datum-prose code {
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--color-muted) 88%, transparent);
+    padding: 0.15rem 0.4rem;
+    font-size: 0.92em;
+  }
+
+  .datum-prose pre {
+    overflow: auto;
+    border-radius: 1rem;
+    background: oklch(0.18 0 0);
+    color: oklch(0.96 0 0);
+    padding: 1rem 1.15rem;
+  }
+
+  .datum-prose blockquote {
+    border-left: 3px solid var(--color-border);
+    padding-left: 1rem;
+    color: var(--color-muted-foreground);
+  }
+
+  .datum-prose ul,
+  .datum-prose ol {
+    padding-left: 1.25rem;
+  }
+
+  .datum-prose a {
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+  }
+
+  .datum-diff-view {
+    --diff-background-color: color-mix(in oklab, var(--color-background) 96%, transparent);
+    --diff-text-color: var(--color-foreground);
+    --diff-selection-background-color: color-mix(in oklab, var(--color-accent) 45%, transparent);
+    --diff-gutter-insert-background-color: color-mix(in oklab, #16a34a 18%, transparent);
+    --diff-gutter-delete-background-color: color-mix(in oklab, #dc2626 16%, transparent);
+    --diff-code-insert-background-color: color-mix(in oklab, #16a34a 15%, transparent);
+    --diff-code-delete-background-color: color-mix(in oklab, #dc2626 13%, transparent);
+  }
+
+  .datum-diff-view .diff {
+    margin: 0;
+  }
+
+  .datum-diff-view .diff-gutter,
+  .datum-diff-view .diff-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+  }
 }

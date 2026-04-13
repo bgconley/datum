@@ -3,14 +3,7 @@ import type { FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { Project } from '@/lib/api'
-
-export interface SearchDraft {
-  query: string
-  project: string
-  versionMode: 'current' | 'all' | 'as_of'
-  asOf: string
-  limit: number
-}
+import type { SearchDraft } from '@/lib/search-route'
 
 interface SearchBarProps {
   value: SearchDraft

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -221,9 +222,10 @@ export function SearchResults({
       </div>
 
       {filteredResults.map((result) => (
-        <a
+        <Link
           key={result.chunk_id || `${result.project_slug}:${result.document_path}:${result.version_number}`}
-          href={`#/${result.project_slug}/${result.document_path}`}
+          to="/projects/$slug/docs/$"
+          params={{ slug: result.project_slug, _splat: result.document_path }}
           className="block"
         >
           <Card className="border border-border/80 transition-colors hover:bg-accent/40">
@@ -273,7 +275,7 @@ export function SearchResults({
               )}
             </CardContent>
           </Card>
-        </a>
+        </Link>
       ))}
     </div>
   )

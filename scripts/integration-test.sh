@@ -513,6 +513,21 @@ CONFLICT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/projects/${API_TE
 echo "    Conflict status: $CONFLICT (expected 409)"
 [ "$CONFLICT" = "409" ] || { echo "    FAIL: expected 409"; exit 1; }
 
+echo "  Checking version history endpoints..."
+VERSIONS=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/docs/docs/api-test.md/versions")
+VERSION_COUNT=$(echo "$VERSIONS" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+LATEST_VERSION=$(echo "$VERSIONS" | python3 -c 'import sys,json;data=json.load(sys.stdin);print(data[-1]["version_number"] if data else 0)')
+[ "$VERSION_COUNT" -ge 2 ] 2>/dev/null || { echo "    FAIL: expected at least 2 versions"; exit 1; }
+[ "$LATEST_VERSION" = "2" ] || { echo "    FAIL: expected latest version 2"; exit 1; }
+
+VERSION_ONE=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/docs/docs/api-test.md/versions/1")
+echo "$VERSION_ONE" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert "# API Test" in data["content"]'
+
+VERSION_DIFF=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/docs/docs/api-test.md/versions/diff/1/2")
+DIFF_ADDITIONS=$(echo "$VERSION_DIFF" | python3 -c 'import sys,json;print(json.load(sys.stdin)["additions"])')
+[ "$DIFF_ADDITIONS" -gt 0 ] 2>/dev/null || { echo "    FAIL: version diff reported no additions"; exit 1; }
+echo "    Versions: $VERSION_COUNT, latest: v$LATEST_VERSION"
+
 echo "  API tests PASS"
 echo ""
 
@@ -631,6 +646,10 @@ echo "  Caddy -> API:"
 curl -sf http://localhost:3080/api/v1/health | grep -q ok && echo "    OK" || { echo "    FAIL: Caddy not proxying to API"; exit 1; }
 echo "  Caddy -> Frontend:"
 curl -sf http://localhost:3080/ | grep -q Datum && echo "    OK" || { echo "    FAIL: Caddy not proxying to frontend"; exit 1; }
+echo "  Caddy -> Routed search page:"
+curl -sf http://localhost:3080/search | grep -q Datum && echo "    OK" || { echo "    FAIL: routed /search page not served"; exit 1; }
+echo "  Caddy -> Routed document history page:"
+curl -sf "http://localhost:3080/projects/${API_TEST_SLUG}/history/docs/api-test.md" | grep -q Datum && echo "    OK" || { echo "    FAIL: routed document history page not served"; exit 1; }
 echo ""
 
 # --- 9. Cleanup ---

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
@@ -16,6 +18,7 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   const [docType, setDocType] = useState('plan')
   const [folder, setFolder] = useState('docs')
   const [saving, setSaving] = useState(false)
+  const navigate = useNavigate()
 
   const filename = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.md'
   const relativePath = `${folder}/${filename}`
@@ -23,7 +26,7 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   const handleSubmit = async () => {
     setSaving(true)
     try {
-      await api.documents.create(projectSlug, {
+      const document = await api.documents.create(projectSlug, {
         relative_path: relativePath,
         title,
         doc_type: docType,
@@ -32,7 +35,10 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
       setOpen(false)
       setTitle('')
       onCreated()
-      window.location.hash = `#/${projectSlug}/${relativePath}`
+      navigate({
+        to: '/projects/$slug/docs/$',
+        params: { slug: projectSlug, _splat: document.relative_path },
+      })
     } catch (e) {
       alert(String(e))
     } finally {

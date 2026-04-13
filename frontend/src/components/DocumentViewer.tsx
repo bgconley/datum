@@ -1,10 +1,19 @@
-import { useEffect, useState, useCallback } from 'react'
+import { lazy, Suspense, type ReactNode, useEffect, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { api, type DocumentContent } from '@/lib/api'
+import { ContextPanel } from '@/components/ContextPanel'
+import { useContextPanel } from '@/lib/context-panel'
+import { api, type DocumentContent, type VersionInfo } from '@/lib/api'
+
+const CodeMirrorEditor = lazy(() =>
+  import('@/components/CodeMirrorEditor').then((module) => ({
+    default: module.CodeMirrorEditor,
+  })),
+)
 
 interface DocumentViewerProps {
   projectSlug: string
@@ -13,122 +22,242 @@ interface DocumentViewerProps {
 
 type ViewMode = 'rendered' | 'raw' | 'split' | 'edit'
 
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---[\s\S]*?---\n*/, '')
+}
+
+function detectLanguage(path: string): 'markdown' | 'json' | 'sql' | 'yaml' | 'text' {
+  if (path.endsWith('.json')) {
+    return 'json'
+  }
+  if (path.endsWith('.sql')) {
+    return 'sql'
+  }
+  if (path.endsWith('.yaml') || path.endsWith('.yml')) {
+    return 'yaml'
+  }
+  if (path.endsWith('.md')) {
+    return 'markdown'
+  }
+  return 'text'
+}
+
 export function DocumentViewer({ projectSlug, docPath }: DocumentViewerProps) {
-  const [doc, setDoc] = useState<DocumentContent | null>(null)
+  const [document, setDocument] = useState<DocumentContent | null>(null)
+  const [versions, setVersions] = useState<VersionInfo[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('rendered')
   const [editContent, setEditContent] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const { setContent } = useContextPanel()
 
-  const loadDoc = useCallback(() => {
+  useEffect(() => {
     setLoading(true)
-    api.documents
-      .get(projectSlug, docPath)
-      .then((d) => {
-        setDoc(d)
-        // Edit mode works with the full file content (frontmatter included)
-        // for round-trip fidelity — what GET returns is what PUT accepts
-        setEditContent(d.content)
+    Promise.all([
+      api.documents.get(projectSlug, docPath),
+      api.versions.list(projectSlug, docPath).catch(() => []),
+    ])
+      .then(([nextDocument, nextVersions]) => {
+        setDocument(nextDocument)
+        setVersions(nextVersions)
+        setEditContent(nextDocument.content)
       })
-      .catch(console.error)
+      .catch((error) => {
+        console.error(error)
+        setDocument(null)
+        setVersions([])
+      })
       .finally(() => setLoading(false))
-  }, [projectSlug, docPath])
+  }, [docPath, projectSlug])
 
-  useEffect(() => { loadDoc() }, [loadDoc])
+  useEffect(() => {
+    if (document) {
+      setContent(
+        <ContextPanel
+          projectSlug={projectSlug}
+          document={document.metadata}
+          versions={versions}
+        />,
+      )
+    }
+    return () => setContent(null)
+  }, [document, projectSlug, setContent, versions])
 
   const handleSave = async () => {
-    if (!doc) return
+    if (!document) {
+      return
+    }
+
     setSaving(true)
     try {
-      // Send full file content (frontmatter + body) — the API expects this
-      await api.documents.save(projectSlug, docPath, {
+      await api.documents.save(projectSlug, document.metadata.relative_path, {
         content: editContent,
-        base_hash: doc.metadata.content_hash,
+        base_hash: document.metadata.content_hash,
       })
+
+      const [nextDocument, nextVersions] = await Promise.all([
+        api.documents.get(projectSlug, document.metadata.relative_path),
+        api.versions.list(projectSlug, document.metadata.relative_path).catch(() => []),
+      ])
+      setDocument(nextDocument)
+      setVersions(nextVersions)
+      setEditContent(nextDocument.content)
       setViewMode('rendered')
-      loadDoc() // Reload to get new version/hash
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if (msg.includes('409')) {
-        alert('Document was modified externally. Please reload and try again.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('409')) {
+        alert('Document was modified externally. Reload the latest cabinet state and try again.')
       } else {
-        alert(msg)
+        alert(message)
       }
     } finally {
       setSaving(false)
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-      e.preventDefault()
-      if (viewMode === 'edit') handleSave()
-    }
+  if (loading) {
+    return <div className="p-8 text-muted-foreground">Loading document…</div>
   }
 
-  if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
-  if (!doc) return <div className="p-8 text-muted-foreground">Document not found</div>
+  if (!document) {
+    return <div className="p-8 text-muted-foreground">Document not found.</div>
+  }
 
-  const { metadata } = doc
-  const displayContent = doc.content.replace(/^---[\s\S]*?---\n*/, '')
+  const { metadata } = document
+  const language = detectLanguage(metadata.relative_path)
+  const renderedSource =
+    viewMode === 'split' || viewMode === 'edit'
+      ? stripFrontmatter(editContent)
+      : stripFrontmatter(document.content)
 
   return (
-    <div className="max-w-4xl mx-auto p-8" onKeyDown={handleKeyDown}>
-      {/* Header */}
-      <div className="mb-6">
-        <div className="text-sm text-muted-foreground mb-1">{docPath}</div>
-        <h1 className="text-2xl font-bold mb-2">{metadata.title}</h1>
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">{metadata.doc_type}</Badge>
-          <Badge variant="outline">{metadata.status}</Badge>
-          <span className="text-sm text-muted-foreground">v{metadata.version}</span>
-          {metadata.tags?.map((t) => (
-            <Badge key={t} variant="outline" className="text-xs">{t}</Badge>
-          ))}
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
+      <div className="rounded-[2rem] border border-border/80 bg-card/80 p-8 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+              {metadata.relative_path}
+            </div>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">{metadata.title}</h1>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{metadata.doc_type}</Badge>
+              <Badge variant="outline">{metadata.status}</Badge>
+              <Badge variant="outline">v{metadata.version}</Badge>
+              {metadata.tags.map((tag) => (
+                <Badge key={tag} variant="outline">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(['rendered', 'raw', 'split', 'edit'] as const).map((mode) => (
+              <Button
+                key={mode}
+                type="button"
+                variant={viewMode === mode ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setViewMode(mode)}
+              >
+                {mode}
+              </Button>
+            ))}
+            <Link
+              to="/projects/$slug/history/$"
+              params={{ slug: projectSlug, _splat: metadata.relative_path }}
+              className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              History
+            </Link>
+            {(viewMode === 'edit' || viewMode === 'split') && (
+              <Button type="button" size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* View mode toggle */}
-      <div className="flex gap-1 mb-4 border-b border-border pb-2">
-        {(['rendered', 'raw', 'split', 'edit'] as const).map((mode) => (
-          <Button
-            key={mode}
-            variant={viewMode === mode ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setViewMode(mode)}
-          >
-            {mode.charAt(0).toUpperCase() + mode.slice(1)}
-          </Button>
-        ))}
-        {viewMode === 'edit' && (
-          <Button size="sm" variant="default" onClick={handleSave} disabled={saving} className="ml-auto">
-            {saving ? 'Saving...' : 'Save (Ctrl+S)'}
-          </Button>
-        )}
-      </div>
+      {viewMode === 'edit' && (
+        <CardShell>
+          <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading editor…</div>}>
+            <CodeMirrorEditor
+              value={editContent}
+              onChange={setEditContent}
+              onSave={handleSave}
+              language={language}
+            />
+          </Suspense>
+        </CardShell>
+      )}
 
-      {/* Content */}
-      {viewMode === 'edit' ? (
-        <Textarea
-          value={editContent}
-          onChange={(e) => setEditContent(e.target.value)}
-          className="font-mono text-sm min-h-[500px] resize-y"
-          spellCheck={false}
-        />
-      ) : (
-        <div className={viewMode === 'split' ? 'grid grid-cols-2 gap-4' : ''}>
-          {(viewMode === 'rendered' || viewMode === 'split') && (
-            <div className="prose prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
-            </div>
-          )}
-          {(viewMode === 'raw' || viewMode === 'split') && (
-            <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto font-mono whitespace-pre-wrap">
-              {doc.content}
-            </pre>
-          )}
+      {viewMode === 'split' && (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+          <CardShell title="Source">
+            <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading editor…</div>}>
+              <CodeMirrorEditor
+                value={editContent}
+                onChange={setEditContent}
+                onSave={handleSave}
+                language={language}
+              />
+            </Suspense>
+          </CardShell>
+          <CardShell title={language === 'markdown' ? 'Preview' : 'Rendered source'}>
+            {language === 'markdown' ? (
+              <div className="datum-prose">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderedSource}</ReactMarkdown>
+              </div>
+            ) : (
+              <pre className="overflow-auto whitespace-pre-wrap font-mono text-sm">
+                {editContent}
+              </pre>
+            )}
+          </CardShell>
         </div>
       )}
+
+      {viewMode === 'rendered' && (
+        <CardShell>
+          {language === 'markdown' ? (
+            <div className="datum-prose">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderedSource}</ReactMarkdown>
+            </div>
+          ) : (
+            <pre className="overflow-auto whitespace-pre-wrap font-mono text-sm">
+              {document.content}
+            </pre>
+          )}
+        </CardShell>
+      )}
+
+      {viewMode === 'raw' && (
+        <CardShell>
+          <pre className="overflow-auto whitespace-pre-wrap font-mono text-sm">
+            {document.content}
+          </pre>
+        </CardShell>
+      )}
+    </div>
+  )
+}
+
+function CardShell({
+  children,
+  title,
+}: {
+  children: ReactNode
+  title?: string
+}) {
+  return (
+    <div className="rounded-[2rem] border border-border/80 bg-card/80 p-5 shadow-sm">
+      {title && (
+        <div className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          {title}
+        </div>
+      )}
+      {children}
     </div>
   )
 }

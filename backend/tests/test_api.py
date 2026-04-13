@@ -84,6 +84,46 @@ async def test_save_document_success(client):
 
 
 @pytest.mark.asyncio
+async def test_version_history_endpoints(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/a.md",
+        "title": "A",
+        "doc_type": "plan",
+        "content": "# V1",
+    })
+
+    current = await client.get("/api/v1/projects/p/docs/docs/a.md")
+    assert current.status_code == 200
+    current_hash = current.json()["metadata"]["content_hash"]
+    updated = current.json()["content"].replace("# V1", "# V2 updated")
+
+    saved = await client.put("/api/v1/projects/p/docs/docs/a.md", json={
+        "content": updated,
+        "base_hash": current_hash,
+    })
+    assert saved.status_code == 200
+
+    versions = await client.get("/api/v1/projects/p/docs/docs/a.md/versions")
+    assert versions.status_code == 200
+    version_payload = versions.json()
+    assert [entry["version_number"] for entry in version_payload] == [1, 2]
+    assert version_payload[0]["change_source"] == "web"
+
+    version_one = await client.get("/api/v1/projects/p/docs/docs/a.md/versions/1")
+    assert version_one.status_code == 200
+    assert "# V1" in version_one.json()["content"]
+
+    diff = await client.get("/api/v1/projects/p/docs/docs/a.md/versions/diff/1/2")
+    assert diff.status_code == 200
+    diff_payload = diff.json()
+    assert diff_payload["version_a"] == 1
+    assert diff_payload["version_b"] == 2
+    assert diff_payload["additions"] > 0 or diff_payload["deletions"] > 0
+    assert "V2 updated" in diff_payload["diff_text"]
+
+
+@pytest.mark.asyncio
 async def test_create_document_rejects_non_docs_path(client):
     await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
     resp = await client.post("/api/v1/projects/p/docs", json={
