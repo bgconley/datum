@@ -107,6 +107,17 @@ def embedding_model_payload(gateway: ModelGateway) -> dict[str, Any] | None:
     }
 
 
+def reranker_model_payload(gateway: ModelGateway) -> dict[str, Any] | None:
+    config = gateway.reranker
+    if config is None:
+        return None
+    return {
+        "model_name": config.name,
+        "endpoint": config.endpoint,
+        "protocol": config.protocol,
+    }
+
+
 async def get_or_create_pipeline_config(
     session: AsyncSession,
     *,
@@ -216,6 +227,43 @@ async def get_active_embedding_model_run(
         model_name=payload["model_name"],
         model_version=config_hash,
         task="embedding",
+        config=payload,
+        started_at=datetime.now(UTC),
+    )
+    session.add(model_run)
+    await session.flush()
+    return model_run
+
+
+async def get_active_reranker_model_run(
+    session: AsyncSession,
+    gateway: ModelGateway,
+    *,
+    create: bool,
+) -> ModelRun | None:
+    payload = reranker_model_payload(gateway)
+    if payload is None:
+        return None
+
+    config_hash = stable_config_hash(payload)
+    result = await session.execute(
+        select(ModelRun)
+        .where(
+            ModelRun.task == "reranker",
+            ModelRun.model_name == payload["model_name"],
+            ModelRun.model_version == config_hash,
+        )
+        .order_by(ModelRun.started_at.desc().nullslast())
+        .limit(1)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None or not create:
+        return existing
+
+    model_run = ModelRun(
+        model_name=payload["model_name"],
+        model_version=config_hash,
+        task="reranker",
         config=payload,
         started_at=datetime.now(UTC),
     )

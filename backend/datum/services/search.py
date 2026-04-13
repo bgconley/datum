@@ -26,6 +26,7 @@ from datum.services.pipeline_configs import (
     RETRIEVAL_RRF_K,
     RETRIEVAL_WEIGHTS,
     get_active_embedding_model_run,
+    get_active_reranker_model_run,
     get_retrieval_pipeline_config,
 )
 from datum.services.technical_terms import TermMatch, extract_technical_terms
@@ -294,6 +295,11 @@ async def _prepare_search_context(
         reranker_enabled = search_options.reranker_enabled and bool(
             gateway and getattr(gateway, "reranker", None)
         )
+    reranker_model_run_id = search_options.reranker_model_run_id if search_options else None
+    if reranker_enabled and reranker_model_run_id is None and gateway and gateway.reranker:
+        reranker_model_run = await get_active_reranker_model_run(session, gateway, create=True)
+        if reranker_model_run is not None:
+            reranker_model_run_id = reranker_model_run.id
 
     rrf_k, weights = _retrieval_settings(retrieval_config)
 
@@ -307,7 +313,7 @@ async def _prepare_search_context(
             and bool(gateway and gateway.embedding)
         ),
         reranker_enabled=reranker_enabled,
-        reranker_model_run_id=search_options.reranker_model_run_id if search_options else None,
+        reranker_model_run_id=reranker_model_run_id,
         rrf_k=rrf_k,
         weight_bm25=weights["bm25"],
         weight_vector=weights["vector"],

@@ -73,6 +73,8 @@ def test_compare_runs_prefers_higher_ndcg():
 @pytest.mark.asyncio
 async def test_run_evaluation_uses_search_overrides(monkeypatch):
     eval_set_id = uuid4()
+    embedding_run_id = uuid4()
+    reranker_run_id = uuid4()
     session = _EvalSession(
         EvaluationSet(
             id=eval_set_id,
@@ -112,22 +114,49 @@ async def test_run_evaluation_uses_search_overrides(monkeypatch):
 
     monkeypatch.setattr("datum.services.evaluation.search", fake_search)
 
+    async def fake_embedding_run(session, gateway, create):
+        del session, gateway
+        assert create is False
+        return type("ModelRun", (), {"id": embedding_run_id})()
+
+    async def fake_reranker_run(session, gateway, create):
+        del session, gateway
+        assert create is True
+        return type("ModelRun", (), {"id": reranker_run_id})()
+
+    monkeypatch.setattr(
+        "datum.services.evaluation.get_active_embedding_model_run",
+        fake_embedding_run,
+    )
+    monkeypatch.setattr(
+        "datum.services.evaluation.get_active_reranker_model_run",
+        fake_reranker_run,
+    )
+
+    class _Gateway:
+        embedding = type("Embedding", (), {"name": "embed-model"})()
+        reranker = type("Reranker", (), {"name": "rerank-model"})()
+
     eval_run, metrics = await run_evaluation(
         session=session,
         eval_set_id=eval_set_id,
         config=EvalConfig(
             retrieval_config_id=uuid4(),
-            embedding_model_run_id=uuid4(),
-            reranker_enabled=False,
+            reranker_enabled=True,
             version_scope="all",
         ),
         run_name="baseline",
-        gateway=None,
+        gateway=_Gateway(),
     )
 
     assert captured["version_scope"] == "all"
-    assert captured["search_options"].embedding_model_run_id is not None
-    assert captured["search_options"].reranker_enabled is False
+    assert captured["search_options"].embedding_model_run_id == embedding_run_id
+    assert captured["search_options"].reranker_enabled is True
+    assert captured["search_options"].reranker_model_run_id == reranker_run_id
     assert metrics["ndcg_at_5"] > 0
     assert isinstance(eval_run, EvaluationRun)
+    assert eval_run.embedding_model == "embed-model"
+    assert eval_run.embedding_model_run_id == embedding_run_id
+    assert eval_run.reranker_model == "rerank-model"
+    assert eval_run.reranker_model_run_id == reranker_run_id
     assert session.committed is True

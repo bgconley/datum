@@ -7,7 +7,9 @@ from datum.services.search import (
     FusedResult,
     ParsedQuery,
     RankedCandidate,
+    SearchOptions,
     _log_search_run,
+    _prepare_search_context,
     _term_search,
     _vector_search,
     fuse_results,
@@ -108,6 +110,42 @@ async def test_vector_search_scopes_to_active_model_run():
     assert "projects.slug" in rendered
     assert "CAST(:embedding AS halfvec" not in rendered
     assert params == {}
+
+
+@pytest.mark.asyncio
+async def test_prepare_search_context_resolves_active_reranker_model_run(monkeypatch):
+    retrieval_config_id = uuid4()
+    reranker_run_id = uuid4()
+    session = _FakeSession()
+
+    async def fake_retrieval_config(session, search_options):
+        del session, search_options
+        return type("Config", (), {"id": retrieval_config_id, "config": {}})()
+
+    async def fake_reranker_run(session, gateway, create):
+        del session, gateway
+        assert create is True
+        return type("ModelRun", (), {"id": reranker_run_id})()
+
+    monkeypatch.setattr("datum.services.search._resolve_retrieval_config", fake_retrieval_config)
+    monkeypatch.setattr("datum.services.search.get_active_reranker_model_run", fake_reranker_run)
+
+    class _Gateway:
+        embedding = None
+        reranker = object()
+
+    context = await _prepare_search_context(
+        session,
+        query="DATABASE_URL",
+        gateway=_Gateway(),
+        project_scope="alpha",
+        version_scope="current",
+        search_options=SearchOptions(),
+    )
+
+    assert context.retrieval_config_id == retrieval_config_id
+    assert context.reranker_enabled is True
+    assert context.reranker_model_run_id == reranker_run_id
 
 
 @pytest.mark.asyncio

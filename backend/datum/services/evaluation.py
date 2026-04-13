@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datum.models.evaluation import EvaluationRun, EvaluationSet
 from datum.services.metrics import compute_eval_metrics
 from datum.services.model_gateway import ModelGateway
+from datum.services.pipeline_configs import (
+    get_active_embedding_model_run,
+    get_active_reranker_model_run,
+)
 from datum.services.search import SearchOptions, SearchResult, search
 
 logger = logging.getLogger(__name__)
@@ -150,6 +154,39 @@ def _build_effective_gateway(
     return ModelGateway(embedding=embedding, reranker=reranker)
 
 
+async def _resolve_effective_eval_config(
+    session: AsyncSession,
+    gateway: ModelGateway | None,
+    config: EvalConfig,
+) -> EvalConfig:
+    resolved = replace(config)
+
+    if gateway and gateway.embedding and resolved.embedding_model is None:
+        resolved.embedding_model = gateway.embedding.name
+    if (
+        gateway
+        and gateway.embedding
+        and resolved.embedding_model_run_id is None
+    ):
+        embedding_run = await get_active_embedding_model_run(session, gateway, create=False)
+        if embedding_run is not None:
+            resolved.embedding_model_run_id = embedding_run.id
+
+    if not resolved.reranker_enabled or not gateway or not gateway.reranker:
+        resolved.reranker_model = None if not resolved.reranker_enabled else resolved.reranker_model
+        resolved.reranker_model_run_id = None
+        return resolved
+
+    if resolved.reranker_model is None:
+        resolved.reranker_model = gateway.reranker.name
+    if resolved.reranker_model_run_id is None:
+        reranker_run = await get_active_reranker_model_run(session, gateway, create=True)
+        if reranker_run is not None:
+            resolved.reranker_model_run_id = reranker_run.id
+
+    return resolved
+
+
 async def run_evaluation(
     session: AsyncSession,
     eval_set_id: UUID,
@@ -167,6 +204,7 @@ async def run_evaluation(
 
     effective_gateway = _build_effective_gateway(gateway, config)
     owns_gateway = effective_gateway is not None and effective_gateway is not gateway
+    effective_config = await _resolve_effective_eval_config(session, effective_gateway, config)
 
     try:
         query_results: list[dict[str, Any]] = []
@@ -180,9 +218,9 @@ async def run_evaluation(
                     session=session,
                     query=query_text,
                     gateway=effective_gateway,
-                    version_scope=config.version_scope,
+                    version_scope=effective_config.version_scope,
                     limit=max(k_values),
-                    search_options=config.to_search_options(),
+                    search_options=effective_config.to_search_options(),
                 )
             except Exception as exc:
                 logger.warning("evaluation query failed for %s: %s", query_text, exc)
@@ -217,15 +255,15 @@ async def run_evaluation(
         eval_run = EvaluationRun(
             evaluation_set_id=eval_set_id,
             name=run_name,
-            retrieval_config_id=config.retrieval_config_id,
-            embedding_model=config.embedding_model,
-            embedding_model_run_id=config.embedding_model_run_id,
-            reranker_model=config.reranker_model,
-            reranker_model_run_id=config.reranker_model_run_id,
-            version_scope=config.version_scope,
-            chunking_config=config.chunking_config,
-            fusion_weights=config.fusion_weights,
-            search_overrides=config.to_dict(),
+            retrieval_config_id=effective_config.retrieval_config_id,
+            embedding_model=effective_config.embedding_model,
+            embedding_model_run_id=effective_config.embedding_model_run_id,
+            reranker_model=effective_config.reranker_model,
+            reranker_model_run_id=effective_config.reranker_model_run_id,
+            version_scope=effective_config.version_scope,
+            chunking_config=effective_config.chunking_config,
+            fusion_weights=effective_config.fusion_weights,
+            search_overrides=effective_config.to_dict(),
             results=metrics,
         )
         session.add(eval_run)
