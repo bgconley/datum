@@ -305,12 +305,12 @@ export function SearchPage({ route }: SearchPageProps) {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
       <div>
-        <div className="text-sm uppercase tracking-[0.24em] text-muted-foreground">Phase 2</div>
+        <div className="text-sm uppercase tracking-[0.24em] text-muted-foreground">Phase 3</div>
         <h1 className="mt-2 text-3xl font-bold tracking-tight">Search</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-          Hybrid retrieval across indexed documents using lexical search, technical-term matches,
-          and semantic vectors when the embedding service is available. Search state is kept in the
-          URL so scoped queries are durable and shareable.
+          Streaming retrieval across indexed documents: lexical hits land first, then exact-term
+          and semantic signals are fused and reranked. Search state stays in the URL so scoped
+          queries remain durable and shareable.
         </p>
       </div>
 

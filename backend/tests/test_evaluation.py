@@ -4,6 +4,8 @@ from uuid import uuid4
 
 import pytest
 
+from datum.cli import eval as eval_cli
+from datum.cli import main as root_cli
 from datum.models.evaluation import EvaluationRun, EvaluationSet
 from datum.services.evaluation import (
     EvalConfig,
@@ -54,6 +56,33 @@ def test_sample_eval_set_fixture_exists():
     assert len(payload) >= 5
     assert any("DATABASE_URL" in item["query"] for item in payload)
     assert any("/api/v1/users" in item["query"] for item in payload)
+
+
+def test_eval_parser_supports_root_cli_prog_name():
+    parser = eval_cli.build_parser(prog="datum eval")
+    assert parser.prog == "datum eval"
+
+
+def test_root_cli_dispatches_eval_subcommand(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_main(argv=None, *, prog="datum-eval"):
+        captured["argv"] = argv
+        captured["prog"] = prog
+
+    monkeypatch.setattr("datum.cli.eval.main", fake_main)
+
+    root_cli.main(["eval", "stats"])
+
+    assert captured == {"argv": ["stats"], "prog": "datum eval"}
+
+
+def test_root_cli_help_prints_available_commands(capsys):
+    root_cli.main(["--help"])
+    output = capsys.readouterr().out
+
+    assert "usage: datum" in output
+    assert "{eval}" in output
 
 
 def test_compare_runs_prefers_higher_ndcg():

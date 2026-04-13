@@ -1,4 +1,4 @@
-"""datum-eval CLI for evaluation and re-embedding workflows."""
+"""Datum evaluation CLI for evaluation and re-embedding workflows."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
 
@@ -156,8 +157,8 @@ async def cmd_drop(args: argparse.Namespace) -> None:
     print(f"Dropped {deleted} embeddings")
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="datum-eval", description="Datum evaluation harness")
+def build_parser(prog: str = "datum-eval") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog, description="Datum evaluation harness")
     subparsers = parser.add_subparsers(dest="command")
 
     p_create = subparsers.add_parser("create-set")
@@ -216,10 +217,10 @@ async def _dispatch(args: argparse.Namespace) -> None:
     await handler(args)
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None, *, prog: str = "datum-eval") -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    parser = build_parser()
-    args = parser.parse_args()
+    parser = build_parser(prog=prog)
+    args = parser.parse_args(list(argv) if argv is not None else None)
     if not args.command:
         parser.print_help()
         return

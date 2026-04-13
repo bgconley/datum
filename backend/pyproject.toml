@@ -35,6 +35,7 @@ dev = [
 ]
 
 [project.scripts]
+datum = "datum.cli.main:main"
 datum-eval = "datum.cli.eval:main"
 
 [tool.setuptools.packages.find]
