@@ -61,12 +61,13 @@ export interface SearchRequestParams {
 
 export interface SearchStreamEvent {
   event: 'phase' | 'error'
-  phase?: 'lexical' | 'hybrid'
+  phase?: 'lexical' | 'reranked'
   query: string
   results: SearchResultItem[]
   result_count: number
   latency_ms: number | null
   semantic_enabled: boolean
+  rerank_applied: boolean
   message?: string
 }
 
@@ -134,12 +135,13 @@ export const api = {
       const fallback = await api.search(params)
       await onEvent({
         event: 'phase',
-        phase: 'hybrid',
+        phase: 'reranked',
         query: fallback.query,
         results: fallback.results,
         result_count: fallback.result_count,
         latency_ms: fallback.latency_ms,
         semantic_enabled: false,
+        rerank_applied: false,
       })
       return
     }

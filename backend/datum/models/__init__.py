@@ -23,6 +23,12 @@ from datum.models.core import (
 from datum.models.core import (
     VersionHeadEvent as VersionHeadEvent,
 )
+from datum.models.evaluation import (
+    EvaluationRun as EvaluationRun,
+)
+from datum.models.evaluation import (
+    EvaluationSet as EvaluationSet,
+)
 from datum.models.search import (
     ChunkEmbedding as ChunkEmbedding,
 )
@@ -52,6 +58,8 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "DocumentVersion",
+    "EvaluationRun",
+    "EvaluationSet",
     "IngestionJob",
     "ModelRun",
     "PipelineConfig",

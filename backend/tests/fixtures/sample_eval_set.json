@@ -1,0 +1,26 @@
+[
+  {
+    "query": "JWT token lifetime",
+    "expected_results": [
+      {
+        "doc_path": "docs/decisions/adr-0002-jwt-over-sessions.md",
+        "heading_path_contains": "Token Lifetime",
+        "rank_threshold": 3
+      },
+      {
+        "doc_path": "docs/requirements/auth-requirements.md",
+        "heading_path_contains": "OAuth Scoping",
+        "rank_threshold": 5
+      }
+    ]
+  },
+  {
+    "query": "DATABASE_URL connection string",
+    "expected_results": [
+      {
+        "doc_path": "docs/schemas/initial-postgres-schema.sql",
+        "rank_threshold": 1
+      }
+    ]
+  }
+]

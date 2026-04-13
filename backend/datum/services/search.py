@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from datum.config import settings
-from datum.models.core import Document, DocumentVersion, Project, VersionHeadEvent
+from datum.models.core import Document, DocumentVersion, PipelineConfig, Project, VersionHeadEvent
 from datum.models.search import (
     DocumentChunk,
     SearchRun,
@@ -55,6 +55,7 @@ class FusedResult:
     rank_bm25: int | None = None
     rank_vector: int | None = None
     rank_terms: int | None = None
+    rerank_score: float | None = None
 
 
 @dataclass(slots=True)
@@ -82,6 +83,22 @@ class SearchExecutionContext:
     retrieval_config_id: UUID | None
     active_embedding_run_id: UUID | None
     semantic_enabled: bool
+    reranker_enabled: bool
+    reranker_model_run_id: UUID | None
+    rrf_k: int
+    weight_bm25: float
+    weight_vector: float
+    weight_terms: float
+
+
+@dataclass(slots=True)
+class SearchOptions:
+    retrieval_config_id: UUID | None = None
+    embedding_model_run_id: UUID | None = None
+    reranker_enabled: bool | None = None
+    reranker_model_run_id: UUID | None = None
+    rerank_candidate_limit: int = 50
+    max_results_per_document: int | None = 3
 
 
 @dataclass(slots=True)
@@ -92,6 +109,7 @@ class SearchExecution:
     fused_results: list[FusedResult]
     latency_ms: int
     semantic_enabled: bool
+    rerank_applied: bool
 
 
 def parse_query(
@@ -117,6 +135,32 @@ def _parse_as_of_scope(version_scope: str) -> datetime | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("as_of scope must include a timezone-aware timestamp")
     return parsed
+
+
+async def _resolve_retrieval_config(
+    session: AsyncSession,
+    search_options: SearchOptions | None,
+) -> PipelineConfig:
+    if search_options and search_options.retrieval_config_id is not None:
+        retrieval_config = await session.get(PipelineConfig, search_options.retrieval_config_id)
+        if retrieval_config is None:
+            raise ValueError(
+                f"retrieval config {search_options.retrieval_config_id} not found"
+            )
+        return retrieval_config
+    return await get_retrieval_pipeline_config(session)
+
+
+def _retrieval_settings(retrieval_config: PipelineConfig) -> tuple[int, dict[str, float]]:
+    config = retrieval_config.config or {}
+    rrf_k = int(config.get("rrf_k", RETRIEVAL_RRF_K))
+    raw_weights = config.get("weights", {})
+    weights = {
+        "bm25": float(raw_weights.get("bm25", RETRIEVAL_WEIGHTS["bm25"])),
+        "vector": float(raw_weights.get("vector", RETRIEVAL_WEIGHTS["vector"])),
+        "terms": float(raw_weights.get("terms", RETRIEVAL_WEIGHTS["terms"])),
+    }
+    return rrf_k, weights
 
 
 def fuse_results(
@@ -157,6 +201,7 @@ async def search(
     project_scope: str | None = None,
     version_scope: str = "current",
     limit: int = 20,
+    search_options: SearchOptions | None = None,
 ) -> list[SearchResult]:
     context = await _prepare_search_context(
         session,
@@ -164,6 +209,7 @@ async def search(
         gateway=gateway,
         project_scope=project_scope,
         version_scope=version_scope,
+        search_options=search_options,
     )
     execution = await _execute_search(
         session,
@@ -175,6 +221,7 @@ async def search(
         include_vector=True,
         phase="hybrid",
         log_search=True,
+        search_options=search_options,
     )
     return execution.results
 
@@ -186,6 +233,7 @@ async def stream_search(
     project_scope: str | None = None,
     version_scope: str = "current",
     limit: int = 20,
+    search_options: SearchOptions | None = None,
 ) -> AsyncIterator[SearchExecution]:
     context = await _prepare_search_context(
         session,
@@ -193,6 +241,7 @@ async def stream_search(
         gateway=gateway,
         project_scope=project_scope,
         version_scope=version_scope,
+        search_options=search_options,
     )
 
     yield await _execute_search(
@@ -205,6 +254,7 @@ async def stream_search(
         include_vector=False,
         phase="lexical",
         log_search=False,
+        search_options=search_options,
     )
 
     yield await _execute_search(
@@ -215,8 +265,9 @@ async def stream_search(
         project_scope=project_scope,
         limit=limit,
         include_vector=True,
-        phase="hybrid",
+        phase="reranked",
         log_search=True,
+        search_options=search_options,
     )
 
 
@@ -227,21 +278,39 @@ async def _prepare_search_context(
     gateway,
     project_scope: str | None,
     version_scope: str,
+    search_options: SearchOptions | None,
 ) -> SearchExecutionContext:
     parsed = parse_query(query, project_scope, version_scope)
-    retrieval_config = await get_retrieval_pipeline_config(session)
-    active_embedding_run_id = None
-    if gateway and gateway.embedding:
+    retrieval_config = await _resolve_retrieval_config(session, search_options)
+    active_embedding_run_id = search_options.embedding_model_run_id if search_options else None
+    if active_embedding_run_id is None and gateway and gateway.embedding:
         active_embedding_run = await get_active_embedding_model_run(session, gateway, create=False)
         if active_embedding_run is not None:
             active_embedding_run_id = active_embedding_run.id
+
+    reranker_enabled = bool(gateway and getattr(gateway, "reranker", None))
+    if search_options and search_options.reranker_enabled is not None:
+        reranker_enabled = search_options.reranker_enabled and bool(
+            gateway and getattr(gateway, "reranker", None)
+        )
+
+    rrf_k, weights = _retrieval_settings(retrieval_config)
 
     return SearchExecutionContext(
         query=query,
         parsed=parsed,
         retrieval_config_id=retrieval_config.id,
         active_embedding_run_id=active_embedding_run_id,
-        semantic_enabled=active_embedding_run_id is not None,
+        semantic_enabled=(
+            active_embedding_run_id is not None
+            and bool(gateway and gateway.embedding)
+        ),
+        reranker_enabled=reranker_enabled,
+        reranker_model_run_id=search_options.reranker_model_run_id if search_options else None,
+        rrf_k=rrf_k,
+        weight_bm25=weights["bm25"],
+        weight_vector=weights["vector"],
+        weight_terms=weights["terms"],
     )
 
 
@@ -256,6 +325,7 @@ async def _execute_search(
     include_vector: bool,
     phase: str,
     log_search: bool,
+    search_options: SearchOptions | None,
 ) -> SearchExecution:
     started = time.monotonic()
     parsed = context.parsed
@@ -290,13 +360,35 @@ async def _execute_search(
         bm25_results=bm25_results,
         vector_results=vector_results,
         term_results=term_results,
+        k=context.rrf_k,
+        w_bm25=context.weight_bm25,
+        w_vector=context.weight_vector,
+        w_terms=context.weight_terms,
     )
 
-    results: list[SearchResult] = []
-    for item in fused[:limit]:
-        built = await _build_search_result(session, item, parsed)
-        if built is not None:
-            results.append(built)
+    rerank_applied = False
+    if phase == "reranked" and context.reranker_enabled and gateway:
+        fused, rerank_applied = await _rerank_search_results(
+            session=session,
+            fused=fused,
+            query=context.query,
+            gateway=gateway,
+            top_n=(
+                search_options.rerank_candidate_limit
+                if search_options is not None
+                else 50
+            ),
+        )
+
+    results = await _build_limited_search_results(
+        session=session,
+        fused_results=fused,
+        parsed=parsed,
+        limit=limit,
+        max_results_per_document=(
+            search_options.max_results_per_document if search_options is not None else 3
+        ),
+    )
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
 
@@ -307,6 +399,7 @@ async def _execute_search(
             parsed=parsed,
             retrieval_config_id=context.retrieval_config_id,
             embedding_model_run_id=context.active_embedding_run_id if include_vector else None,
+            reranker_model_run_id=context.reranker_model_run_id if rerank_applied else None,
             version_scope=version_scope,
             project_scope=project_scope,
             elapsed_ms=elapsed_ms,
@@ -321,7 +414,105 @@ async def _execute_search(
         fused_results=fused[:limit],
         latency_ms=elapsed_ms,
         semantic_enabled=context.semantic_enabled if phase == "lexical" else semantic_applied,
+        rerank_applied=rerank_applied,
     )
+
+
+async def _rerank_search_results(
+    *,
+    session: AsyncSession,
+    fused: list[FusedResult],
+    query: str,
+    gateway,
+    top_n: int,
+) -> tuple[list[FusedResult], bool]:
+    if not fused or not gateway or not getattr(gateway, "reranker", None):
+        return fused, False
+
+    rerank_inputs = await _load_chunk_rerank_payloads(session, fused[:top_n])
+    if not rerank_inputs:
+        return fused, False
+
+    documents = [payload for _, payload in rerank_inputs]
+    reranked_fused = {str(item.chunk_id): item for item in fused[:top_n]}
+
+    try:
+        reranked_indices = await gateway.rerank(query, documents, top_n=top_n)
+    except Exception as exc:
+        logger.warning("reranking unavailable: %s", exc)
+        return fused, False
+
+    reordered: list[FusedResult] = []
+    seen: set[str] = set()
+    for index, score in reranked_indices:
+        if index < 0 or index >= len(rerank_inputs):
+            continue
+        chunk_id = rerank_inputs[index][0]
+        item = reranked_fused.get(chunk_id)
+        if item is None:
+            continue
+        item.rerank_score = float(score)
+        reordered.append(item)
+        seen.add(chunk_id)
+
+    for item in fused:
+        if item.chunk_id not in seen:
+            reordered.append(item)
+
+    return reordered, True
+
+
+async def _load_chunk_rerank_payloads(
+    session: AsyncSession,
+    fused_results: list[FusedResult],
+) -> list[tuple[str, str]]:
+    if not fused_results:
+        return []
+
+    chunk_ids = [UUID(item.chunk_id) for item in fused_results]
+    result = await session.execute(
+        select(DocumentChunk.id, DocumentChunk.heading_path, DocumentChunk.content).where(
+            DocumentChunk.id.in_(chunk_ids)
+        )
+    )
+    rows = {str(row[0]): row for row in result.fetchall()}
+
+    payloads: list[tuple[str, str]] = []
+    for item in fused_results:
+        row = rows.get(item.chunk_id)
+        if row is None:
+            continue
+        heading_path = " > ".join(row[1] or [])
+        prefix = f"{heading_path}\n" if heading_path else ""
+        payloads.append((item.chunk_id, prefix + row[2]))
+    return payloads
+
+
+async def _build_limited_search_results(
+    *,
+    session: AsyncSession,
+    fused_results: list[FusedResult],
+    parsed: ParsedQuery,
+    limit: int,
+    max_results_per_document: int | None,
+) -> list[SearchResult]:
+    results: list[SearchResult] = []
+    per_document_counts: dict[str, int] = {}
+
+    for item in fused_results:
+        built = await _build_search_result(session, item, parsed)
+        if built is None:
+            continue
+        if max_results_per_document is not None:
+            doc_count = per_document_counts.get(built.document_uid, 0)
+            if doc_count >= max_results_per_document:
+                continue
+            per_document_counts[built.document_uid] = doc_count + 1
+        results.append(built)
+        if len(results) >= limit:
+            break
+
+    return results
 
 
 def _build_scope_sql(version_scope: str, project_scope: str | None) -> tuple[str, dict]:
@@ -589,6 +780,7 @@ async def _log_search_run(
     parsed: ParsedQuery,
     retrieval_config_id: UUID | None,
     embedding_model_run_id: UUID | None,
+    reranker_model_run_id: UUID | None,
     version_scope: str,
     project_scope: str | None,
     elapsed_ms: int,
@@ -607,6 +799,7 @@ async def _log_search_run(
             project_scope=project_scope,
             retrieval_config_id=retrieval_config_id,
             embedding_model_run_id=embedding_model_run_id,
+            reranker_model_run_id=reranker_model_run_id,
             result_count=len(results),
             latency_ms=elapsed_ms,
         )
@@ -619,12 +812,13 @@ async def _log_search_run(
                     search_run_id=search_run.id,
                     chunk_id=UUID(item.chunk_id),
                     rank_bm25=item.rank_bm25,
-                    rank_vector=item.rank_vector,
-                    rank_entity=item.rank_terms,
-                    fused_score=item.fused_score,
-                    final_rank=index,
+                        rank_vector=item.rank_vector,
+                        rank_entity=item.rank_terms,
+                        fused_score=item.fused_score,
+                        rerank_score=item.rerank_score,
+                        final_rank=index,
+                    )
                 )
-            )
         await session.commit()
     except Exception as exc:
         logger.debug("search run logging skipped: %s", exc, exc_info=True)

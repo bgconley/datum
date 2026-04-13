@@ -65,3 +65,12 @@ def test_search_models_registered():
         "search_run_results",
     }
     assert expected.issubset(table_names)
+
+
+def test_evaluation_models_registered():
+    table_names = set(Base.metadata.tables.keys())
+    expected = {
+        "evaluation_sets",
+        "evaluation_runs",
+    }
+    assert expected.issubset(table_names)

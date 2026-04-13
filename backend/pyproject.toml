@@ -33,6 +33,9 @@ dev = [
     "types-PyYAML>=6.0.12.20250915",
 ]
 
+[project.scripts]
+datum-eval = "datum.cli.eval:main"
+
 [tool.setuptools.packages.find]
 include = ["datum*"]
 

@@ -13,8 +13,9 @@ interface SearchResultsProps {
   projectScope: string | null
   onProjectSelect: (project: string) => void
   loading: boolean
-  streamPhase: 'idle' | 'lexical' | 'hybrid'
+  streamPhase: 'idle' | 'lexical' | 'reranked'
   semanticEnabled: boolean | null
+  rerankApplied: boolean | null
 }
 
 function buildCountFacets(values: string[]): Array<{ value: string; count: number }> {
@@ -45,25 +46,30 @@ function buildTermFacets(results: SearchResultItem[]): Array<{ value: string; co
 
 function describePhase(
   loading: boolean,
-  streamPhase: 'idle' | 'lexical' | 'hybrid',
+  streamPhase: 'idle' | 'lexical' | 'reranked',
   semanticEnabled: boolean | null,
+  rerankApplied: boolean | null,
 ): string | null {
   if (loading && streamPhase === 'lexical') {
     return semanticEnabled === false
-      ? 'Lexical results are ready. Semantic search is unavailable, so the final phase will confirm exact-term and keyword ranking.'
-      : 'Lexical results are ready. Refining the final hybrid ranking now.'
+      ? 'Lexical results are ready. Semantic search is unavailable, so the final pass will confirm exact-term and keyword ranking.'
+      : 'Lexical results are ready. Running semantic fusion and cross-encoder reranking now.'
   }
 
   if (loading) {
-    return 'Searching lexical, exact-term, and semantic indices.'
+    return 'Searching lexical, exact-term, semantic, and reranking stages.'
   }
 
-  if (streamPhase === 'hybrid' && semanticEnabled === false) {
-    return 'Hybrid search completed without semantic vectors because the embedding service was unavailable.'
+  if (streamPhase === 'reranked' && semanticEnabled === false) {
+    return 'Final results were produced without semantic vectors because the embedding service was unavailable.'
   }
 
-  if (streamPhase === 'hybrid') {
-    return 'Hybrid results combine keyword, exact-term, and semantic signals.'
+  if (streamPhase === 'reranked' && rerankApplied === false) {
+    return 'Results reflect lexical, exact-term, and semantic fusion. Reranking was unavailable, so fused order was preserved.'
+  }
+
+  if (streamPhase === 'reranked') {
+    return 'Final results combine lexical, exact-term, semantic, and reranking signals.'
   }
 
   return null
@@ -79,6 +85,7 @@ export function SearchResults({
   loading,
   streamPhase,
   semanticEnabled,
+  rerankApplied,
 }: SearchResultsProps) {
   const [signalFacet, setSignalFacet] = useState<string | null>(null)
   const [termFacet, setTermFacet] = useState<string | null>(null)
@@ -91,7 +98,7 @@ export function SearchResults({
   const projectFacets = buildProjectFacets(results)
   const signalFacets = buildSignalFacets(results)
   const termFacets = buildTermFacets(results)
-  const phaseDescription = describePhase(loading, streamPhase, semanticEnabled)
+  const phaseDescription = describePhase(loading, streamPhase, semanticEnabled, rerankApplied)
 
   const filteredResults = results.filter((result) => {
     if (signalFacet && !result.match_signals.includes(signalFacet)) {

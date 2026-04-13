@@ -239,6 +239,10 @@ embedding_endpoint_healthy() {
     curl -sf --max-time 2 "${DATUM_EMBEDDING_ENDPOINT}/health" >/dev/null 2>&1
 }
 
+reranker_endpoint_healthy() {
+    curl -sf --max-time 2 "${DATUM_RERANKER_ENDPOINT}/health" >/dev/null 2>&1
+}
+
 wait_for_search_pipeline() {
     local slug="${1:-$API_TEST_SLUG}"
     local timeout_seconds="${2:-45}"
@@ -530,9 +534,13 @@ SEARCH_STREAM=$(curl --fail-with-body -sS -N -X POST "$API/search/stream" \
   -d "{\"query\":\"Updated via API\",\"project\":\"${API_TEST_SLUG}\"}")
 STREAM_PHASES=$(echo "$SEARCH_STREAM" | python3 -c 'import sys,json; lines=[json.loads(line) for line in sys.stdin if line.strip()]; print(",".join(item.get("phase","") for item in lines if item.get("event")=="phase"))')
 STREAM_FINAL_COUNT=$(echo "$SEARCH_STREAM" | python3 -c 'import sys,json; lines=[json.loads(line) for line in sys.stdin if line.strip()]; phases=[item for item in lines if item.get("event")=="phase"]; print(phases[-1]["result_count"] if phases else 0)')
+STREAM_RERANK_APPLIED=$(echo "$SEARCH_STREAM" | python3 -c 'import sys,json; lines=[json.loads(line) for line in sys.stdin if line.strip()]; phases=[item for item in lines if item.get("event")=="phase"]; print(phases[-1].get("rerank_applied", False) if phases else False)')
 echo "    Stream phases: ${STREAM_PHASES:-none}"
-[ "$STREAM_PHASES" = "lexical,hybrid" ] || { echo "    FAIL: expected lexical,hybrid phases"; exit 1; }
+[ "$STREAM_PHASES" = "lexical,reranked" ] || { echo "    FAIL: expected lexical,reranked phases"; exit 1; }
 [ "$STREAM_FINAL_COUNT" -ge 1 ] 2>/dev/null || { echo "    FAIL: stream final phase returned 0 results"; exit 1; }
+if reranker_endpoint_healthy; then
+    [ "$STREAM_RERANK_APPLIED" = "True" ] || { echo "    FAIL: expected rerank_applied true"; exit 1; }
+fi
 
 echo "  Searching current-version content..."
 SEARCH_UPDATED=$(curl --fail-with-body -sS -X POST "$API/search" \
@@ -553,6 +561,50 @@ MATCHED_TERMS=$(echo "$SEARCH_TERM" | python3 -c 'import sys,json; data=json.loa
 echo "    Query 'DATABASE_URL' results: $TERM_COUNT"
 [ "$TERM_COUNT" -ge 1 ] 2>/dev/null || { echo "    FAIL: technical-term search returned 0 results"; exit 1; }
 echo "    Matched terms: ${MATCHED_TERMS:-none}"
+echo ""
+
+# --- 6.6. Evaluation harness integration ---
+echo "--- 6.6. Evaluation harness ---"
+echo "  Creating evaluation set..."
+EVAL_SET=$(curl --fail-with-body -sS -X POST "$API/eval/sets" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"integration-test-set\",\"queries\":[{\"query\":\"Updated via API\",\"expected_results\":[{\"doc_path\":\"docs/api-test.md\",\"rank_threshold\":1}]}]}")
+EVAL_SET_ID=$(echo "$EVAL_SET" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+[ -n "$EVAL_SET_ID" ] || { echo "    FAIL: evaluation set creation returned no ID"; exit 1; }
+echo "    Created: $EVAL_SET_ID"
+
+echo "  Running evaluation..."
+EVAL_RUN=$(curl --fail-with-body -sS -X POST "$API/eval/runs" \
+  -H "Content-Type: application/json" \
+  -d "{\"eval_set_id\":\"${EVAL_SET_ID}\",\"name\":\"integration-eval-run\",\"version_scope\":\"current\",\"reranker_enabled\":true}")
+EVAL_RUN_ID=$(echo "$EVAL_RUN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+[ -n "$EVAL_RUN_ID" ] || { echo "    FAIL: evaluation run returned no ID"; exit 1; }
+echo "    Eval run: $EVAL_RUN_ID"
+
+echo "  Listing evaluation sets..."
+SET_COUNT=$(curl --fail-with-body -sS "$API/eval/sets" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+[ "$SET_COUNT" -gt 0 ] || { echo "    FAIL: no evaluation sets found"; exit 1; }
+echo "    Count: $SET_COUNT"
+
+echo "  Checking embedding stats..."
+EMBED_MODEL_COUNT=$(curl --fail-with-body -sS "$API/eval/stats" | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("models", [])))')
+echo "    Stats: ${EMBED_MODEL_COUNT} embedding model(s)"
+
+if reranker_endpoint_healthy; then
+    echo "  Verifying rerank telemetry..."
+    RERANK_ROWS="$(
+      cd "$REPO_DIR" && docker compose exec -T paradedb psql -tA -U datum -d datum <<SQL
+SELECT count(*)
+FROM search_run_results srr
+JOIN search_runs sr ON sr.id = srr.search_run_id
+WHERE sr.reranker_model_run_id IS NOT NULL
+  AND srr.rerank_score IS NOT NULL
+  AND sr.project_scope = '${API_TEST_SLUG}';
+SQL
+    )"
+    [ "${RERANK_ROWS:-0}" -gt 0 ] 2>/dev/null || { echo "    FAIL: rerank telemetry missing"; exit 1; }
+fi
+echo "  Evaluation harness: OK"
 echo ""
 
 # --- 7. Background workers health check ---

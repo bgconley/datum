@@ -159,8 +159,9 @@ export function SearchPage({ route }: SearchPageProps) {
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [streamPhase, setStreamPhase] = useState<'idle' | 'lexical' | 'hybrid'>('idle')
+  const [streamPhase, setStreamPhase] = useState<'idle' | 'lexical' | 'reranked'>('idle')
   const [semanticEnabled, setSemanticEnabled] = useState<boolean | null>(null)
+  const [rerankApplied, setRerankApplied] = useState<boolean | null>(null)
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch((err) => {
@@ -178,6 +179,7 @@ export function SearchPage({ route }: SearchPageProps) {
         setSearched(Boolean(nextDraft.query.trim()))
         setStreamPhase('idle')
         setSemanticEnabled(null)
+        setRerankApplied(null)
         setError(
           nextDraft.versionMode === 'as_of'
             ? 'Choose a valid as-of timestamp before searching.'
@@ -193,6 +195,7 @@ export function SearchPage({ route }: SearchPageProps) {
     setQuery(request.query)
     setStreamPhase('idle')
     setSemanticEnabled(null)
+    setRerankApplied(null)
 
     try {
       await api.searchStream(request, async (event: SearchStreamEvent) => {
@@ -204,8 +207,9 @@ export function SearchPage({ route }: SearchPageProps) {
           setResults(event.results)
           setLatencyMs(event.latency_ms)
           setQuery(event.query)
-          setStreamPhase(event.phase ?? 'hybrid')
+          setStreamPhase(event.phase ?? 'reranked')
           setSemanticEnabled(event.semantic_enabled)
+          setRerankApplied(event.rerank_applied)
         })
       })
     } catch (err) {
@@ -215,8 +219,9 @@ export function SearchPage({ route }: SearchPageProps) {
           setResults(response.results)
           setLatencyMs(response.latency_ms)
           setQuery(response.query)
-          setStreamPhase('hybrid')
+          setStreamPhase('reranked')
           setSemanticEnabled(null)
+          setRerankApplied(false)
         })
       } catch (fallbackErr) {
         const message = fallbackErr instanceof Error
@@ -229,6 +234,7 @@ export function SearchPage({ route }: SearchPageProps) {
           setLatencyMs(null)
           setStreamPhase('idle')
           setSemanticEnabled(null)
+          setRerankApplied(null)
           setError(message)
         })
       }
@@ -343,6 +349,7 @@ export function SearchPage({ route }: SearchPageProps) {
           loading={loading}
           streamPhase={streamPhase}
           semanticEnabled={semanticEnabled}
+          rerankApplied={rerankApplied}
         />
       )}
     </div>

@@ -53,10 +53,11 @@ class SearchResponse(BaseModel):
 
 class SearchStreamEventResponse(BaseModel):
     event: Literal["phase", "error"]
-    phase: Literal["lexical", "hybrid"] | None = None
+    phase: Literal["lexical", "reranked"] | None = None
     query: str
     results: list[SearchResultResponse] = []
     result_count: int = 0
     latency_ms: int | None = None
     semantic_enabled: bool = False
+    rerank_applied: bool = False
     message: str | None = None

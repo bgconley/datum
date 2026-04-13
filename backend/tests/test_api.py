@@ -266,6 +266,7 @@ async def test_manifest_conflict_on_list_returns_503(client):
 async def test_search_returns_results(client, monkeypatch):
     class StubGateway:
         embedding = None
+        reranker = None
 
         async def close(self):
             return None
@@ -296,6 +297,7 @@ async def test_search_rejects_invalid_as_of_scope(client):
 async def test_search_serializes_nonempty_results(client, monkeypatch):
     class StubGateway:
         embedding = None
+        reranker = None
 
         async def close(self):
             return None
@@ -334,6 +336,7 @@ async def test_search_serializes_nonempty_results(client, monkeypatch):
 async def test_search_stream_emits_phases(client, monkeypatch):
     class StubGateway:
         embedding = None
+        reranker = object()
 
         async def close(self):
             return None
@@ -348,13 +351,14 @@ async def test_search_stream_emits_phases(client, monkeypatch):
                 "results": [],
                 "latency_ms": 4,
                 "semantic_enabled": False,
+                "rerank_applied": False,
             },
         )()
         yield type(
             "Execution",
             (),
             {
-                "phase": "hybrid",
+                "phase": "reranked",
                 "query": "DATABASE_URL",
                 "results": [
                     SearchResult(
@@ -376,6 +380,7 @@ async def test_search_stream_emits_phases(client, monkeypatch):
                 ],
                 "latency_ms": 12,
                 "semantic_enabled": False,
+                "rerank_applied": True,
             },
         )()
 
@@ -390,5 +395,140 @@ async def test_search_stream_emits_phases(client, monkeypatch):
         assert resp.status_code == 200
         lines = [json.loads(line) async for line in resp.aiter_lines() if line]
 
-    assert [line["phase"] for line in lines] == ["lexical", "hybrid"]
+    assert [line["phase"] for line in lines] == ["lexical", "reranked"]
     assert lines[1]["results"][0]["match_signals"] == ["keyword", "exact-term"]
+    assert lines[1]["rerank_applied"] is True
+
+
+class _EvalScalarResult:
+    def __init__(self, items):
+        self._items = items
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._items
+
+
+class _EvalSession:
+    def __init__(self):
+        self.sets = []
+        self.runs = []
+
+    def add(self, obj):
+        if obj.__class__.__name__ == "EvaluationSet":
+            if getattr(obj, "id", None) is None:
+                obj.id = "eval-set-id"
+            self.sets.append(obj)
+        else:
+            self.runs.append(obj)
+
+    async def commit(self):
+        return None
+
+    async def refresh(self, obj):
+        return None
+
+    async def execute(self, statement, params=None):
+        rendered = str(statement)
+        if "FROM evaluation_sets" in rendered:
+            return _EvalScalarResult(list(self.sets))
+        if "FROM evaluation_runs" in rendered:
+            return _EvalScalarResult(list(self.runs))
+        return _EvalScalarResult([])
+
+    async def get(self, model, key):
+        name = model.__name__
+        if name == "EvaluationRun":
+            return next((item for item in self.runs if str(item.id) == str(key)), None)
+        if name == "EvaluationSet":
+            return next((item for item in self.sets if str(item.id) == str(key)), None)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_eval_set_crud(client):
+    from datum.db import get_session
+    from datum.main import app
+
+    session = _EvalSession()
+
+    async def override_get_session():
+        yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        resp = await client.post(
+            "/api/v1/eval/sets",
+            json={
+                "name": "test-set",
+                "queries": [{"query": "test", "expected_results": [{"doc_path": "docs/a.md"}]}],
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["query_count"] == 1
+
+        resp = await client.get("/api/v1/eval/sets")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_eval_run_and_stats(client, monkeypatch):
+    from datum.db import get_session
+    from datum.main import app
+
+    session = _EvalSession()
+
+    async def override_get_session():
+        yield session
+
+    class StubGateway:
+        embedding = None
+        reranker = None
+
+        async def close(self):
+            return None
+
+    async def fake_run_evaluation(**kwargs):
+        from datum.models.evaluation import EvaluationRun
+
+        run = EvaluationRun(
+            id=uuid.uuid4(),
+            evaluation_set_id=uuid.uuid4(),
+            name=kwargs["run_name"],
+            version_scope="current",
+            results={"ndcg_at_5": 1.0},
+        )
+        session.runs.append(run)
+        return run, {"ndcg_at_5": 1.0}
+
+    async def fake_stats(_session):
+        return [{"model_name": "Qwen3-Embedding-4B", "model_run_id": "run-1", "embedding_count": 5}]
+
+    import uuid
+
+    app.dependency_overrides[get_session] = override_get_session
+    monkeypatch.setattr("datum.api.evaluation.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.evaluation.run_evaluation", fake_run_evaluation)
+    monkeypatch.setattr("datum.api.evaluation.get_embedding_stats", fake_stats)
+    try:
+        resp = await client.post(
+            "/api/v1/eval/runs",
+            json={"eval_set_id": str(uuid.uuid4()), "name": "baseline", "version_scope": "current"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["results"]["ndcg_at_5"] == 1.0
+
+        resp = await client.get("/api/v1/eval/runs")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+        resp = await client.get("/api/v1/eval/stats")
+        assert resp.status_code == 200
+        assert resp.json()["models"][0]["embedding_count"] == 5
+    finally:
+        app.dependency_overrides.clear()

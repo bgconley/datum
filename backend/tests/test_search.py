@@ -165,6 +165,7 @@ async def test_log_search_run_persists_config_references():
     session = _FakeSession()
     retrieval_config_id = uuid4()
     embedding_model_run_id = uuid4()
+    reranker_model_run_id = uuid4()
 
     await _log_search_run(
         session=session,
@@ -178,10 +179,18 @@ async def test_log_search_run_persists_config_references():
         ),
         retrieval_config_id=retrieval_config_id,
         embedding_model_run_id=embedding_model_run_id,
+        reranker_model_run_id=reranker_model_run_id,
         version_scope="all",
         project_scope="alpha",
         elapsed_ms=12,
-        fused_results=[FusedResult(chunk_id=str(uuid4()), fused_score=1.0, rank_bm25=1)],
+        fused_results=[
+            FusedResult(
+                chunk_id=str(uuid4()),
+                fused_score=1.0,
+                rank_bm25=1,
+                rerank_score=0.7,
+            )
+        ],
         results=[],
     )
 
@@ -190,6 +199,8 @@ async def test_log_search_run_persists_config_references():
 
     assert search_run.retrieval_config_id == retrieval_config_id
     assert search_run.embedding_model_run_id == embedding_model_run_id
+    assert search_run.reranker_model_run_id == reranker_model_run_id
     assert search_run.parsed_query["version_scope"] == "all"
     assert search_run_result.search_run_id == search_run.id
+    assert search_run_result.rerank_score == 0.7
     assert session.committed is True

@@ -26,7 +26,7 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
         results = await search(
             session=session,
             query=body.query,
-            gateway=gateway if gateway.embedding else None,
+            gateway=gateway if (gateway.embedding or gateway.reranker) else None,
             project_scope=body.project,
             version_scope=body.version_scope,
             limit=body.limit,
@@ -51,7 +51,7 @@ async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends
             async for execution in stream_search(
                 session=session,
                 query=body.query,
-                gateway=gateway if gateway.embedding else None,
+                gateway=gateway if (gateway.embedding or gateway.reranker) else None,
                 project_scope=body.project,
                 version_scope=body.version_scope,
                 limit=body.limit,
@@ -67,6 +67,7 @@ async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends
                     result_count=len(execution.results),
                     latency_ms=execution.latency_ms,
                     semantic_enabled=execution.semantic_enabled,
+                    rerank_applied=execution.rerank_applied,
                 )
                 yield payload.model_dump_json(exclude_none=True) + "\n"
         except Exception as exc:
