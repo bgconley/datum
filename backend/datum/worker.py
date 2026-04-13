@@ -334,7 +334,7 @@ async def _handle_embed_job(
         vector_literal = "[" + ",".join(str(value) for value in vector) + "]"
         await session.execute(
             text(
-                f"""
+                """
                 INSERT INTO chunk_embeddings (
                     id,
                     chunk_id,

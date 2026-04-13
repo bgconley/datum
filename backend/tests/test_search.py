@@ -94,7 +94,7 @@ async def test_vector_search_scopes_to_active_model_run():
 
     results = await _vector_search(
         session,
-        query_embedding=[0.1, 0.2, 0.3],
+        query_embedding=[0.1] * 1024,
         embedding_model_run_id=model_run_id,
         version_scope="current",
         project_scope="alpha",
@@ -106,6 +106,24 @@ async def test_vector_search_scopes_to_active_model_run():
     assert "ce.model_run_id = :model_run_id" in str(statement)
     assert params["model_run_id"] == model_run_id
     assert params["project_scope"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_vector_search_skips_dimension_mismatch():
+    session = _FakeSession()
+    model_run_id = uuid4()
+
+    results = await _vector_search(
+        session,
+        query_embedding=[0.1, 0.2, 0.3],
+        embedding_model_run_id=model_run_id,
+        version_scope="current",
+        project_scope="alpha",
+        limit=10,
+    )
+
+    assert results == []
+    assert session.executed == []
 
 
 @pytest.mark.asyncio

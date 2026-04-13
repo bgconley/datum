@@ -13,6 +13,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from datum.config import settings
 from datum.models.core import Document, DocumentVersion, Project, VersionHeadEvent
 from datum.models.search import (
     DocumentChunk,
@@ -421,6 +422,13 @@ async def _vector_search(
 ) -> list[RankedCandidate]:
     if not query_embedding or embedding_model_run_id is None:
         return []
+    if len(query_embedding) != settings.embedding_dimensions:
+        logger.warning(
+            "vector search skipped due to embedding dimension mismatch: got=%s expected=%s",
+            len(query_embedding),
+            settings.embedding_dimensions,
+        )
+        return []
 
     scope_sql, params = _build_scope_sql(version_scope, project_scope)
     dims = len(query_embedding)
@@ -428,7 +436,9 @@ async def _vector_search(
     sql = text(
         f"""
         SELECT dc.id::text,
-               1 - (ce.embedding <=> CAST(:embedding AS halfvec({dims}))) AS similarity
+               1 - (
+                   ce.embedding <=> CAST(:embedding AS halfvec({settings.embedding_dimensions}))
+               ) AS similarity
         FROM chunk_embeddings ce
         JOIN document_chunks dc ON ce.chunk_id = dc.id
         JOIN document_versions dv ON dc.version_id = dv.id
@@ -437,7 +447,7 @@ async def _vector_search(
         WHERE ce.dimensions = :dimensions
           AND ce.model_run_id = :model_run_id
           AND {scope_sql}
-        ORDER BY ce.embedding <=> CAST(:embedding AS halfvec({dims}))
+        ORDER BY ce.embedding <=> CAST(:embedding AS halfvec({settings.embedding_dimensions}))
         LIMIT :limit
         """
     )

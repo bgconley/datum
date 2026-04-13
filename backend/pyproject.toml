@@ -30,6 +30,7 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "pip-audit>=2.8.0",
+    "types-PyYAML>=6.0.12.20250915",
 ]
 
 [tool.setuptools.packages.find]
@@ -51,5 +52,5 @@ line-length = 100
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [[tool.mypy.overrides]]
-module = ["frontmatter", "pymupdf4llm", "kreuzberg"]
+module = ["frontmatter", "pymupdf4llm", "kreuzberg", "yaml"]
 ignore_missing_imports = true
