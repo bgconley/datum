@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -43,6 +45,15 @@ def test_create_evaluation_set_payload():
     assert eval_set["name"] == "gold"
     assert eval_set["description"] == "test"
     assert len(eval_set["queries"]) == 1
+
+
+def test_sample_eval_set_fixture_exists():
+    fixture_path = Path(__file__).parent / "fixtures" / "sample_eval_set.json"
+    payload = json.loads(fixture_path.read_text())
+
+    assert len(payload) >= 5
+    assert any("DATABASE_URL" in item["query"] for item in payload)
+    assert any("/api/v1/users" in item["query"] for item in payload)
 
 
 def test_compare_runs_prefers_higher_ndcg():

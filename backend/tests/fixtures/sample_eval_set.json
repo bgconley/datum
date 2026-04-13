@@ -22,5 +22,37 @@
         "rank_threshold": 1
       }
     ]
+  },
+  {
+    "query": "rate limiting strategy",
+    "expected_results": [
+      {
+        "doc_path": "docs/requirements/auth-requirements.md",
+        "heading_path_contains": "API Limits",
+        "rank_threshold": 3
+      }
+    ]
+  },
+  {
+    "query": "GET /api/v1/users endpoint",
+    "expected_results": [
+      {
+        "doc_path": "docs/schemas/api-openapi-spec.yaml",
+        "rank_threshold": 2
+      }
+    ]
+  },
+  {
+    "query": "PostgreSQL migration strategy",
+    "expected_results": [
+      {
+        "doc_path": "docs/decisions/adr-0001-use-paradedb.md",
+        "rank_threshold": 3
+      },
+      {
+        "doc_path": "docs/schemas/initial-postgres-schema.sql",
+        "rank_threshold": 5
+      }
+    ]
   }
 ]
