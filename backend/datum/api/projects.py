@@ -6,9 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datum.config import settings
 from datum.db import get_session
 from datum.schemas.project import ProjectCreate, ProjectResponse
-from datum.services.project_manager import create_project, get_project, list_projects
-from datum.services.db_sync import sync_project_to_db, log_audit_event
+from datum.services.db_sync import log_audit_event, sync_project_to_db
 from datum.services.filesystem import compute_content_hash
+from datum.services.project_manager import create_project, get_project, list_projects
 
 logger = logging.getLogger(__name__)
 

@@ -3,26 +3,20 @@
 Documents are filesystem-first: the .md/.sql/.yaml file on disk is canonical.
 Frontmatter stores human metadata. Hashes and versions live in .piq/ manifests.
 """
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import frontmatter
 
 from datum.services.filesystem import (
-    atomic_write,
     compute_content_hash,
-    doc_manifest_dir,
-    read_manifest,
     validate_canonical_path,
 )
 from datum.services.versioning import (
     VersionInfo,
     create_version,
     get_current_version,
-    list_versions,
-    read_version_content,
 )
 
 # Document paths must live under docs/ per design doc filesystem schema.
@@ -38,13 +32,17 @@ class ConflictError(Exception):
         super().__init__(f"Conflict: file changed (current={current_hash}, base={base_hash})")
 
 
-def _validate_document_path(relative_path: str) -> None:
-    """Enforce that document paths live under docs/ and pass traversal checks."""
-    validate_canonical_path(relative_path)
-    if not any(relative_path.startswith(prefix) for prefix in _ALLOWED_DOC_PREFIXES):
+def _validate_document_path(relative_path: str) -> str:
+    """Enforce that document paths live under docs/ and return the normalized path."""
+    resolved = validate_canonical_path(relative_path)
+    normalized_path = resolved.as_posix()
+    if len(resolved.parts) < 2 or not any(
+        normalized_path.startswith(prefix) for prefix in _ALLOWED_DOC_PREFIXES
+    ):
         raise ValueError(
             f"Document path must be under docs/, got: {relative_path}"
         )
+    return normalized_path
 
 
 @dataclass
@@ -57,8 +55,8 @@ class DocumentInfo:
     version: int
     content_hash: str
     document_uid: str
-    created: Optional[str] = None
-    updated: Optional[str] = None
+    created: str | None = None
+    updated: str | None = None
 
 
 def create_document(
@@ -67,21 +65,21 @@ def create_document(
     title: str,
     doc_type: str,
     content: str,
-    tags: Optional[list[str]] = None,
+    tags: list[str] | None = None,
     status: str = "draft",
 ) -> DocumentInfo:
     """Create a new document with frontmatter and initial version.
 
     Raises ValueError if path is not under docs/ or already exists.
     """
-    _validate_document_path(relative_path)
+    normalized_path = _validate_document_path(relative_path)
 
     # Reject if canonical file already exists
-    canonical_full = project_path / relative_path
+    canonical_full = project_path / normalized_path
     if canonical_full.exists():
-        raise FileExistsError(f"Document already exists: {relative_path}")
+        raise FileExistsError(f"Document already exists: {normalized_path}")
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now = datetime.now(UTC).strftime("%Y-%m-%d")
 
     # Build frontmatter + content
     fm = frontmatter.Post(
@@ -102,17 +100,19 @@ def create_document(
     # Do NOT write the canonical file here — that bypasses the pending_commit protocol.
     version_info = create_version(
         project_path=project_path,
-        canonical_path=relative_path,
+        canonical_path=normalized_path,
         content=file_bytes,
         change_source="web",
     )
+    if version_info is None:
+        raise RuntimeError(f"Initial version was not created for {normalized_path}")
 
     return DocumentInfo(
         title=title,
         doc_type=doc_type,
         status=status,
         tags=tags or [],
-        relative_path=relative_path,
+        relative_path=normalized_path,
         version=version_info.version_number,
         content_hash=version_info.content_hash,
         document_uid=version_info.document_uid,
@@ -127,7 +127,7 @@ def save_document(
     content: str,
     base_hash: str,
     change_source: str,
-    label: Optional[str] = None,
+    label: str | None = None,
 ) -> DocumentInfo:
     """Save changes to an existing document with optimistic concurrency.
 
@@ -137,11 +137,11 @@ def save_document(
 
     base_hash must match the current file's hash, or ConflictError is raised.
     """
-    _validate_document_path(relative_path)
-    canonical_full = project_path / relative_path
+    normalized_path = _validate_document_path(relative_path)
+    canonical_full = project_path / normalized_path
 
     if not canonical_full.exists():
-        raise FileNotFoundError(f"Document not found: {relative_path}")
+        raise FileNotFoundError(f"Document not found: {normalized_path}")
 
     # Conflict check
     current_bytes = canonical_full.read_bytes()
@@ -152,33 +152,35 @@ def save_document(
     # Parse the incoming content as a full frontmatter document.
     # This preserves whatever the client sent (including frontmatter).
     post = frontmatter.loads(content)
-    post["updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    post["updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
     new_bytes = frontmatter.dumps(post).encode()
 
     new_hash = compute_content_hash(new_bytes)
     if new_hash == current_hash:
         # Content unchanged after frontmatter rebuild — return current state
-        ver = get_current_version(project_path, relative_path)
-        return _build_doc_info(post, relative_path, ver)
+        ver = get_current_version(project_path, normalized_path)
+        return _build_doc_info(post, normalized_path, ver)
 
     # create_version owns the canonical write transaction.
     # It writes: pending_commit -> version file -> canonical file -> final manifest.
     # Do NOT write the canonical file here — that bypasses the pending_commit protocol.
     version_info = create_version(
         project_path=project_path,
-        canonical_path=relative_path,
+        canonical_path=normalized_path,
         content=new_bytes,
         change_source=change_source,
         label=label,
     )
+    if version_info is None:
+        raise RuntimeError(f"Updated version was not created for {normalized_path}")
 
-    return _build_doc_info(post, relative_path, version_info)
+    return _build_doc_info(post, normalized_path, version_info)
 
 
-def get_document(project_path: Path, relative_path: str) -> Optional[DocumentInfo]:
+def get_document(project_path: Path, relative_path: str) -> DocumentInfo | None:
     """Get document info by reading its canonical file and manifest."""
-    _validate_document_path(relative_path)
-    canonical_full = project_path / relative_path
+    normalized_path = _validate_document_path(relative_path)
+    canonical_full = project_path / normalized_path
     if not canonical_full.exists():
         return None
 
@@ -187,8 +189,8 @@ def get_document(project_path: Path, relative_path: str) -> Optional[DocumentInf
     except Exception:
         return None
 
-    ver = get_current_version(project_path, relative_path)
-    return _build_doc_info(post, relative_path, ver)
+    ver = get_current_version(project_path, normalized_path)
+    return _build_doc_info(post, normalized_path, ver)
 
 
 def list_documents(project_path: Path) -> list[DocumentInfo]:
@@ -208,7 +210,7 @@ def list_documents(project_path: Path) -> list[DocumentInfo]:
 
 
 def _build_doc_info(
-    post: frontmatter.Post, relative_path: str, ver: Optional[VersionInfo]
+    post: frontmatter.Post, relative_path: str, ver: VersionInfo | None
 ) -> DocumentInfo:
     return DocumentInfo(
         title=post.get("title", Path(relative_path).stem),

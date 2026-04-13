@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
 import time
-from typing import Optional
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -26,8 +25,8 @@ class ModelConfig:
 
 @dataclass(slots=True)
 class ModelGateway:
-    embedding: Optional[ModelConfig] = None
-    reranker: Optional[ModelConfig] = None
+    embedding: ModelConfig | None = None
+    reranker: ModelConfig | None = None
     _client: httpx.AsyncClient = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -63,6 +62,13 @@ class ModelGateway:
             else:
                 raise ValueError(f"Unknown protocol: {config.protocol}")
 
+            for vector in batch_vectors:
+                if len(vector) != config.dimensions:
+                    raise ValueError(
+                        f"embedding response dimensions {len(vector)} do not match configured "
+                        f"dimension {config.dimensions}"
+                    )
+
             logger.debug(
                 "Embedded batch %s (%s texts) in %.2fs",
                 (start_index // config.batch_size) + 1,
@@ -73,7 +79,12 @@ class ModelGateway:
 
         return embeddings
 
-    async def rerank(self, query: str, documents: list[str], top_n: int = 50) -> list[tuple[int, float]]:
+    async def rerank(
+        self,
+        query: str,
+        documents: list[str],
+        top_n: int = 50,
+    ) -> list[tuple[int, float]]:
         if not self.reranker:
             raise RuntimeError("No reranker model configured")
 

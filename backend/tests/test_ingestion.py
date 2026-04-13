@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from datum.services.document_manager import create_document
-from datum.services.ingestion import IngestionContext, run_chunking, run_extraction, run_technical_terms
+from datum.services.ingestion import (
+    IngestionContext,
+    run_chunking,
+    run_extraction,
+    run_technical_terms,
+)
 from datum.services.project_manager import create_project
 
 
@@ -16,7 +21,11 @@ def project_with_doc(tmp_path: Path):
         "docs/arch.md",
         "Architecture",
         "plan",
-        "# Architecture\n\n## API Layer\n\nThe API runs on port 8001 at /api/v1/users.\n\n## Database\n\nPostgreSQL with DATABASE_URL connection.",
+        (
+            "# Architecture\n\n## API Layer\n\n"
+            "The API runs on port 8001 at /api/v1/users.\n\n"
+            "## Database\n\nPostgreSQL with DATABASE_URL connection."
+        ),
     )
     return project
 

@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
 import time
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
-from datum.models.core import Document, DocumentVersion, Project
-from datum.models.search import ChunkEmbedding, DocumentChunk, SearchRun, SearchRunResult, TechnicalTerm
+from datum.models.core import Document, DocumentVersion, Project, VersionHeadEvent
+from datum.models.search import (
+    DocumentChunk,
+    SearchRun,
+    SearchRunResult,
+    TechnicalTerm,
+)
 from datum.services.pipeline_configs import (
     RETRIEVAL_RRF_K,
     RETRIEVAL_WEIGHTS,
@@ -30,7 +37,7 @@ class ParsedQuery:
     bm25_query: str
     detected_terms: list[TermMatch] = field(default_factory=list)
     version_scope: str = "current"
-    project_scope: Optional[str] = None
+    project_scope: str | None = None
 
 
 @dataclass(slots=True)
@@ -44,9 +51,9 @@ class RankedCandidate:
 class FusedResult:
     chunk_id: str
     fused_score: float
-    rank_bm25: Optional[int] = None
-    rank_vector: Optional[int] = None
-    rank_terms: Optional[int] = None
+    rank_bm25: int | None = None
+    rank_vector: int | None = None
+    rank_terms: int | None = None
 
 
 @dataclass(slots=True)
@@ -88,7 +95,7 @@ class SearchExecution:
 
 def parse_query(
     query: str,
-    project_scope: Optional[str] = None,
+    project_scope: str | None = None,
     version_scope: str = "current",
 ) -> ParsedQuery:
     return ParsedQuery(
@@ -100,11 +107,22 @@ def parse_query(
     )
 
 
+def _parse_as_of_scope(version_scope: str) -> datetime | None:
+    if not version_scope.startswith("as_of:"):
+        return None
+
+    raw_timestamp = version_scope.split(":", 1)[1]
+    parsed = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("as_of scope must include a timezone-aware timestamp")
+    return parsed
+
+
 def fuse_results(
     *,
-    bm25_results: Optional[list[RankedCandidate]] = None,
-    vector_results: Optional[list[RankedCandidate]] = None,
-    term_results: Optional[list[RankedCandidate]] = None,
+    bm25_results: list[RankedCandidate] | None = None,
+    vector_results: list[RankedCandidate] | None = None,
+    term_results: list[RankedCandidate] | None = None,
     k: int = RETRIEVAL_RRF_K,
     w_bm25: float = RETRIEVAL_WEIGHTS["bm25"],
     w_vector: float = RETRIEVAL_WEIGHTS["vector"],
@@ -114,7 +132,13 @@ def fuse_results(
 
     def apply(candidates: list[RankedCandidate], attr: str, weight: float) -> None:
         for candidate in candidates:
-            fused = scores.setdefault(candidate.chunk_id, FusedResult(chunk_id=candidate.chunk_id, fused_score=0.0))
+            fused = scores.setdefault(
+                candidate.chunk_id,
+                FusedResult(
+                    chunk_id=candidate.chunk_id,
+                    fused_score=0.0,
+                ),
+            )
             fused.fused_score += weight * (1.0 / (k + candidate.rank))
             setattr(fused, attr, candidate.rank)
 
@@ -129,7 +153,7 @@ async def search(
     session: AsyncSession,
     query: str,
     gateway=None,
-    project_scope: Optional[str] = None,
+    project_scope: str | None = None,
     version_scope: str = "current",
     limit: int = 20,
 ) -> list[SearchResult]:
@@ -158,7 +182,7 @@ async def stream_search(
     session: AsyncSession,
     query: str,
     gateway=None,
-    project_scope: Optional[str] = None,
+    project_scope: str | None = None,
     version_scope: str = "current",
     limit: int = 20,
 ) -> AsyncIterator[SearchExecution]:
@@ -200,7 +224,7 @@ async def _prepare_search_context(
     *,
     query: str,
     gateway,
-    project_scope: Optional[str],
+    project_scope: str | None,
     version_scope: str,
 ) -> SearchExecutionContext:
     parsed = parse_query(query, project_scope, version_scope)
@@ -226,7 +250,7 @@ async def _execute_search(
     context: SearchExecutionContext,
     gateway,
     version_scope: str,
-    project_scope: Optional[str],
+    project_scope: str | None,
     limit: int,
     include_vector: bool,
     phase: str,
@@ -240,7 +264,12 @@ async def _execute_search(
 
     vector_results: list[RankedCandidate] = []
     semantic_applied = False
-    if include_vector and gateway and gateway.embedding and context.active_embedding_run_id is not None:
+    if (
+        include_vector
+        and gateway
+        and gateway.embedding
+        and context.active_embedding_run_id is not None
+    ):
         try:
             vectors = await gateway.embed([context.query])
             if vectors:
@@ -294,14 +323,14 @@ async def _execute_search(
     )
 
 
-def _build_scope_sql(version_scope: str, project_scope: Optional[str]) -> tuple[str, dict]:
+def _build_scope_sql(version_scope: str, project_scope: str | None) -> tuple[str, dict]:
     clauses: list[str] = []
     params: dict[str, object] = {}
 
     if version_scope == "current":
         clauses.append("dv.id = d.current_version_id")
     elif version_scope.startswith("as_of:"):
-        as_of_ts = version_scope.split(":", 1)[1]
+        as_of_ts = _parse_as_of_scope(version_scope)
         params["as_of_ts"] = as_of_ts
         clauses.append(
             """
@@ -320,6 +349,34 @@ def _build_scope_sql(version_scope: str, project_scope: Optional[str]) -> tuple[
         params["project_scope"] = project_scope
 
     return (" AND ".join(clauses) if clauses else "TRUE"), params
+
+
+def _build_term_scope_filters(
+    version_scope: str, project_scope: str | None
+) -> list[ColumnElement[bool]]:
+    filters: list[ColumnElement[bool]] = []
+
+    if version_scope == "current":
+        filters.append(DocumentVersion.id == Document.current_version_id)
+    elif version_scope.startswith("as_of:"):
+        as_of_ts = _parse_as_of_scope(version_scope)
+        filters.append(
+            DocumentVersion.id.in_(
+                select(VersionHeadEvent.version_id).where(
+                    VersionHeadEvent.document_id == Document.id,
+                    VersionHeadEvent.valid_from <= as_of_ts,
+                    or_(
+                        VersionHeadEvent.valid_to.is_(None),
+                        VersionHeadEvent.valid_to > as_of_ts,
+                    ),
+                )
+            )
+        )
+
+    if project_scope:
+        filters.append(Project.slug == project_scope)
+
+    return filters
 
 
 async def _bm25_search(
@@ -359,7 +416,7 @@ async def _vector_search(
     query_embedding: list[float],
     embedding_model_run_id: UUID | None,
     version_scope: str,
-    project_scope: Optional[str],
+    project_scope: str | None,
     limit: int,
 ) -> list[RankedCandidate]:
     if not query_embedding or embedding_model_run_id is None:
@@ -371,7 +428,7 @@ async def _vector_search(
     sql = text(
         f"""
         SELECT dc.id::text,
-               1 - (ce.embedding <=> CAST(:embedding AS halfvec(1024))) AS similarity
+               1 - (ce.embedding <=> CAST(:embedding AS halfvec({dims}))) AS similarity
         FROM chunk_embeddings ce
         JOIN document_chunks dc ON ce.chunk_id = dc.id
         JOIN document_versions dv ON dc.version_id = dv.id
@@ -380,7 +437,7 @@ async def _vector_search(
         WHERE ce.dimensions = :dimensions
           AND ce.model_run_id = :model_run_id
           AND {scope_sql}
-        ORDER BY ce.embedding <=> CAST(:embedding AS halfvec(1024))
+        ORDER BY ce.embedding <=> CAST(:embedding AS halfvec({dims}))
         LIMIT :limit
         """
     )
@@ -426,10 +483,8 @@ async def _term_search(
         .limit(limit)
     )
 
-    if version_scope == "current":
-        query = query.where(DocumentVersion.id == Document.current_version_id)
-    if parsed.project_scope:
-        query = query.where(Project.slug == parsed.project_scope)
+    for filter_clause in _build_term_scope_filters(version_scope, parsed.project_scope):
+        query = query.where(filter_clause)
 
     try:
         result = await session.execute(query)
@@ -448,7 +503,7 @@ async def _build_search_result(
     session: AsyncSession,
     fused: FusedResult,
     parsed: ParsedQuery,
-) -> Optional[SearchResult]:
+) -> SearchResult | None:
     try:
         chunk = await session.get(DocumentChunk, UUID(fused.chunk_id))
         if chunk is None:
@@ -525,7 +580,7 @@ async def _log_search_run(
     retrieval_config_id: UUID | None,
     embedding_model_run_id: UUID | None,
     version_scope: str,
-    project_scope: Optional[str],
+    project_scope: str | None,
     elapsed_ms: int,
     fused_results: list[FusedResult],
     results: list[SearchResult],

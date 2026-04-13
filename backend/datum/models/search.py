@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy import (
+    ARRAY,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from datum.models.base import Base, new_uuid, utcnow
@@ -16,15 +25,17 @@ class VersionText(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
     version_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("document_versions.id"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=False,
     )
     text_kind: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
-    extraction_run_id: Mapped[Optional[UUID]] = mapped_column(
+    extraction_run_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("model_runs.id")
     )
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class DocumentChunk(Base):
@@ -32,18 +43,20 @@ class DocumentChunk(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
     version_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("document_versions.id"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=False,
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    heading_path: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String))
-    start_line: Mapped[Optional[int]] = mapped_column(Integer)
-    end_line: Mapped[Optional[int]] = mapped_column(Integer)
+    heading_path: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    start_line: Mapped[int | None] = mapped_column(Integer)
+    end_line: Mapped[int | None] = mapped_column(Integer)
     start_char: Mapped[int] = mapped_column(Integer, nullable=False)
     end_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    token_count: Mapped[Optional[int]] = mapped_column(Integer)
+    token_count: Mapped[int | None] = mapped_column(Integer)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
-    chunking_run_id: Mapped[Optional[UUID]] = mapped_column(
+    chunking_run_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("pipeline_configs.id")
     )
     source_text_hash: Mapped[str] = mapped_column(String, nullable=False)
@@ -56,13 +69,13 @@ class ChunkEmbedding(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
     chunk_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("document_chunks.id"), nullable=False
+        PG_UUID(as_uuid=True), ForeignKey("document_chunks.id", ondelete="CASCADE"), nullable=False
     )
     model_run_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("model_runs.id"), nullable=False
     )
     dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("chunk_id", "model_run_id"),)
 
@@ -74,21 +87,21 @@ class TechnicalTerm(Base):
     normalized_text: Mapped[str] = mapped_column(String, nullable=False)
     raw_text: Mapped[str] = mapped_column(String, nullable=False)
     term_type: Mapped[str] = mapped_column(String, nullable=False)
-    chunk_id: Mapped[Optional[UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("document_chunks.id")
+    chunk_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("document_chunks.id", ondelete="CASCADE")
     )
-    version_id: Mapped[Optional[UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("document_versions.id")
+    version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("document_versions.id", ondelete="CASCADE")
     )
     start_char: Mapped[int] = mapped_column(Integer, nullable=False)
     end_char: Mapped[int] = mapped_column(Integer, nullable=False)
     extraction_method: Mapped[str] = mapped_column(String, nullable=False)
-    pipeline_config_id: Mapped[Optional[UUID]] = mapped_column(
+    pipeline_config_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("pipeline_configs.id")
     )
-    confidence: Mapped[Optional[float]] = mapped_column(Float)
-    source_text_hash: Mapped[Optional[str]] = mapped_column(String)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utcnow)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    source_text_hash: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class IngestionJob(Base):
@@ -98,25 +111,25 @@ class IngestionJob(Base):
     project_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
     )
-    version_id: Mapped[Optional[UUID]] = mapped_column(
+    version_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("document_versions.id")
     )
     job_type: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="queued")
     priority: Mapped[int] = mapped_column(Integer, default=2)
-    pipeline_config_id: Mapped[Optional[UUID]] = mapped_column(
+    pipeline_config_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("pipeline_configs.id")
     )
-    model_run_id: Mapped[Optional[UUID]] = mapped_column(
+    model_run_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("model_runs.id")
     )
-    content_hash: Mapped[Optional[str]] = mapped_column(String)
-    idempotency_key: Mapped[Optional[str]] = mapped_column(String, unique=True)
-    depends_on: Mapped[Optional[list[UUID]]] = mapped_column(ARRAY(PG_UUID(as_uuid=True)))
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utcnow)
+    content_hash: Mapped[str | None] = mapped_column(String)
+    idempotency_key: Mapped[str | None] = mapped_column(String, unique=True)
+    depends_on: Mapped[list[UUID] | None] = mapped_column(ARRAY(PG_UUID(as_uuid=True)))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class SearchRun(Base):
@@ -124,21 +137,21 @@ class SearchRun(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
     query_text: Mapped[str] = mapped_column(Text, nullable=False)
-    parsed_query: Mapped[Optional[dict]] = mapped_column(JSONB)
-    version_scope: Mapped[Optional[str]] = mapped_column(String)
-    project_scope: Mapped[Optional[str]] = mapped_column(String)
-    retrieval_config_id: Mapped[Optional[UUID]] = mapped_column(
+    parsed_query: Mapped[dict | None] = mapped_column(JSONB)
+    version_scope: Mapped[str | None] = mapped_column(String)
+    project_scope: Mapped[str | None] = mapped_column(String)
+    retrieval_config_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("pipeline_configs.id")
     )
-    embedding_model_run_id: Mapped[Optional[UUID]] = mapped_column(
+    embedding_model_run_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("model_runs.id")
     )
-    reranker_model_run_id: Mapped[Optional[UUID]] = mapped_column(
+    reranker_model_run_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("model_runs.id")
     )
-    result_count: Mapped[Optional[int]] = mapped_column(Integer)
-    latency_ms: Mapped[Optional[int]] = mapped_column(Integer)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utcnow)
+    result_count: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class SearchRunResult(Base):
@@ -151,11 +164,11 @@ class SearchRunResult(Base):
     chunk_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("document_chunks.id"), nullable=False
     )
-    rank_bm25: Mapped[Optional[int]] = mapped_column(Integer)
-    rank_vector: Mapped[Optional[int]] = mapped_column(Integer)
-    rank_entity: Mapped[Optional[int]] = mapped_column(Integer)
-    fused_score: Mapped[Optional[float]] = mapped_column(Float)
-    rerank_score: Mapped[Optional[float]] = mapped_column(Float)
-    final_rank: Mapped[Optional[int]] = mapped_column(Integer)
+    rank_bm25: Mapped[int | None] = mapped_column(Integer)
+    rank_vector: Mapped[int | None] = mapped_column(Integer)
+    rank_entity: Mapped[int | None] = mapped_column(Integer)
+    fused_score: Mapped[float | None] = mapped_column(Float)
+    rerank_score: Mapped[float | None] = mapped_column(Float)
+    final_rank: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (UniqueConstraint("search_run_id", "chunk_id"),)

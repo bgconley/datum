@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync backend dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Ruff
+        run: uv run ruff check datum tests
+
+      - name: Mypy
+        run: uv run mypy datum
+
+      - name: Pytest
+        run: uv run pytest -q
+
+      - name: Pip audit
+        run: uv run pip-audit
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare bind-mount directories
+        run: mkdir -p dev/projects dev/blobs dev/cache dev/pgdata
+
+      - name: Validate compose
+        run: docker compose config
+
+      - name: Start stack
+        run: docker compose up -d --build paradedb datum-api datum-frontend caddy
+
+      - name: Wait for services
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8001/api/v1/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8001/api/v1/health
+          curl -fsS http://127.0.0.1:3080/ >/dev/null
+
+      - name: Run migrations in container
+        run: docker compose exec -T datum-api alembic upgrade head
+
+      - name: Shutdown stack
+        if: always()
+        run: docker compose down -v --remove-orphans

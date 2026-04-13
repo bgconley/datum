@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from datum.services.filesystem import (
+    _legacy_manifest_dir,
     compute_content_hash,
     doc_manifest_dir,
-    _legacy_manifest_dir,
     read_manifest,
 )
 

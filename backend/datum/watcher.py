@@ -9,12 +9,12 @@ import logging
 import time
 from pathlib import Path
 
-from watchdog.events import FileSystemEventHandler, FileSystemEvent
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from datum.config import settings
-from datum.services.watcher_utils import should_process_path, compute_file_state
 from datum.services.versioning import create_version
+from datum.services.watcher_utils import compute_file_state, should_process_path
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class DebouncedHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         # Record src_path if it passes filtering
-        path = Path(event.src_path)
+        path = Path(str(event.src_path))
         if should_process_path(path):
             self._pending[str(path)] = time.monotonic()
         # For rename/move events, also record dest_path.
@@ -42,7 +42,7 @@ class DebouncedHandler(FileSystemEventHandler):
         # Design doc: "treat all relevant events as 'path may have changed'"
         dest = getattr(event, "dest_path", None)
         if dest:
-            dest_path = Path(dest)
+            dest_path = Path(str(dest))
             if should_process_path(dest_path):
                 self._pending[str(dest_path)] = time.monotonic()
 
@@ -85,8 +85,8 @@ class DebouncedHandler(FileSystemEventHandler):
 
             if canonical_path == "project.yaml":
                 from datum.services.project_versioning import (
-                    version_project_yaml,
                     sync_project_yaml_to_db,
+                    version_project_yaml,
                 )
                 new_ver = version_project_yaml(
                     project_path, content=path.read_bytes(), change_source="watcher",
@@ -121,12 +121,14 @@ class DebouncedHandler(FileSystemEventHandler):
         """Best-effort DB catch-up after a watcher-created version."""
         try:
             import asyncio
+
             import frontmatter as fm
-            from datum.db import async_session
-            from datum.services.db_sync import sync_document_version_to_db, log_audit_event
-            from datum.services.filesystem import compute_content_hash
             from sqlalchemy import select
+
+            from datum.db import async_session
             from datum.models.core import Project
+            from datum.services.db_sync import log_audit_event, sync_document_version_to_db
+            from datum.services.filesystem import compute_content_hash
 
             try:
                 post = fm.loads(content.decode())

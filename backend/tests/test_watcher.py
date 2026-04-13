@@ -1,10 +1,6 @@
-import pytest
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-from datum.services.project_manager import create_project
-from datum.services.watcher_utils import should_process_path, compute_file_state, FileState
+from datum.services.watcher_utils import compute_file_state, should_process_path
 
 
 class TestShouldProcessPath:

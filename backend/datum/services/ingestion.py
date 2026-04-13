@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from datum.services.chunking import (
-    Chunk,
     DEFAULT_MAX_TOKENS,
     DEFAULT_OVERLAP_TOKENS,
+    Chunk,
     chunk_text,
 )
 from datum.services.extraction import ExtractionResult, extract_text, extract_text_async
@@ -22,14 +21,14 @@ class IngestionContext:
     canonical_path: str
 
 
-def run_extraction(ctx: IngestionContext) -> Optional[ExtractionResult]:
+def run_extraction(ctx: IngestionContext) -> ExtractionResult | None:
     file_path = ctx.project_path / ctx.canonical_path
     if not file_path.exists():
         return None
     return extract_text(file_path)
 
 
-async def run_extraction_async(ctx: IngestionContext) -> Optional[ExtractionResult]:
+async def run_extraction_async(ctx: IngestionContext) -> ExtractionResult | None:
     file_path = ctx.project_path / ctx.canonical_path
     if not file_path.exists():
         return None

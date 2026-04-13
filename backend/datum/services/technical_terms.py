@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 TECHNICAL_TERMS_PIPELINE_NAME = "regex-technical-terms"
 TECHNICAL_TERMS_PIPELINE_VERSION = "regex-v1"
@@ -33,12 +33,19 @@ PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     ("version", re.compile(r"\bv?\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?\b"), 0.9),
     (
         "sql_identifier",
-        re.compile(r"(?:FROM|TABLE|JOIN|INTO|UPDATE|INDEX\s+ON)\s+([A-Za-z_][\w$]*)", re.IGNORECASE),
+        re.compile(
+            r"(?:FROM|TABLE|JOIN|INTO|UPDATE|INDEX\s+ON)\s+([A-Za-z_][\w$]*)",
+            re.IGNORECASE,
+        ),
         0.9,
     ),
     (
         "package",
-        re.compile(r"(?:pip\s+install|npm\s+install|yarn\s+add)\s+([\w\[\].-]+(?:\s+[\w\[\].-]+)*)", re.IGNORECASE),
+        re.compile(
+            r"(?:pip\s+install|npm\s+install|yarn\s+add)\s+"
+            r"([\w\[\].-]+(?:\s+[\w\[\].-]+)*)",
+            re.IGNORECASE,
+        ),
         0.8,
     ),
     ("port", re.compile(r"(?::(\d{2,5})(?!\d))|(?:port\s+(\d{2,5}))", re.IGNORECASE), 0.7),

@@ -10,22 +10,20 @@ These tests verify that:
 - Write to legacy path triggers migration to new layout
 - Both legacy+new dirs present triggers ManifestLayoutConflictError
 """
-import pytest
 from pathlib import Path
 
-import yaml
+import pytest
 
+from datum.services.document_manager import create_document, get_document, save_document
 from datum.services.filesystem import (
+    ManifestLayoutConflictError,
     atomic_write,
     compute_content_hash,
-    read_manifest,
-    write_manifest,
     resolve_manifest_dir,
-    ManifestLayoutConflictError,
+    write_manifest,
 )
-from datum.services.versioning import create_version, get_current_version
 from datum.services.project_manager import create_project
-from datum.services.document_manager import create_document, save_document, get_document
+from datum.services.versioning import get_current_version
 
 
 def _create_legacy_manifest(project_path: Path, canonical_path: str, content: bytes):

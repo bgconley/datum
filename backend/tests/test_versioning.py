@@ -1,8 +1,17 @@
-import pytest
-from pathlib import Path
 
-from datum.services.filesystem import compute_content_hash, read_manifest, write_manifest, doc_manifest_dir
-from datum.services.versioning import create_version, get_current_version, VersionInfo, StalePendingCommitError
+import pytest
+
+from datum.services.filesystem import (
+    compute_content_hash,
+    doc_manifest_dir,
+    read_manifest,
+    write_manifest,
+)
+from datum.services.versioning import (
+    StalePendingCommitError,
+    create_version,
+    get_current_version,
+)
 
 
 class TestCreateVersion:
@@ -77,7 +86,7 @@ class TestCreateVersion:
         content = b"# Same content"
         canonical_path.write_bytes(content)
 
-        info1 = create_version(project, canonical, content, "web")
+        create_version(project, canonical, content, "web")
         info2 = create_version(project, canonical, content, "watcher")
 
         assert info2 is None  # No new version created

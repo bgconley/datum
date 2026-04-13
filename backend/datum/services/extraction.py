@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import frontmatter
 
@@ -34,7 +33,7 @@ class ExtractionResult:
     source_extension: str
 
 
-def extract_text(file_path: Path) -> Optional[ExtractionResult]:
+def extract_text(file_path: Path) -> ExtractionResult | None:
     ext = file_path.suffix.lower()
 
     if ext in TEXT_EXTENSIONS:
@@ -46,7 +45,7 @@ def extract_text(file_path: Path) -> Optional[ExtractionResult]:
     return _extract_kreuzberg(file_path)
 
 
-async def extract_text_async(file_path: Path) -> Optional[ExtractionResult]:
+async def extract_text_async(file_path: Path) -> ExtractionResult | None:
     ext = file_path.suffix.lower()
 
     if ext in TEXT_EXTENSIONS:

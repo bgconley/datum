@@ -1,10 +1,10 @@
-import pytest
-from pathlib import Path
 
-from datum.services.project_manager import create_project
+import pytest
+
 from datum.services.document_manager import create_document
-from datum.services.reconciler import reconcile_project, ReconcileResult
 from datum.services.filesystem import read_manifest, write_manifest
+from datum.services.project_manager import create_project
+from datum.services.reconciler import reconcile_project
 
 
 class TestReconciler:

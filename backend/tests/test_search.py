@@ -8,10 +8,12 @@ from datum.services.search import (
     ParsedQuery,
     RankedCandidate,
     _log_search_run,
+    _term_search,
     _vector_search,
     fuse_results,
     parse_query,
 )
+from datum.services.technical_terms import TermMatch
 
 
 class _FakeExecuteResult:
@@ -104,6 +106,40 @@ async def test_vector_search_scopes_to_active_model_run():
     assert "ce.model_run_id = :model_run_id" in str(statement)
     assert params["model_run_id"] == model_run_id
     assert params["project_scope"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_term_search_applies_as_of_scope():
+    session = _FakeSession()
+
+    results = await _term_search(
+        session,
+        ParsedQuery(
+            raw="DATABASE_URL",
+            bm25_query="DATABASE_URL",
+            detected_terms=[
+                TermMatch(
+                    raw_text="DATABASE_URL",
+                    normalized_text="database_url",
+                    term_type="env_var",
+                    start_char=0,
+                    end_char=12,
+                    confidence=1.0,
+                )
+            ],
+            version_scope="as_of:2026-01-01T00:00:00+00:00",
+            project_scope="alpha",
+        ),
+        version_scope="as_of:2026-01-01T00:00:00+00:00",
+        limit=10,
+    )
+
+    assert results == []
+    statement, _ = session.executed[0]
+    rendered = str(statement)
+    assert "version_head_events" in rendered
+    assert "valid_from" in rendered
+    assert "projects.slug" in rendered
 
 
 @pytest.mark.asyncio

@@ -1,13 +1,13 @@
+
 import pytest
-from pathlib import Path
 
 from datum.services.filesystem import (
-    compute_content_hash,
     atomic_write,
-    read_manifest,
-    write_manifest,
+    compute_content_hash,
     doc_manifest_dir,
+    read_manifest,
     validate_canonical_path,
+    write_manifest,
 )
 
 

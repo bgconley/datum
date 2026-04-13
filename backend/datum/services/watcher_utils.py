@@ -1,8 +1,7 @@
 """Filesystem watcher utilities: path filtering, state computation, debouncing."""
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from datum.services.filesystem import compute_content_hash
 
@@ -39,7 +38,7 @@ class FileState:
     mtime: datetime
 
 
-def compute_file_state(path: Path) -> Optional[FileState]:
+def compute_file_state(path: Path) -> FileState | None:
     """Compute the current state of a file for sync comparison."""
     if not path.exists() or not path.is_file():
         return None
@@ -49,5 +48,5 @@ def compute_file_state(path: Path) -> Optional[FileState]:
         path=path,
         content_hash=compute_content_hash(content),
         byte_size=len(content),
-        mtime=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        mtime=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
     )

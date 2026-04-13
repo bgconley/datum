@@ -7,7 +7,6 @@ import hashlib
 import os
 import tempfile
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +66,16 @@ def write_manifest(manifest_path: Path, data: dict[str, Any]) -> None:
 def ensure_piq_structure(project_path: Path) -> None:
     """Create the .piq/ directory structure for a project if it doesn't exist."""
     piq = project_path / ".piq"
-    for subdir in ["docs", "drafts", "extracted", "records", "operations", "tmp", "project/versions"]:
+    subdirs = [
+        "docs",
+        "drafts",
+        "extracted",
+        "records",
+        "operations",
+        "tmp",
+        "project/versions",
+    ]
+    for subdir in subdirs:
         (piq / subdir).mkdir(parents=True, exist_ok=True)
 
 
@@ -174,8 +182,8 @@ def resolve_manifest_dir(
 
 def _migrate_legacy_manifest(legacy_dir: Path, new_dir: Path) -> None:
     """Atomically migrate a legacy manifest directory to the new layout."""
-    import shutil
     import logging
+    import shutil
     logger = logging.getLogger(__name__)
 
     new_dir.parent.mkdir(parents=True, exist_ok=True)

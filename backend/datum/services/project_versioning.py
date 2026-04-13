@@ -7,7 +7,6 @@ max-based version numbering (gap-safe), and optional DB sync.
 import logging
 import re
 from pathlib import Path
-from typing import Optional
 
 from datum.services.filesystem import atomic_write, compute_content_hash
 
@@ -27,7 +26,7 @@ def _max_version_number(versions_dir: Path) -> int:
     return max_num
 
 
-def _latest_version_hash(versions_dir: Path) -> Optional[str]:
+def _latest_version_hash(versions_dir: Path) -> str | None:
     """Get the content hash of the highest-numbered version file. None if no versions."""
     max_num = _max_version_number(versions_dir)
     if max_num == 0:
@@ -40,9 +39,9 @@ def _latest_version_hash(versions_dir: Path) -> Optional[str]:
 
 def version_project_yaml(
     project_path: Path,
-    content: Optional[bytes] = None,
+    content: bytes | None = None,
     change_source: str = "system",
-) -> Optional[int]:
+) -> int | None:
     """Create a new version of project.yaml if content has changed.
 
     Returns the new version number, or None if content is unchanged (idempotent skip).
@@ -77,9 +76,11 @@ def sync_project_yaml_to_db(project_slug: str, project_path: Path):
     """Best-effort DB sync after project.yaml version creation."""
     try:
         import asyncio
+
         import yaml
+
         from datum.db import async_session
-        from datum.services.db_sync import sync_project_to_db, log_audit_event
+        from datum.services.db_sync import log_audit_event, sync_project_to_db
 
         project_yaml = project_path / "project.yaml"
         content = project_yaml.read_bytes()

@@ -95,6 +95,18 @@ async def test_create_document_rejects_non_docs_path(client):
 
 
 @pytest.mark.asyncio
+async def test_create_document_rejects_docs_prefix_traversal(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    resp = await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/../.piq/pwn.md",
+        "title": "Bad",
+        "doc_type": "plan",
+        "content": "# Bad",
+    })
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_project_rejects_bad_slug(client):
     resp = await client.post("/api/v1/projects", json={
         "name": "Bad", "slug": "../escape"
@@ -162,7 +174,7 @@ async def test_stale_pending_commit_returns_503(client, tmp_path):
     })
 
     # Inject stale pending_commit with existing version file
-    from datum.services.filesystem import read_manifest, write_manifest, doc_manifest_dir
+    from datum.services.filesystem import doc_manifest_dir, read_manifest, write_manifest
     project_path = settings.projects_root / "p2"
     manifest_dir = doc_manifest_dir(project_path, "docs/stale.md")
     manifest_path = manifest_dir / "manifest.yaml"
@@ -272,6 +284,15 @@ async def test_search_returns_results(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_rejects_invalid_as_of_scope(client):
+    resp = await client.post(
+        "/api/v1/search",
+        json={"query": "test", "version_scope": "as_of:not-a-timestamp"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_search_serializes_nonempty_results(client, monkeypatch):
     class StubGateway:
         embedding = None
@@ -361,7 +382,11 @@ async def test_search_stream_emits_phases(client, monkeypatch):
     monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
     monkeypatch.setattr("datum.api.search.stream_search", fake_stream_search)
 
-    async with client.stream("POST", "/api/v1/search/stream", json={"query": "DATABASE_URL"}) as resp:
+    async with client.stream(
+        "POST",
+        "/api/v1/search/stream",
+        json={"query": "DATABASE_URL"},
+    ) as resp:
         assert resp.status_code == 200
         lines = [json.loads(line) async for line in resp.aiter_lines() if line]
 

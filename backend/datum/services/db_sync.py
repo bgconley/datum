@@ -3,7 +3,7 @@
 Called after every successful filesystem write. The database is derived —
 if it falls behind, the reconciler rebuilds it.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -45,7 +45,7 @@ async def sync_project_to_db(
         project.project_yaml_hash = project_yaml_hash
         project.description = description
         project.tags = tags or []
-        project.updated_at = datetime.now(timezone.utc)
+        project.updated_at = datetime.now(UTC)
     else:
         project = Project(
             uid=uid,
@@ -130,7 +130,7 @@ async def sync_document_version_to_db(
 
     # Update document.current_version_id
     doc.current_version_id = version.id
-    doc.updated_at = datetime.now(timezone.utc)
+    doc.updated_at = datetime.now(UTC)
 
     # Insert version_head_event
     # Close previous head event
@@ -153,14 +153,14 @@ async def sync_document_version_to_db(
     ))
 
     # Update source_files
-    result = await session.execute(
+    source_file_result = await session.execute(
         select(SourceFile).where(
             SourceFile.project_id == project_id,
             SourceFile.canonical_path == canonical_path,
         )
     )
-    sf = result.scalar_one_or_none()
-    now = datetime.now(timezone.utc)
+    sf: SourceFile | None = source_file_result.scalar_one_or_none()
+    now = datetime.now(UTC)
     if sf:
         sf.content_hash = content_hash
         sf.byte_size = byte_size

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import json
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,10 +49,13 @@ def make_ingestion_job_idempotency_key(
     job_type: str,
     content_hash: str,
     pipeline_config_hash: str,
-    model_run_id: Optional[Any] = None,
+    model_run_id: Any | None = None,
 ) -> str:
     model_part = str(model_run_id) if model_run_id else "none"
-    return f"{project_id}:{version_id}:{job_type}:{content_hash}:{pipeline_config_hash}:{model_part}"
+    return (
+        f"{project_id}:{version_id}:{job_type}:{content_hash}:"
+        f"{pipeline_config_hash}:{model_part}"
+    )
 
 
 def extraction_pipeline_payload() -> dict[str, Any]:
@@ -91,7 +94,7 @@ def retrieval_pipeline_payload() -> dict[str, Any]:
     }
 
 
-def embedding_model_payload(gateway: ModelGateway) -> Optional[dict[str, Any]]:
+def embedding_model_payload(gateway: ModelGateway) -> dict[str, Any] | None:
     config = gateway.embedding
     if config is None:
         return None
@@ -172,7 +175,7 @@ async def get_retrieval_pipeline_config(session: AsyncSession) -> PipelineConfig
 async def get_embedding_pipeline_config(
     session: AsyncSession,
     gateway: ModelGateway,
-) -> Optional[PipelineConfig]:
+) -> PipelineConfig | None:
     payload = embedding_model_payload(gateway)
     if payload is None:
         return None
@@ -189,7 +192,7 @@ async def get_active_embedding_model_run(
     gateway: ModelGateway,
     *,
     create: bool,
-) -> Optional[ModelRun]:
+) -> ModelRun | None:
     payload = embedding_model_payload(gateway)
     if payload is None:
         return None
@@ -214,7 +217,7 @@ async def get_active_embedding_model_run(
         model_version=config_hash,
         task="embedding",
         config=payload,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
     )
     session.add(model_run)
     await session.flush()

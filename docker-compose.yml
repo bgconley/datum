@@ -1,6 +1,6 @@
 services:
   paradedb:
-    image: paradedb/paradedb:latest
+    image: paradedb/paradedb:0.22.6
     environment:
       POSTGRES_USER: datum
       POSTGRES_PASSWORD: ${DATUM_DB_PASSWORD:-datum_dev}

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -12,8 +13,17 @@ class SearchRequest(BaseModel):
     @field_validator("version_scope")
     @classmethod
     def validate_version_scope(cls, value: str) -> str:
-        if value in {"current", "all"} or value.startswith("as_of:"):
+        if value in {"current", "all"}:
             return value
+        if value.startswith("as_of:"):
+            raw_timestamp = value.split(":", 1)[1]
+            try:
+                parsed = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("version_scope as_of timestamp must be valid ISO-8601") from exc
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise ValueError("version_scope as_of timestamp must include a timezone")
+            return f"as_of:{parsed.isoformat()}"
         raise ValueError("version_scope must be current, all, or as_of:<timestamp>")
 
 

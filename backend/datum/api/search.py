@@ -1,5 +1,5 @@
-from dataclasses import asdict
 import time
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -60,7 +60,10 @@ async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends
                     event="phase",
                     phase=execution.phase,
                     query=execution.query,
-                    results=[SearchResultResponse(**asdict(result)) for result in execution.results],
+                    results=[
+                        SearchResultResponse(**asdict(result))
+                        for result in execution.results
+                    ],
                     result_count=len(execution.results),
                     latency_ms=execution.latency_ms,
                     semantic_enabled=execution.semantic_enabled,

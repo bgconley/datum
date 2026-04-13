@@ -3,18 +3,8 @@ from pathlib import Path
 from sqlalchemy import BigInteger
 
 from datum.models import (
-    AuditEvent,
     DocumentVersion,
-    IngestionJob,
-    ModelRun,
-    PipelineConfig,
-    Project,
-    SearchRun,
-    SearchRunResult,
     SourceFile,
-    TechnicalTerm,
-    VersionHeadEvent,
-    VersionText,
 )
 from datum.models.base import Base
 
@@ -46,8 +36,14 @@ def test_byte_size_columns_are_bigint():
     """Design doc specifies BIGINT for byte_size — verify ORM matches."""
     sf_col = SourceFile.__table__.columns["byte_size"]
     dv_col = DocumentVersion.__table__.columns["byte_size"]
-    assert isinstance(sf_col.type, BigInteger), f"source_files.byte_size is {sf_col.type}, expected BigInteger"
-    assert isinstance(dv_col.type, BigInteger), f"document_versions.byte_size is {dv_col.type}, expected BigInteger"
+    assert isinstance(
+        sf_col.type,
+        BigInteger,
+    ), f"source_files.byte_size is {sf_col.type}, expected BigInteger"
+    assert isinstance(
+        dv_col.type,
+        BigInteger,
+    ), f"document_versions.byte_size is {dv_col.type}, expected BigInteger"
 
 
 def test_alembic_env_reads_database_url(monkeypatch):

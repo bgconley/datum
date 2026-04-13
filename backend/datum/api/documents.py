@@ -13,6 +13,7 @@ from datum.schemas.document import (
     DocumentResponse,
     DocumentSave,
 )
+from datum.services.db_sync import log_audit_event, sync_document_version_to_db
 from datum.services.document_manager import (
     ConflictError,
     create_document,
@@ -20,9 +21,8 @@ from datum.services.document_manager import (
     list_documents,
     save_document,
 )
-from datum.services.db_sync import sync_document_version_to_db, log_audit_event
-from datum.services.project_manager import get_project
 from datum.services.filesystem import ManifestLayoutConflictError
+from datum.services.project_manager import get_project
 from datum.services.versioning import StalePendingCommitError
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,10 @@ async def api_create_document(
             status=body.status,
         )
     except FileExistsError:
-        raise HTTPException(status_code=409, detail=f"Document '{body.relative_path}' already exists")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Document '{body.relative_path}' already exists",
+        )
     except StalePendingCommitError as e:
         raise HTTPException(
             status_code=503,

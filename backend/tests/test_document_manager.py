@@ -1,16 +1,15 @@
-import pytest
-from pathlib import Path
 
-from datum.services.project_manager import create_project
+import pytest
+
 from datum.services.document_manager import (
+    ConflictError,
     create_document,
-    save_document,
     get_document,
     list_documents,
-    DocumentInfo,
-    ConflictError,
+    save_document,
 )
 from datum.services.filesystem import compute_content_hash
+from datum.services.project_manager import create_project
 
 
 @pytest.fixture
@@ -33,7 +32,9 @@ class TestCreateDocument:
         assert info.version == 1
         assert (project / "docs" / "requirements" / "auth.md").exists()
         # Version file exists
-        assert (project / ".piq" / "docs" / "requirements" / "auth.md" / "main" / "v001.md").exists()
+        assert (
+            project / ".piq" / "docs" / "requirements" / "auth.md" / "main" / "v001.md"
+        ).exists()
 
     def test_frontmatter_written(self, project):
         create_document(
@@ -114,13 +115,25 @@ class TestDocumentPathEnforcement:
         with pytest.raises(ValueError, match="must be under docs/"):
             create_document(project, "escape.md", "Bad", "plan", "# Bad")
 
+    def test_rejects_traversal_back_into_piq(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            create_document(project, "docs/../.piq/pwn.md", "Bad", "plan", "# Bad")
+
     def test_save_rejects_non_docs_path(self, project):
         with pytest.raises(ValueError, match="must be under docs/"):
             save_document(project, "project.yaml", "# Bad", "sha256:fake", "web")
 
+    def test_save_rejects_traversal_back_into_project_root(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            save_document(project, "docs/../escape.md", "# Bad", "sha256:fake", "web")
+
     def test_get_rejects_non_docs_path(self, project):
         with pytest.raises(ValueError, match="must be under docs/"):
             get_document(project, "project.yaml")
+
+    def test_get_rejects_traversal_back_into_piq(self, project):
+        with pytest.raises(ValueError, match="must be under docs/"):
+            get_document(project, "docs/../.piq/pwn.md")
 
 
 class TestDocumentDuplicateGuard:
@@ -135,7 +148,13 @@ class TestSameStemDifferentExtension:
 
     def test_separate_versions_and_uids(self, project):
         md_info = create_document(project, "docs/foo.md", "Foo MD", "plan", "# Markdown")
-        sql_info = create_document(project, "docs/foo.sql", "Foo SQL", "schema", "CREATE TABLE foo;")
+        sql_info = create_document(
+            project,
+            "docs/foo.sql",
+            "Foo SQL",
+            "schema",
+            "CREATE TABLE foo;",
+        )
 
         assert md_info.document_uid != sql_info.document_uid
         assert md_info.version == 1

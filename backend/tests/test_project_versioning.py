@@ -1,9 +1,8 @@
+
 import pytest
-from pathlib import Path
 
 from datum.services.project_manager import create_project
-from datum.services.project_versioning import version_project_yaml, _max_version_number
-from datum.services.filesystem import compute_content_hash
+from datum.services.project_versioning import _max_version_number, version_project_yaml
 
 
 @pytest.fixture

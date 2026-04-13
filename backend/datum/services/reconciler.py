@@ -11,7 +11,6 @@ from pathlib import Path
 from datum.services.filesystem import (
     atomic_write,
     compute_content_hash,
-    doc_manifest_dir,
     read_manifest,
     write_manifest,
 )
@@ -88,12 +87,13 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                     if db_session:
                         try:
                             import frontmatter as fm
-                            from datum.services.db_sync import (
-                                sync_document_version_to_db,
-                                log_audit_event,
-                            )
                             from sqlalchemy import select
+
                             from datum.models.core import Project
+                            from datum.services.db_sync import (
+                                log_audit_event,
+                                sync_document_version_to_db,
+                            )
 
                             proj_result = await db_session.execute(
                                 select(Project).where(
@@ -135,7 +135,7 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                 logger.exception(f"Reconciler error: {canonical_path}")
 
     # Phase 3: Check project.yaml versioning (shared helper: hash-checked, gap-safe)
-    from datum.services.project_versioning import version_project_yaml, sync_project_yaml_to_db
+    from datum.services.project_versioning import sync_project_yaml_to_db, version_project_yaml
     project_yaml = project_path / "project.yaml"
     if project_yaml.exists():
         result.files_scanned += 1
@@ -146,10 +146,12 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
             if db_session:
                 try:
                     import yaml
-                    from datum.services.db_sync import sync_project_to_db, log_audit_event
+
+                    from datum.services.db_sync import log_audit_event
                     content = project_yaml.read_bytes()
                     data = yaml.safe_load(content)
                     from sqlalchemy import select
+
                     from datum.models.core import Project
                     proj_result = await db_session.execute(
                         select(Project).where(
@@ -241,7 +243,9 @@ def _resolve_pending_commits(project_path: Path, result: ReconcileResult):
 
                 else:
                     # Unexpected state — canonical has content that matches neither old nor new.
-                    logger.warning("  State: unexpected hashes. Advancing manifest from version file.")
+                    logger.warning(
+                        "  State: unexpected hashes. Advancing manifest from version file."
+                    )
                     resolved = True
 
             # Advance manifest if we're resolving a commit that produced a version file

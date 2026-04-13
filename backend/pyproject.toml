@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
+    "pip-audit>=2.8.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -48,3 +49,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[[tool.mypy.overrides]]
+module = ["frontmatter", "pymupdf4llm", "kreuzberg"]
+ignore_missing_imports = true

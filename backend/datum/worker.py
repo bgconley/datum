@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datum.config import settings
 from datum.db import async_session_factory
 from datum.models.core import Document, DocumentVersion, ModelRun, Project
-from datum.models.search import ChunkEmbedding, DocumentChunk, IngestionJob, TechnicalTerm, VersionText
+from datum.models.search import (
+    ChunkEmbedding,
+    DocumentChunk,
+    IngestionJob,
+    TechnicalTerm,
+    VersionText,
+)
 from datum.services.chunking import Chunk
 from datum.services.filesystem import compute_content_hash
 from datum.services.ingestion import (
@@ -41,7 +47,7 @@ POLL_INTERVAL_SECONDS = 2.0
 
 async def process_job(session: AsyncSession, job: IngestionJob, gateway: ModelGateway) -> None:
     job.status = "running"
-    job.started_at = datetime.now(timezone.utc)
+    job.started_at = datetime.now(UTC)
     await session.commit()
 
     try:
@@ -77,13 +83,13 @@ async def process_job(session: AsyncSession, job: IngestionJob, gateway: ModelGa
             job.status = "completed"
 
         if job.completed_at is None and job.status in {"completed", "skipped"}:
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(UTC)
 
         await session.commit()
     except Exception as exc:
         job.status = "failed"
         job.error_message = str(exc)[:1000]
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         await session.commit()
         logger.exception("worker job failed: %s", job.id)
 
@@ -155,6 +161,20 @@ async def _handle_chunk_job(
     chunks = run_chunking(version_text.content)
     source_text_hash = compute_content_hash(version_text.content.encode("utf-8"))
 
+    existing_chunk_ids_result = await session.execute(
+        select(DocumentChunk.id).where(DocumentChunk.version_id == version.id)
+    )
+    existing_chunk_ids = existing_chunk_ids_result.scalars().all()
+    if existing_chunk_ids:
+        await session.execute(
+            delete(ChunkEmbedding).where(ChunkEmbedding.chunk_id.in_(existing_chunk_ids))
+        )
+        await session.execute(
+            delete(TechnicalTerm).where(
+                TechnicalTerm.chunk_id.in_(existing_chunk_ids),
+                TechnicalTerm.version_id == version.id,
+            )
+        )
     await session.execute(delete(DocumentChunk).where(DocumentChunk.version_id == version.id))
     for chunk in chunks:
         session.add(
@@ -196,12 +216,20 @@ async def _handle_chunk_job(
         content_hash=source_text_hash,
         priority=2,
         pipeline_config_id=embedding_config.id if embedding_config else None,
-        pipeline_config_hash=embedding_config.config_hash if embedding_config else "embedding-disabled",
+        pipeline_config_hash=(
+            embedding_config.config_hash
+            if embedding_config
+            else "embedding-disabled"
+        ),
         model_run_id=embedding_model_run.id if embedding_model_run else None,
     )
 
 
-async def _handle_term_job(session: AsyncSession, job: IngestionJob, version: DocumentVersion) -> None:
+async def _handle_term_job(
+    session: AsyncSession,
+    job: IngestionJob,
+    version: DocumentVersion,
+) -> None:
     technical_terms_config = await get_technical_terms_pipeline_config(session)
     chunk_result = await session.execute(
         select(DocumentChunk)
@@ -298,12 +326,31 @@ async def _handle_embed_job(
     )
 
     for chunk_row, vector in zip(chunk_rows, vectors, strict=False):
+        if len(vector) != settings.embedding_dimensions:
+            raise ValueError(
+                f"embedding dimensions {len(vector)} do not match configured "
+                f"schema dimension {settings.embedding_dimensions}"
+            )
         vector_literal = "[" + ",".join(str(value) for value in vector) + "]"
         await session.execute(
             text(
-                """
-                INSERT INTO chunk_embeddings (id, chunk_id, model_run_id, dimensions, embedding, created_at)
-                VALUES (gen_random_uuid(), :chunk_id, :model_run_id, :dimensions, CAST(:embedding AS halfvec(1024)), NOW())
+                f"""
+                INSERT INTO chunk_embeddings (
+                    id,
+                    chunk_id,
+                    model_run_id,
+                    dimensions,
+                    embedding,
+                    created_at
+                )
+                VALUES (
+                    gen_random_uuid(),
+                    :chunk_id,
+                    :model_run_id,
+                    :dimensions,
+                    CAST(:embedding AS halfvec({settings.embedding_dimensions})),
+                    NOW()
+                )
                 """
             ),
             {
@@ -327,8 +374,8 @@ async def _queue_job(
     content_hash: str,
     priority: int,
     pipeline_config_hash: str,
-    pipeline_config_id: Optional[UUID] = None,
-    model_run_id: Optional[UUID] = None,
+    pipeline_config_id: UUID | None = None,
+    model_run_id: UUID | None = None,
 ) -> None:
     idem_key = make_ingestion_job_idempotency_key(
         project_id=project_id,

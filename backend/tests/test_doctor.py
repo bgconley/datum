@@ -1,9 +1,9 @@
-import pytest
-from pathlib import Path
 
-from datum.services.project_manager import create_project
+import pytest
+
+from datum.services.doctor import check_project
 from datum.services.document_manager import create_document
-from datum.services.doctor import check_project, DoctorReport
+from datum.services.project_manager import create_project
 
 
 class TestDoctor:

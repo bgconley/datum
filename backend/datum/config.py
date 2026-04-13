@@ -1,6 +1,9 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+EMBEDDING_COLUMN_DIMENSIONS = 1024
 
 
 class Settings(BaseSettings):
@@ -12,7 +15,7 @@ class Settings(BaseSettings):
     api_port: int = 8001
     embedding_endpoint: str = "http://localhost:8010"
     embedding_model: str = "Qwen3-Embedding-4B"
-    embedding_dimensions: int = 1024
+    embedding_dimensions: int = EMBEDDING_COLUMN_DIMENSIONS
     embedding_protocol: str = "openai"
     embedding_batch_size: int = 64
     reranker_endpoint: str = "http://localhost:8011"
@@ -21,6 +24,16 @@ class Settings(BaseSettings):
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}
+
+    @field_validator("embedding_dimensions")
+    @classmethod
+    def validate_embedding_dimensions(cls, value: int) -> int:
+        if value != EMBEDDING_COLUMN_DIMENSIONS:
+            raise ValueError(
+                "DATUM_EMBEDDING_DIMENSIONS must match the current database schema "
+                f"dimension ({EMBEDDING_COLUMN_DIMENSIONS})."
+            )
+        return value
 
 
 settings = Settings()

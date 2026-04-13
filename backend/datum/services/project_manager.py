@@ -3,14 +3,12 @@
 Projects are filesystem-first: project.yaml is canonical.
 The database mirrors this for search/query.
 """
+import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import yaml
-
-import re
 
 from datum.services.filesystem import (
     atomic_write,
@@ -40,19 +38,19 @@ class ProjectInfo:
     uid: str
     slug: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     status: str = "active"
     tags: list[str] = field(default_factory=list)
-    created: Optional[str] = None
-    filesystem_path: Optional[str] = None
+    created: str | None = None
+    filesystem_path: str | None = None
 
 
 def create_project(
     projects_root: Path,
     name: str,
     slug: str,
-    description: Optional[str] = None,
-    tags: Optional[list[str]] = None,
+    description: str | None = None,
+    tags: list[str] | None = None,
     status: str = "active",
 ) -> ProjectInfo:
     """Create a new project on disk with canonical directory structure."""
@@ -62,7 +60,7 @@ def create_project(
         raise FileExistsError(f"Project directory already exists: {project_dir}")
 
     uid = generate_uid("proj")
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Create directory structure
     project_dir.mkdir(parents=True)
@@ -73,7 +71,7 @@ def create_project(
     ensure_piq_structure(project_dir)
 
     # Write project.yaml (canonical metadata)
-    project_data = {
+    project_data: dict[str, object] = {
         "uid": uid,
         "name": name,
         "slug": slug,
@@ -120,7 +118,7 @@ def list_projects(projects_root: Path) -> list[ProjectInfo]:
     return results
 
 
-def get_project(projects_root: Path, slug: str) -> Optional[ProjectInfo]:
+def get_project(projects_root: Path, slug: str) -> ProjectInfo | None:
     """Get a project by slug."""
     _validate_slug(slug)
     project_dir = projects_root / slug
@@ -129,7 +127,7 @@ def get_project(projects_root: Path, slug: str) -> Optional[ProjectInfo]:
     return _read_project_yaml(project_dir)
 
 
-def _read_project_yaml(project_dir: Path) -> Optional[ProjectInfo]:
+def _read_project_yaml(project_dir: Path) -> ProjectInfo | None:
     """Read project.yaml and return ProjectInfo."""
     try:
         data = yaml.safe_load((project_dir / "project.yaml").read_text())

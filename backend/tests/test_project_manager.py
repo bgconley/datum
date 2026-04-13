@@ -1,13 +1,12 @@
-import pytest
-from pathlib import Path
 
-from datum.services.project_manager import create_project, list_projects, get_project, ProjectInfo
-from datum.services.filesystem import read_manifest
+import pytest
+
+from datum.services.project_manager import create_project, get_project, list_projects
 
 
 class TestCreateProject:
     def test_creates_directory_structure(self, tmp_path):
-        info = create_project(
+        create_project(
             projects_root=tmp_path,
             name="Auth Platform",
             slug="auth-platform",
@@ -23,7 +22,7 @@ class TestCreateProject:
         assert (project_dir / ".piq" / "manifest.yaml").exists()
 
     def test_project_yaml_content(self, tmp_path):
-        info = create_project(tmp_path, "My Project", "my-project")
+        create_project(tmp_path, "My Project", "my-project")
         import yaml
         data = yaml.safe_load((tmp_path / "my-project" / "project.yaml").read_text())
         assert data["name"] == "My Project"

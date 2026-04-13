@@ -17,7 +17,16 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
+
+from datum.services.filesystem import (
+    compute_content_hash,
+    generate_uid,
+    read_manifest,
+    resolve_manifest_dir,
+    write_manifest,
+)
 
 
 class StalePendingCommitError(Exception):
@@ -33,18 +42,6 @@ class StalePendingCommitError(Exception):
             f"Stale pending_commit for version {version} with existing "
             f"version file at {version_file}. Run reconciler to recover."
         )
-from pathlib import Path
-from typing import Optional
-
-from datum.services.filesystem import (
-    atomic_write,
-    compute_content_hash,
-    doc_manifest_dir,
-    generate_uid,
-    read_manifest,
-    resolve_manifest_dir,
-    write_manifest,
-)
 
 
 @dataclass
@@ -63,9 +60,9 @@ def create_version(
     content: bytes,
     change_source: str,
     branch: str = "main",
-    label: Optional[str] = None,
-    restored_from: Optional[int] = None,
-) -> Optional[VersionInfo]:
+    label: str | None = None,
+    restored_from: int | None = None,
+) -> VersionInfo | None:
     """Create a new immutable version of a document.
 
     Returns VersionInfo if a new version was created, None if content
@@ -122,16 +119,17 @@ def create_version(
     version_rel_path = f"{branch}/{version_filename}"
     version_abs_path = manifest_dir / branch / version_filename
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Write content to temp file first (steps a-b)
     full_canonical = project_path / canonical_path
     full_canonical.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
+    fd, created_tmp_path = tempfile.mkstemp(
         dir=full_canonical.parent,
         prefix=f".{full_canonical.name}.",
         suffix=".tmp",
     )
+    tmp_path: str | None = created_tmp_path
     try:
         os.write(fd, content)
         os.fsync(fd)
@@ -140,7 +138,7 @@ def create_version(
     except BaseException:
         if fd >= 0:
             os.close(fd)
-        if os.path.exists(tmp_path):
+        if tmp_path is not None and os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise
 
@@ -158,11 +156,11 @@ def create_version(
 
     # Step f: Copy temp to version path
     version_abs_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(tmp_path, version_abs_path)
+    shutil.copy2(created_tmp_path, version_abs_path)
     _fsync_file(version_abs_path)
 
     # Step h: Rename temp over canonical path (the atomic commit of content)
-    os.rename(tmp_path, full_canonical)
+    os.rename(created_tmp_path, full_canonical)
     _fsync_dir(full_canonical.parent)
     tmp_path = None  # Consumed by rename
 
@@ -214,7 +212,7 @@ def _fsync_dir(path: Path) -> None:
 
 def get_current_version(
     project_path: Path, canonical_path: str, branch: str = "main"
-) -> Optional[VersionInfo]:
+) -> VersionInfo | None:
     """Get the current head version info for a document."""
     manifest_dir = resolve_manifest_dir(project_path, canonical_path, for_write=False)
     manifest = read_manifest(manifest_dir / "manifest.yaml")
@@ -264,7 +262,7 @@ def list_versions(
 
 def read_version_content(
     project_path: Path, canonical_path: str, version_number: int, branch: str = "main"
-) -> Optional[bytes]:
+) -> bytes | None:
     """Read the content of a specific version."""
     manifest_dir = resolve_manifest_dir(project_path, canonical_path, for_write=False)
     manifest = read_manifest(manifest_dir / "manifest.yaml")
