@@ -1,12 +1,14 @@
 from pathlib import Path
 
 from sqlalchemy import BigInteger
+from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
 
 from datum.models import (
     DocumentVersion,
     SourceFile,
 )
 from datum.models.base import Base
+from datum.sqltypes import AsyncpgHalfVec
 
 
 def test_all_models_registered():
@@ -74,3 +76,14 @@ def test_evaluation_models_registered():
         "evaluation_runs",
     }
     assert expected.issubset(table_names)
+
+
+def test_asyncpg_halfvec_preserves_native_bind_values():
+    dialect = PGDialect_asyncpg()
+    typ = AsyncpgHalfVec(4)
+    processor = typ.bind_processor(dialect)
+
+    value = [0.1, 0.2, 0.3, 0.4]
+
+    assert processor is not None
+    assert processor(value) == value

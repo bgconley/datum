@@ -46,6 +46,7 @@ POLL_INTERVAL_SECONDS = 2.0
 
 
 async def process_job(session: AsyncSession, job: IngestionJob, gateway: ModelGateway) -> None:
+    job_id = job.id
     job.status = "running"
     job.started_at = datetime.now(UTC)
     await session.commit()
@@ -87,18 +88,20 @@ async def process_job(session: AsyncSession, job: IngestionJob, gateway: ModelGa
 
         await session.commit()
     except Exception as exc:
-        logger.exception("worker job failed: %s", job.id)
+        logger.exception("worker job failed: %s", job_id)
         await session.rollback()
         try:
-            persisted_job = await session.get(IngestionJob, job.id)
-            target = persisted_job or job
-            target.status = "failed"
-            target.error_message = str(exc)[:1000]
-            target.completed_at = datetime.now(UTC)
+            persisted_job = await session.get(IngestionJob, job_id)
+            if persisted_job is None:
+                raise RuntimeError(f"job disappeared before failure state could persist: {job_id}")
+
+            persisted_job.status = "failed"
+            persisted_job.error_message = str(exc)[:1000]
+            persisted_job.completed_at = datetime.now(UTC)
             await session.commit()
         except Exception:
             await session.rollback()
-            logger.exception("worker failed to persist terminal failure state: %s", job.id)
+            logger.exception("worker failed to persist terminal failure state: %s", job_id)
 
 
 async def _handle_extract_job(
