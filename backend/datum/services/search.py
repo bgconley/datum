@@ -342,7 +342,11 @@ async def _execute_search(
         and context.active_embedding_run_id is not None
     ):
         try:
-            vectors = await gateway.embed([context.query])
+            vectors = await gateway.embed(
+                [context.query],
+                input_type="query",
+                instruction=settings.embedding_query_instruction,
+            )
             if vectors:
                 semantic_applied = True
                 vector_results = await _vector_search(

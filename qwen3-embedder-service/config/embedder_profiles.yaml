@@ -1,0 +1,199 @@
+# Qwen3-Embedder Configuration Profiles
+# ======================================
+# This file defines model configurations for different backends and use cases.
+
+profiles:
+  # ============================================
+  # PyTorch Profiles (PRIMARY - Cross-platform)
+  # ============================================
+  qwen3_4b_cuda:
+    description: "Qwen3 embedder 4B on CUDA (PyTorch + Flash Attention) - RECOMMENDED"
+    backend: "pytorch"
+    model_id: "Qwen/Qwen3-Embedding-4B"
+    embedding_dimension: 2560
+    performance:
+      expected_throughput_tok_s: 20000-30000
+      memory_gb: 9-10
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 8192
+      max_texts_per_request: 500
+      max_text_chars: 32000
+    batching:
+      batch_size: 32
+      max_concurrent_forwards: 2
+    pytorch_options:
+      device: "auto"
+      dtype: "float16"
+      use_flash_attn: true
+
+  qwen3_4b_mps:
+    description: "Qwen3 embedder 4B on MPS (Apple Silicon via PyTorch)"
+    backend: "pytorch"
+    model_id: "Qwen/Qwen3-Embedding-4B"
+    embedding_dimension: 2560
+    performance:
+      expected_throughput_tok_s: 5000-8000
+      memory_gb: 10-12
+      note: "Consider qwen3_4b_mlx for 2-3x better performance"
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 8192
+      max_texts_per_request: 200
+      max_text_chars: 32000
+    batching:
+      batch_size: 16
+      max_concurrent_forwards: 1
+    pytorch_options:
+      device: "mps"
+      dtype: "float16"
+      use_flash_attn: false
+
+  qwen3_4b_cpu:
+    description: "Qwen3 embedder 4B on CPU (fallback, slow)"
+    backend: "pytorch"
+    model_id: "Qwen/Qwen3-Embedding-4B"
+    embedding_dimension: 2560
+    performance:
+      expected_throughput_tok_s: 100-500
+      memory_gb: 12-16
+      note: "CPU inference is slow - use for testing only"
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 4096
+      max_texts_per_request: 50
+      max_text_chars: 16000
+    batching:
+      batch_size: 4
+      max_concurrent_forwards: 1
+    pytorch_options:
+      device: "cpu"
+      dtype: "float32"
+      use_flash_attn: false
+
+  # ============================================
+  # vLLM Profiles (SECONDARY - High-throughput CUDA)
+  # ============================================
+  qwen3_4b_vllm:
+    description: "Qwen3 embedder 4B via vLLM (high-throughput CUDA) - SECONDARY"
+    backend: "vllm"
+    model_id: "Qwen/Qwen3-Embedding-4B"
+    embedding_dimension: 2560
+    performance:
+      expected_throughput_tok_s: 25000-40000
+      continuous_batching: true
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 8192
+      max_texts_per_request: 1000
+      max_text_chars: 32000
+    batching:
+      batch_size: 64
+      max_concurrent_forwards: 4
+    vllm_options:
+      task: "embed"
+      tensor_parallel_size: 1
+      gpu_memory_utilization: 0.8
+      max_model_len: 8192
+      trust_remote_code: true
+
+  qwen3_4b_vllm_multi_gpu:
+    description: "Qwen3 embedder 4B via vLLM with tensor parallelism"
+    backend: "vllm"
+    model_id: "Qwen/Qwen3-Embedding-4B"
+    embedding_dimension: 2560
+    performance:
+      expected_throughput_tok_s: 40000-60000
+      continuous_batching: true
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 8192
+      max_texts_per_request: 2000
+      max_text_chars: 32000
+    batching:
+      batch_size: 128
+      max_concurrent_forwards: 8
+    vllm_options:
+      task: "embed"
+      tensor_parallel_size: 2
+      gpu_memory_utilization: 0.9
+      max_model_len: 8192
+      trust_remote_code: true
+
+  # ============================================
+  # MLX Profiles (TERTIARY - Apple Silicon Optimization)
+  # ============================================
+  qwen3_4b_mlx:
+    description: "Qwen3 embedder 4B in MLX 4-bit (Apple Silicon) - TERTIARY"
+    backend: "mlx"
+    model_id: "mlx-community/Qwen3-Embedding-4B-4bit-DWQ"
+    hf_tokenizer_id: "Qwen/Qwen3-Embedding-4B"
+    embedding_dimension: 2560
+    performance:
+      expected_throughput_tok_s: 18000
+      memory_gb: 2.5
+      throughput_advantage: "2-3x vs PyTorch MPS"
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 8192
+      max_texts_per_request: 200
+      max_text_chars: 32000
+    batching:
+      batch_size: 16
+      max_concurrent_forwards: 1
+    mlx_options:
+      compile: true
+
+  qwen3_06b_mlx:
+    description: "Qwen3 embedder 0.6B in MLX 4-bit (fastest, lower quality)"
+    backend: "mlx"
+    model_id: "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
+    hf_tokenizer_id: "Qwen/Qwen3-Embedding-0.6B"
+    embedding_dimension: 1024
+    performance:
+      expected_throughput_tok_s: 44000
+      memory_gb: 0.9
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 8192
+      max_texts_per_request: 500
+      max_text_chars: 32000
+    batching:
+      batch_size: 32
+      max_concurrent_forwards: 2
+    mlx_options:
+      compile: true
+
+  qwen3_8b_mlx:
+    description: "Qwen3 embedder 8B in MLX 4-bit (highest quality)"
+    backend: "mlx"
+    model_id: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
+    hf_tokenizer_id: "Qwen/Qwen3-Embedding-8B"
+    embedding_dimension: 4096
+    performance:
+      expected_throughput_tok_s: 11000
+      memory_gb: 4.5
+    prompt:
+      default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+    limits:
+      max_length: 8192
+      max_texts_per_request: 100
+      max_text_chars: 32000
+    batching:
+      batch_size: 8
+      max_concurrent_forwards: 1
+    mlx_options:
+      compile: true
+
+# Default profile selection by backend
+defaults:
+  pytorch: "qwen3_4b_cuda"
+  vllm: "qwen3_4b_vllm"
+  mlx: "qwen3_4b_mlx"

@@ -13,6 +13,13 @@ from datum.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _score_from_result(item: dict) -> float:
+    score = item.get("relevance_score")
+    if score is None:
+        score = item["score"]
+    return float(score)
+
+
 @dataclass(slots=True)
 class ModelConfig:
     name: str
@@ -35,7 +42,13 @@ class ModelGateway:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        input_type: str = "document",
+        instruction: str | None = None,
+    ) -> list[list[float]]:
         if not self.embedding:
             raise RuntimeError("No embedding model configured")
 
@@ -53,6 +66,18 @@ class ModelGateway:
                 )
                 data = sorted(response["data"], key=lambda item: item["index"])
                 batch_vectors = [item["embedding"][: config.dimensions] for item in data]
+            elif config.protocol == "qwen3_embedder":
+                payload: dict[str, object] = {
+                    "input": batch,
+                    "model": config.name,
+                    "dimensions": config.dimensions,
+                    "input_type": input_type,
+                }
+                if input_type == "query":
+                    payload["instruction"] = instruction or settings.embedding_query_instruction
+                response = await self._post(f"{config.endpoint}/v1/embeddings", payload)
+                data = sorted(response["data"], key=lambda item: item["index"])
+                batch_vectors = [item["embedding"] for item in data]
             elif config.protocol == "tei":
                 response = await self._post(
                     f"{config.endpoint}/embed",
@@ -99,7 +124,19 @@ class ModelGateway:
                     "top_n": top_n,
                 },
             )
-            return [(item["index"], item["relevance_score"]) for item in response["results"]]
+            return [(item["index"], _score_from_result(item)) for item in response["results"]]
+        if config.protocol == "qwen3_reranker":
+            response = await self._post(
+                f"{config.endpoint}/v1/rerank",
+                {
+                    "model": config.name,
+                    "query": query,
+                    "documents": documents,
+                    "top_n": top_n,
+                    "instruction": settings.reranker_instruction,
+                },
+            )
+            return [(item["index"], _score_from_result(item)) for item in response["results"]]
         if config.protocol == "tei":
             response = await self._post(
                 f"{config.endpoint}/rerank",

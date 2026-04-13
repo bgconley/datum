@@ -65,3 +65,54 @@ class TestModelGateway:
             healthy = await gateway.check_health("embedding")
             assert healthy is True
         await gateway.close()
+
+    @pytest.mark.asyncio
+    async def test_embed_query_with_custom_service_protocol(self):
+        gateway = ModelGateway(
+            embedding=ModelConfig(
+                name="Qwen3-Embedding-4B",
+                endpoint="http://localhost:8010",
+                protocol="qwen3_embedder",
+                dimensions=1024,
+                batch_size=32,
+            )
+        )
+        with patch.object(
+            ModelGateway,
+            "_post",
+            new_callable=AsyncMock,
+            return_value={"data": [{"embedding": [0.1] * 1024, "index": 0}]},
+        ) as mocked_post:
+            result = await gateway.embed(
+                ["where is the migration?"], input_type="query", instruction="find docs"
+            )
+            assert len(result) == 1
+            payload = mocked_post.await_args.args[1]
+            assert payload["input_type"] == "query"
+            assert payload["instruction"] == "find docs"
+            assert payload["dimensions"] == 1024
+        await gateway.close()
+
+    @pytest.mark.asyncio
+    async def test_rerank_custom_service_protocol(self):
+        gateway = ModelGateway(
+            reranker=ModelConfig(
+                name="Qwen3-Reranker-0.6B",
+                endpoint="http://localhost:8011",
+                protocol="qwen3_reranker",
+            )
+        )
+        with patch.object(
+            ModelGateway,
+            "_post",
+            new_callable=AsyncMock,
+            return_value={
+                "results": [
+                    {"index": 2, "relevance_score": 0.95},
+                    {"index": 0, "relevance_score": 0.75},
+                ]
+            },
+        ):
+            result = await gateway.rerank("query", ["a", "b", "c"], top_n=2)
+            assert result == [(2, 0.95), (0, 0.75)]
+        await gateway.close()

@@ -18,9 +18,22 @@ class Settings(BaseSettings):
     embedding_dimensions: int = EMBEDDING_SCHEMA_DIMENSIONS
     embedding_protocol: str = "openai"
     embedding_batch_size: int = 64
+    embedding_query_instruction: str = (
+        "Given a technical query about an internal software project, retrieve the most "
+        "relevant passages from documentation, code-adjacent text, API descriptions, "
+        "configuration notes, migration records, and operational runbooks that directly "
+        "answer the query."
+    )
     reranker_endpoint: str = "http://localhost:8011"
     reranker_model: str = "Qwen3-Reranker-0.6B"
     reranker_protocol: str = "openai"
+    reranker_instruction: str = (
+        "Given a technical query about an internal software project, judge whether the "
+        "passage is a strong answer source. Prefer passages that are authoritative, "
+        "specific, version-relevant, and operationally actionable. Favor exact API names, "
+        "config keys, file paths, schema or migration details, and direct evidence over "
+        "general discussion."
+    )
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}

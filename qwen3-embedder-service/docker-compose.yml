@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # PyTorch CUDA backend (default)
+  qwen3-embedder-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8010:8010"
+    environment:
+      - QWEN_EMBED_BACKEND=pytorch
+      - QWEN_EMBED_PROFILE=qwen3_4b_cuda
+      - QWEN_EMBED_LOG_FORMAT=json
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    volumes:
+      - huggingface-cache:/app/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+  # vLLM backend (high-throughput)
+  qwen3-embedder-vllm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8012:8010"
+    environment:
+      - QWEN_EMBED_BACKEND=vllm
+      - QWEN_EMBED_PROFILE=qwen3_4b_vllm
+      - QWEN_EMBED_LOG_FORMAT=json
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    volumes:
+      - huggingface-cache:/app/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - vllm
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+  # CPU-only backend (for testing)
+  qwen3-embedder-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "8014:8010"
+    environment:
+      - QWEN_EMBED_BACKEND=pytorch
+      - QWEN_EMBED_PROFILE=qwen3_4b_cpu
+      - QWEN_EMBED_LOG_FORMAT=json
+    volumes:
+      - huggingface-cache:/app/.cache/huggingface
+    profiles:
+      - cpu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
+
+volumes:
+  huggingface-cache:
+    driver: local

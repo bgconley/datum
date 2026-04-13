@@ -1,0 +1,51 @@
+# Qwen3-Embedder - CPU-only Dockerfile
+# For environments without GPU access
+
+FROM python:3.11-slim
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy application
+COPY pyproject.toml .
+COPY src/ src/
+COPY config/ config/
+
+# Install dependencies
+RUN pip install --upgrade pip && \
+    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -e ".[cpu]"
+
+# Environment configuration
+ENV QWEN_EMBED_BACKEND=pytorch
+ENV QWEN_EMBED_PROFILE=qwen3_4b_cpu
+ENV QWEN_EMBED_HOST=0.0.0.0
+ENV QWEN_EMBED_PORT=8010
+ENV QWEN_EMBED_LOG_FORMAT=json
+
+# HuggingFace cache directory
+ENV HF_HOME=/app/.cache/huggingface
+RUN mkdir -p /app/.cache/huggingface
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
+    CMD curl -f http://localhost:8010/health || exit 1
+
+# Expose port
+EXPOSE 8010
+
+# Run the service
+CMD ["python", "-m", "qwen3_embedder.main"]
