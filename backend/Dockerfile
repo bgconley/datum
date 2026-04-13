@@ -2,13 +2,16 @@ FROM python:3.12-slim@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194e
 
 WORKDIR /app
 
-# Copy source first, then install (setuptools needs the package to exist)
+# Install locked third-party dependencies first for reproducible builds.
+COPY requirements.lock .
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
+
+# Install the local package separately without re-resolving dependencies.
 COPY pyproject.toml .
 COPY datum/ datum/
 COPY alembic/ alembic/
 COPY alembic.ini .
-
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --no-deps .
 
 EXPOSE 8001
 CMD ["uvicorn", "datum.main:app", "--host", "0.0.0.0", "--port", "8001"]
