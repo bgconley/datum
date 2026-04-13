@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,11 +87,18 @@ async def process_job(session: AsyncSession, job: IngestionJob, gateway: ModelGa
 
         await session.commit()
     except Exception as exc:
-        job.status = "failed"
-        job.error_message = str(exc)[:1000]
-        job.completed_at = datetime.now(UTC)
-        await session.commit()
         logger.exception("worker job failed: %s", job.id)
+        await session.rollback()
+        try:
+            persisted_job = await session.get(IngestionJob, job.id)
+            target = persisted_job or job
+            target.status = "failed"
+            target.error_message = str(exc)[:1000]
+            target.completed_at = datetime.now(UTC)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("worker failed to persist terminal failure state: %s", job.id)
 
 
 async def _handle_extract_job(
@@ -331,34 +338,13 @@ async def _handle_embed_job(
                 f"embedding dimensions {len(vector)} do not match configured "
                 f"schema dimension {settings.embedding_dimensions}"
             )
-        vector_literal = "[" + ",".join(str(value) for value in vector) + "]"
-        await session.execute(
-            text(
-                """
-                INSERT INTO chunk_embeddings (
-                    id,
-                    chunk_id,
-                    model_run_id,
-                    dimensions,
-                    embedding,
-                    created_at
-                )
-                VALUES (
-                    gen_random_uuid(),
-                    :chunk_id,
-                    :model_run_id,
-                    :dimensions,
-                    CAST(:embedding AS halfvec({settings.embedding_dimensions})),
-                    NOW()
-                )
-                """
-            ),
-            {
-                "chunk_id": str(chunk_row.id),
-                "model_run_id": str(model_run.id),
-                "dimensions": len(vector),
-                "embedding": vector_literal,
-            },
+        session.add(
+            ChunkEmbedding(
+                chunk_id=chunk_row.id,
+                model_run_id=model_run.id,
+                dimensions=len(vector),
+                embedding=vector,
+            )
         )
 
     model_run.items_processed = (model_run.items_processed or 0) + len(vectors)

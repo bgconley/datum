@@ -4,9 +4,9 @@ from uuid import uuid4
 import pytest
 
 from datum.models.core import Document, DocumentVersion, Project
-from datum.models.search import IngestionJob, VersionText
+from datum.models.search import ChunkEmbedding, DocumentChunk, IngestionJob, VersionText
 from datum.services.chunking import Chunk
-from datum.worker import _handle_chunk_job, process_job
+from datum.worker import _handle_chunk_job, _handle_embed_job, process_job
 
 
 class _FakeSession:
@@ -61,6 +61,43 @@ class _ChunkJobSession:
 
     async def flush(self):
         return None
+
+
+class _EmbedJobSession:
+    def __init__(self, chunks: list[DocumentChunk]):
+        self.chunks = chunks
+        self.executed_statements: list[str] = []
+        self.added = []
+
+    async def execute(self, statement, params=None):
+        del params
+        rendered = str(statement)
+        self.executed_statements.append(rendered)
+        if "FROM document_chunks" in rendered:
+            return _ScalarListResult(self.chunks)
+        return _ScalarOneResult(None)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        return None
+
+
+class _FailureSession:
+    def __init__(self, objects=None):
+        self._objects = objects or {}
+        self.commit_calls = 0
+        self.rollback_calls = 0
+
+    async def get(self, model, key):
+        return self._objects.get((model, key))
+
+    async def commit(self):
+        self.commit_calls += 1
+
+    async def rollback(self):
+        self.rollback_calls += 1
 
 
 @pytest.mark.asyncio
@@ -204,3 +241,127 @@ async def test_chunk_job_deletes_dependents_before_replacing_chunks(monkeypatch)
 
     assert delete_embeddings_index < delete_chunks_index
     assert delete_terms_index < delete_chunks_index
+
+
+@pytest.mark.asyncio
+async def test_embed_job_persists_typed_chunk_embeddings(monkeypatch):
+    version_id = uuid4()
+    model_run_id = uuid4()
+    chunk = DocumentChunk(
+        id=uuid4(),
+        version_id=version_id,
+        chunk_index=0,
+        content="Body",
+        heading_path=["Title"],
+        start_char=0,
+        end_char=4,
+        token_count=1,
+        content_hash="sha256:chunk",
+        source_text_hash="sha256:text",
+    )
+    session = _EmbedJobSession([chunk])
+    job = IngestionJob(
+        id=uuid4(),
+        project_id=uuid4(),
+        version_id=version_id,
+        job_type="embed",
+        status="queued",
+    )
+    version = DocumentVersion(
+        id=version_id,
+        document_id=uuid4(),
+        version_number=1,
+        branch="main",
+        content_hash="sha256:test",
+        filesystem_path="/tmp/docs/test.md",
+    )
+
+    async def fake_run_embedding(chunks, gateway):
+        del chunks, gateway
+        return [[0.1] * 1024]
+
+    async def fake_model_run(session, job, gateway):
+        del session, job, gateway
+        return type("ModelRun", (), {"id": model_run_id, "items_processed": 0})()
+
+    monkeypatch.setattr("datum.worker.run_embedding", fake_run_embedding)
+    monkeypatch.setattr("datum.worker._resolve_embedding_model_run", fake_model_run)
+
+    class _Gateway:
+        embedding = object()
+
+        async def check_health(self, model_type):
+            assert model_type == "embedding"
+            return True
+
+    gateway = _Gateway()
+    await _handle_embed_job(session, job, version, gateway=gateway)
+
+    persisted = [obj for obj in session.added if isinstance(obj, ChunkEmbedding)]
+    assert len(persisted) == 1
+    assert persisted[0].chunk_id == chunk.id
+    assert persisted[0].model_run_id == model_run_id
+    assert len(persisted[0].embedding) == 1024
+    assert all("INSERT INTO chunk_embeddings" not in stmt for stmt in session.executed_statements)
+
+
+@pytest.mark.asyncio
+async def test_process_job_rolls_back_before_persisting_failure(monkeypatch, tmp_path: Path):
+    version_id = uuid4()
+    document_id = uuid4()
+    project_id = uuid4()
+    job_id = uuid4()
+    job = IngestionJob(
+        id=job_id,
+        project_id=project_id,
+        version_id=version_id,
+        job_type="embed",
+        status="queued",
+    )
+    version = DocumentVersion(
+        id=version_id,
+        document_id=document_id,
+        version_number=1,
+        branch="main",
+        content_hash="sha256:test",
+        filesystem_path=str(tmp_path / "docs/test.md"),
+    )
+    document = Document(
+        id=document_id,
+        project_id=project_id,
+        uid="doc_test",
+        slug="test",
+        canonical_path="docs/test.md",
+        title="Test",
+        doc_type="plan",
+    )
+    project = Project(
+        id=project_id,
+        uid="proj_test",
+        slug="test",
+        name="Test",
+        filesystem_path=str(tmp_path),
+        project_yaml_hash="sha256:project",
+    )
+    session = _FailureSession(
+        {
+            (IngestionJob, job_id): job,
+            (DocumentVersion, version_id): version,
+            (Document, document_id): document,
+            (Project, project_id): project,
+        }
+    )
+
+    async def fake_handle_embed_job(session, job, version, gateway):
+        del session, job, version, gateway
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("datum.worker._handle_embed_job", fake_handle_embed_job)
+
+    await process_job(session, job, gateway=object())
+
+    assert session.rollback_calls == 1
+    assert session.commit_calls == 2
+    assert job.status == "failed"
+    assert job.error_message == "boom"
+    assert job.completed_at is not None

@@ -103,9 +103,11 @@ async def test_vector_search_scopes_to_active_model_run():
 
     assert results == []
     statement, params = session.executed[0]
-    assert "ce.model_run_id = :model_run_id" in str(statement)
-    assert params["model_run_id"] == model_run_id
-    assert params["project_scope"] == "alpha"
+    rendered = str(statement)
+    assert "chunk_embeddings.model_run_id" in rendered
+    assert "projects.slug" in rendered
+    assert "CAST(:embedding AS halfvec" not in rendered
+    assert params == {}
 
 
 @pytest.mark.asyncio

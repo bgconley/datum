@@ -7,6 +7,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30.0",
+    "pgvector>=0.3.6",
     "alembic>=1.14.0",
     "httpx>=0.28.0",
     "kreuzberg>=2.3.0",
@@ -55,5 +56,5 @@ line-length = 100
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [[tool.mypy.overrides]]
-module = ["frontmatter", "pymupdf4llm", "kreuzberg", "yaml"]
+module = ["frontmatter", "pymupdf4llm", "kreuzberg", "yaml", "pgvector.*"]
 ignore_missing_imports = true

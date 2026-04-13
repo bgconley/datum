@@ -16,6 +16,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from datum.config import settings
 from datum.models.core import Document, DocumentVersion, PipelineConfig, Project, VersionHeadEvent
 from datum.models.search import (
+    ChunkEmbedding,
     DocumentChunk,
     SearchRun,
     SearchRunResult,
@@ -625,40 +626,33 @@ async def _vector_search(
         )
         return []
 
-    scope_sql, params = _build_scope_sql(version_scope, project_scope)
     dims = len(query_embedding)
-    embedding_literal = "[" + ",".join(str(value) for value in query_embedding) + "]"
-    sql = text(
-        f"""
-        SELECT dc.id::text,
-               1 - (
-                   ce.embedding <=> CAST(:embedding AS halfvec({settings.embedding_dimensions}))
-               ) AS similarity
-        FROM chunk_embeddings ce
-        JOIN document_chunks dc ON ce.chunk_id = dc.id
-        JOIN document_versions dv ON dc.version_id = dv.id
-        JOIN documents d ON dv.document_id = d.id
-        JOIN projects p ON d.project_id = p.id
-        WHERE ce.dimensions = :dimensions
-          AND ce.model_run_id = :model_run_id
-          AND {scope_sql}
-        ORDER BY ce.embedding <=> CAST(:embedding AS halfvec({settings.embedding_dimensions}))
-        LIMIT :limit
-        """
-    )
-    try:
-        result = await session.execute(
-            sql,
-            {
-                "embedding": embedding_literal,
-                "dimensions": dims,
-                "model_run_id": embedding_model_run_id,
-                "limit": limit,
-                **params,
-            },
+    distance = ChunkEmbedding.embedding.cosine_distance(query_embedding)
+    query = (
+        select(
+            DocumentChunk.id,
+            (1 - distance).label("similarity"),
         )
+        .select_from(ChunkEmbedding)
+        .join(DocumentChunk, ChunkEmbedding.chunk_id == DocumentChunk.id)
+        .join(DocumentVersion, DocumentChunk.version_id == DocumentVersion.id)
+        .join(Document, DocumentVersion.document_id == Document.id)
+        .join(Project, Document.project_id == Project.id)
+        .where(
+            ChunkEmbedding.dimensions == dims,
+            ChunkEmbedding.model_run_id == embedding_model_run_id,
+        )
+        .order_by(distance)
+        .limit(limit)
+    )
+
+    for filter_clause in _build_term_scope_filters(version_scope, project_scope):
+        query = query.where(filter_clause)
+
+    try:
+        result = await session.execute(query)
         return [
-            RankedCandidate(chunk_id=row[0], rank=index + 1, score=float(row[1] or 0.0))
+            RankedCandidate(chunk_id=str(row[0]), rank=index + 1, score=float(row[1] or 0.0))
             for index, row in enumerate(result.fetchall())
         ]
     except Exception as exc:

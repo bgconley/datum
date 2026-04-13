@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (
     ARRAY,
     DateTime,
@@ -75,6 +76,7 @@ class ChunkEmbedding(Base):
         PG_UUID(as_uuid=True), ForeignKey("model_runs.id"), nullable=False
     )
     dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(HALFVEC(1024), nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("chunk_id", "model_run_id"),)

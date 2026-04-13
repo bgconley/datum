@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     embedding_endpoint: str = "http://localhost:8010"
     embedding_model: str = "Qwen3-Embedding-4B"
     embedding_dimensions: int = EMBEDDING_SCHEMA_DIMENSIONS
-    embedding_protocol: str = "openai"
+    embedding_protocol: str = "qwen3_embedder"
     embedding_batch_size: int = 64
     embedding_query_instruction: str = (
         "Given a technical query about an internal software project, retrieve the most "
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
     reranker_endpoint: str = "http://localhost:8011"
     reranker_model: str = "Qwen3-Reranker-0.6B"
-    reranker_protocol: str = "openai"
+    reranker_protocol: str = "qwen3_reranker"
     reranker_instruction: str = (
         "Given a technical query about an internal software project, judge whether the "
         "passage is a strong answer source. Prefer passages that are authoritative, "
