@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useEffectEvent, useState } from 'react'
+import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 
 import {
   api,
@@ -14,6 +14,7 @@ import {
   type SearchDraft,
   type SearchRouteState,
 } from '@/lib/search-route'
+import { useProjectsQuery } from '@/lib/workspace-query'
 import { SearchBar } from './SearchBar'
 import { SearchResults } from './SearchResults'
 
@@ -71,7 +72,6 @@ interface SearchPageProps {
 }
 
 export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
-  const [projects, setProjects] = useState<Project[]>([])
   const [draft, setDraft] = useState<SearchDraft>(() => draftFromRouteSearch(routeSearch))
   const [results, setResults] = useState<SearchResultItem[]>([])
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
@@ -83,11 +83,21 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
   const [semanticEnabled, setSemanticEnabled] = useState<boolean | null>(null)
   const [rerankApplied, setRerankApplied] = useState<boolean | null>(null)
 
-  useEffect(() => {
-    api.projects.list().then(setProjects).catch((err) => {
-      console.error(err)
-    })
-  }, [])
+  const projectsQuery = useProjectsQuery()
+  const projects = projectsQuery.data ?? []
+  const lastExecutedRouteKeyRef = useRef('')
+  const routeDraft = useMemo(
+    () => draftFromRouteSearch(routeSearch),
+    [
+      routeSearch.as_of,
+      routeSearch.limit,
+      routeSearch.mode,
+      routeSearch.project,
+      routeSearch.query,
+      routeSearch.scope,
+    ],
+  )
+  const routeDraftKey = useMemo(() => JSON.stringify(routeDraft), [routeDraft])
 
   const executeSearch = useEffectEvent(async (nextDraft: SearchDraft) => {
     const request = buildSearchRequest(nextDraft)
@@ -164,14 +174,17 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
   })
 
   useEffect(() => {
-    const nextDraft = draftFromRouteSearch(routeSearch)
-    setDraft((current) => (draftsEqual(current, nextDraft) ? current : nextDraft))
+    setDraft((current) => (draftsEqual(current, routeDraft) ? current : routeDraft))
 
-    if (nextDraft.query.trim()) {
-      void executeSearch(nextDraft)
+    if (routeDraft.query.trim()) {
+      if (lastExecutedRouteKeyRef.current !== routeDraftKey) {
+        lastExecutedRouteKeyRef.current = routeDraftKey
+        void executeSearch(routeDraft)
+      }
       return
     }
 
+    lastExecutedRouteKeyRef.current = ''
     startTransition(() => {
       setQuery('')
       setResults([])
@@ -182,7 +195,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       setRerankApplied(null)
       setError(null)
     })
-  }, [executeSearch, routeSearch])
+  }, [executeSearch, routeDraft, routeDraftKey])
 
   const handleSearch = async () => {
     const currentDraft = draftFromRouteSearch(routeSearch)
@@ -223,6 +236,20 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     navigateToSearch(nextDraft)
   }
 
+  const handleDraftChange = (nextDraft: SearchDraft) => {
+    let adjustedDraft = nextDraft
+    if (nextDraft.mode === 'search_history' && nextDraft.versionMode === 'current') {
+      adjustedDraft = { ...nextDraft, versionMode: 'all' }
+    }
+    if (nextDraft.mode === 'compare_over_time' && nextDraft.versionMode === 'current') {
+      adjustedDraft = { ...nextDraft, versionMode: 'as_of' }
+    }
+    if (nextDraft.mode === 'find_docs' && nextDraft.versionMode === 'as_of' && !nextDraft.asOf) {
+      adjustedDraft = { ...nextDraft, versionMode: 'current' }
+    }
+    setDraft(adjustedDraft)
+  }
+
   const scopeSummary = describeScope(draft, projects)
 
   return (
@@ -243,7 +270,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         value={draft}
         projects={projects}
         loading={loading}
-        onChange={setDraft}
+        onChange={handleDraftChange}
         onSearch={handleSearch}
         onReset={handleReset}
       />
@@ -270,6 +297,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
           query={query}
           scopeSummary={scopeSummary}
           projectScope={draft.project || null}
+          searchMode={draft.mode}
           onProjectSelect={handleProjectFacet}
           loading={loading}
           streamPhase={streamPhase}

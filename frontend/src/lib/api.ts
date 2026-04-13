@@ -15,6 +15,7 @@ export interface Project {
   status: string
   tags: string[]
   created: string | null
+  filesystem_path: string | null
 }
 
 export interface DocumentMeta {
@@ -38,6 +39,8 @@ export interface DocumentContent {
 export interface SearchResultItem {
   document_title: string
   document_path: string
+  document_type: string
+  document_status: string
   project_slug: string
   heading_path: string
   snippet: string
@@ -66,6 +69,22 @@ export interface SearchRequestParams {
   limit?: number
 }
 
+export interface DocumentMoveRequest {
+  new_relative_path: string
+}
+
+export interface GeneratedFile {
+  relative_path: string
+  absolute_path: string
+  size_bytes: number
+}
+
+export interface WorkspaceSnapshot {
+  project: Project
+  documents: DocumentMeta[]
+  generated_files: GeneratedFile[]
+}
+
 export interface SearchStreamEvent {
   event: 'phase' | 'error'
   phase?: 'lexical' | 'reranked'
@@ -88,6 +107,8 @@ export interface VersionInfo {
   label?: string
   change_source?: string
   restored_from?: number
+  created_by?: string
+  indexing_status?: string
 }
 
 export interface VersionContent {
@@ -117,6 +138,8 @@ export const api = {
   projects: {
     list: () => fetchJSON<Project[]>(`${API_BASE}/projects`),
     get: (slug: string) => fetchJSON<Project>(`${API_BASE}/projects/${slug}`),
+    workspace: (slug: string) =>
+      fetchJSON<WorkspaceSnapshot>(`${API_BASE}/projects/${slug}/workspace`),
     create: (data: { name: string; slug: string; description?: string; tags?: string[] }) =>
       fetchJSON<Project>(`${API_BASE}/projects`, {
         method: 'POST',
@@ -148,6 +171,23 @@ export const api = {
           body: JSON.stringify(data),
         },
       ),
+    move: (projectSlug: string, docPath: string, data: DocumentMoveRequest) =>
+      fetchJSON<DocumentMeta>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/move`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        },
+      ),
+    createFolder: (projectSlug: string, data: { relative_path: string }) =>
+      fetchJSON<{ relative_path: string }>(`${API_BASE}/projects/${projectSlug}/docs/folders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    listGenerated: (projectSlug: string) =>
+      fetchJSON<GeneratedFile[]>(`${API_BASE}/projects/${projectSlug}/docs/generated`),
   },
   versions: {
     list: (projectSlug: string, docPath: string) =>
@@ -162,6 +202,44 @@ export const api = {
       fetchJSON<VersionDiff>(
         `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/versions/diff/${versionA}/${versionB}`,
       ),
+    restore: (projectSlug: string, docPath: string, version: number, data?: { label?: string }) =>
+      fetchJSON<DocumentMeta>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/versions/${version}/restore`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data ?? {}),
+        },
+      ),
+  },
+  subscribeProjectWorkspace: (
+    projectSlug: string,
+    onMessage: (snapshot: WorkspaceSnapshot) => void,
+  ) => {
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    let socket: WebSocket | null = null
+    let disposed = false
+
+    const timer = window.setTimeout(() => {
+      if (disposed) {
+        return
+      }
+
+      socket = new WebSocket(
+        `${protocol}://${window.location.host}/ws/projects/${encodeURIComponent(projectSlug)}/workspace`,
+      )
+      socket.onmessage = (event) => {
+        onMessage(JSON.parse(event.data) as WorkspaceSnapshot)
+      }
+    }, 0)
+
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+      if (socket && socket.readyState < WebSocket.CLOSING) {
+        socket.close()
+      }
+    }
   },
   search: (params: SearchRequestParams) =>
     fetchJSON<SearchResponse>(`${API_BASE}/search`, {

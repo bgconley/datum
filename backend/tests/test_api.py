@@ -27,6 +27,26 @@ async def test_create_and_list_projects(client):
 
 
 @pytest.mark.asyncio
+async def test_project_workspace_snapshot_endpoint(client):
+    await client.post("/api/v1/projects", json={"name": "Workspace", "slug": "workspace"})
+    created = await client.post("/api/v1/projects/workspace/docs", json={
+        "relative_path": "docs/overview.md",
+        "title": "Overview",
+        "doc_type": "plan",
+        "content": "# Overview",
+    })
+    assert created.status_code == 201
+
+    resp = await client.get("/api/v1/projects/workspace/workspace")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["project"]["slug"] == "workspace"
+    assert payload["documents"][0]["relative_path"] == "docs/overview.md"
+    generated_paths = [item["relative_path"] for item in payload["generated_files"]]
+    assert ".piq/docs/overview.md/manifest.yaml" in generated_paths
+
+
+@pytest.mark.asyncio
 async def test_create_and_get_document(client):
     await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
     resp = await client.post("/api/v1/projects/p/docs", json={
@@ -121,6 +141,98 @@ async def test_version_history_endpoints(client):
     assert diff_payload["version_b"] == 2
     assert diff_payload["additions"] > 0 or diff_payload["deletions"] > 0
     assert "V2 updated" in diff_payload["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_restore_version_endpoint(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/a.md",
+        "title": "A",
+        "doc_type": "plan",
+        "content": "# V1",
+    })
+
+    current = await client.get("/api/v1/projects/p/docs/docs/a.md")
+    hash_v1 = current.json()["metadata"]["content_hash"]
+    full_content = current.json()["content"]
+
+    saved = await client.put("/api/v1/projects/p/docs/docs/a.md", json={
+        "content": full_content.replace("# V1", "# V2"),
+        "base_hash": hash_v1,
+    })
+    assert saved.status_code == 200
+
+    restored = await client.post(
+        "/api/v1/projects/p/docs/docs/a.md/versions/1/restore",
+        json={"label": "Back to v1"},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["version"] == 3
+
+    latest = await client.get("/api/v1/projects/p/docs/docs/a.md")
+    assert latest.status_code == 200
+    assert "# V1" in latest.json()["content"]
+
+    versions = await client.get("/api/v1/projects/p/docs/docs/a.md/versions")
+    assert versions.status_code == 200
+    assert versions.json()[-1]["restored_from"] == 1
+    assert versions.json()[-1]["label"] == "Back to v1"
+
+
+@pytest.mark.asyncio
+async def test_move_document_endpoint(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    created = await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/notes.md",
+        "title": "Notes",
+        "doc_type": "plan",
+        "content": "# Notes",
+    })
+    assert created.status_code == 201
+
+    moved = await client.post(
+        "/api/v1/projects/p/docs/docs/notes.md/move",
+        json={"new_relative_path": "docs/archive/renamed-notes.md"},
+    )
+    assert moved.status_code == 200
+    assert moved.json()["relative_path"] == "docs/archive/renamed-notes.md"
+
+    old_doc = await client.get("/api/v1/projects/p/docs/docs/notes.md")
+    assert old_doc.status_code == 404
+
+    new_doc = await client.get("/api/v1/projects/p/docs/docs/archive/renamed-notes.md")
+    assert new_doc.status_code == 200
+    assert "# Notes" in new_doc.json()["content"]
+
+    versions = await client.get("/api/v1/projects/p/docs/docs/archive/renamed-notes.md/versions")
+    assert versions.status_code == 200
+    assert len(versions.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_folder_and_list_generated_files(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+
+    folder = await client.post(
+        "/api/v1/projects/p/docs/folders",
+        json={"relative_path": "docs/adr"},
+    )
+    assert folder.status_code == 201
+    assert folder.json()["relative_path"] == "docs/adr"
+
+    created = await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/adr/decision.md",
+        "title": "Decision",
+        "doc_type": "decision",
+        "content": "# Decision",
+    })
+    assert created.status_code == 201
+
+    generated = await client.get("/api/v1/projects/p/docs/generated")
+    assert generated.status_code == 200
+    generated_paths = [item["relative_path"] for item in generated.json()]
+    assert ".piq/docs/adr/decision.md/manifest.yaml" in generated_paths
 
 
 @pytest.mark.asyncio
@@ -457,6 +569,8 @@ async def test_search_serializes_nonempty_results(client, monkeypatch):
             SearchResult(
                 document_title="Search Doc",
                 document_path="docs/search.md",
+                document_type="note",
+                document_status="draft",
                 project_slug="p",
                 heading_path="Intro",
                 snippet="Use DATABASE_URL on port 8001.",
@@ -514,6 +628,8 @@ async def test_search_stream_emits_phases(client, monkeypatch):
                     SearchResult(
                         document_title="Search Doc",
                         document_path="docs/search.md",
+                        document_type="note",
+                        document_status="draft",
                         project_slug="p",
                         heading_path="Intro",
                         snippet="Use DATABASE_URL on port 8001.",

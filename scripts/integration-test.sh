@@ -649,7 +649,7 @@ curl -sf http://localhost:3080/ | grep -q Datum && echo "    OK" || { echo "    
 echo "  Caddy -> Routed search page:"
 curl -sf http://localhost:3080/search | grep -q Datum && echo "    OK" || { echo "    FAIL: routed /search page not served"; exit 1; }
 echo "  Caddy -> Routed document history page:"
-curl -sf "http://localhost:3080/projects/${API_TEST_SLUG}/history/docs/api-test.md" | grep -q Datum && echo "    OK" || { echo "    FAIL: routed document history page not served"; exit 1; }
+curl -sf "http://localhost:3080/projects/${API_TEST_SLUG}/docs/docs/api-test.md/history" | grep -q Datum && echo "    OK" || { echo "    FAIL: routed document history page not served"; exit 1; }
 echo ""
 
 # --- 9. Cleanup ---

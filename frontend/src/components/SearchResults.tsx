@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { SearchResultItem } from '@/lib/api'
+import type { SearchMode } from '@/lib/search-route'
 
 interface SearchResultsProps {
   results: SearchResultItem[]
@@ -12,6 +13,7 @@ interface SearchResultsProps {
   query: string
   scopeSummary: string
   projectScope: string | null
+  searchMode: SearchMode
   onProjectSelect: (project: string) => void
   loading: boolean
   streamPhase: 'idle' | 'lexical' | 'reranked'
@@ -28,21 +30,6 @@ function buildCountFacets(values: string[]): Array<{ value: string; count: numbe
   return [...counts.entries()]
     .map(([value, count]) => ({ value, count }))
     .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value))
-}
-
-function buildProjectFacets(results: SearchResultItem[]): Array<{ slug: string; count: number }> {
-  return buildCountFacets(results.map((result) => result.project_slug)).map(({ value, count }) => ({
-    slug: value,
-    count,
-  }))
-}
-
-function buildSignalFacets(results: SearchResultItem[]): Array<{ value: string; count: number }> {
-  return buildCountFacets(results.flatMap((result) => result.match_signals))
-}
-
-function buildTermFacets(results: SearchResultItem[]): Array<{ value: string; count: number }> {
-  return buildCountFacets(results.flatMap((result) => result.matched_terms)).slice(0, 8)
 }
 
 function describePhase(
@@ -82,6 +69,7 @@ export function SearchResults({
   query,
   scopeSummary,
   projectScope,
+  searchMode,
   onProjectSelect,
   loading,
   streamPhase,
@@ -94,14 +82,27 @@ export function SearchResults({
   useEffect(() => {
     setSignalFacet(null)
     setTermFacet(null)
-  }, [query, projectScope])
+  }, [query, projectScope, searchMode])
 
-  const projectFacets = buildProjectFacets(results)
-  const signalFacets = buildSignalFacets(results)
-  const termFacets = buildTermFacets(results)
+  const modeFilteredResults = useMemo(() => {
+    if (searchMode === 'find_decisions') {
+      return results.filter((result) => result.document_type === 'decision')
+    }
+    return results
+  }, [results, searchMode])
+
+  const projectFacets = buildCountFacets(modeFilteredResults.map((result) => result.project_slug)).map(
+    ({ value, count }) => ({
+      value,
+      count,
+    }),
+  )
+  const signalFacets = buildCountFacets(modeFilteredResults.flatMap((result) => result.match_signals))
+  const termFacets = buildCountFacets(modeFilteredResults.flatMap((result) => result.matched_terms)).slice(0, 10)
+  const typeFacets = buildCountFacets(modeFilteredResults.map((result) => result.document_type))
   const phaseDescription = describePhase(loading, streamPhase, semanticEnabled, rerankApplied)
 
-  const filteredResults = results.filter((result) => {
+  const filteredResults = modeFilteredResults.filter((result) => {
     if (signalFacet && !result.match_signals.includes(signalFacet)) {
       return false
     }
@@ -111,7 +112,7 @@ export function SearchResults({
     return true
   })
 
-  if (results.length === 0) {
+  if (modeFilteredResults.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-10 text-center text-sm text-muted-foreground">
         No results found for "{query}" within {scopeSummary}.
@@ -120,17 +121,121 @@ export function SearchResults({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-border/70 bg-card/50 p-4">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+    <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
+      <aside className="space-y-4">
+        <Card className="bg-card/60">
+          <CardHeader>
+            <CardTitle className="text-base">Facets</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {!projectScope && projectFacets.length > 1 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Projects
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {projectFacets.map((facet) => (
+                    <Button
+                      key={facet.value}
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={() => onProjectSelect(facet.value)}
+                    >
+                      {facet.value} ({facet.count})
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {typeFacets.length > 1 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Doc types
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {typeFacets.map((facet) => (
+                    <Badge key={facet.value} variant="outline">
+                      {facet.value} ({facet.count})
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {signalFacets.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Signals
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {signalFacets.map((facet) => (
+                    <Button
+                      key={facet.value}
+                      type="button"
+                      variant={signalFacet === facet.value ? 'secondary' : 'outline'}
+                      size="xs"
+                      onClick={() => setSignalFacet(signalFacet === facet.value ? null : facet.value)}
+                    >
+                      {facet.value} ({facet.count})
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {termFacets.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Exact terms
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {termFacets.map((facet) => (
+                    <Button
+                      key={facet.value}
+                      type="button"
+                      variant={termFacet === facet.value ? 'secondary' : 'outline'}
+                      size="xs"
+                      onClick={() => setTermFacet(termFacet === facet.value ? null : facet.value)}
+                    >
+                      {facet.value}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(projectScope || signalFacet || termFacet) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => {
+                  if (projectScope) {
+                    onProjectSelect('')
+                  }
+                  setSignalFacet(null)
+                  setTermFacet(null)
+                }}
+              >
+                Clear facets
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      </aside>
+
+      <div className="space-y-4">
+        <div className="rounded-xl border border-border/70 bg-card/50 p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-1">
               <div className="text-sm font-medium text-foreground">
                 {filteredResults.length} visible result{filteredResults.length === 1 ? '' : 's'} for "{query}"
-                {filteredResults.length !== results.length ? ` (${results.length} total)` : ''}
+                {filteredResults.length !== modeFilteredResults.length ? ` (${modeFilteredResults.length} total)` : ''}
               </div>
               <div className="text-sm text-muted-foreground">
-                Searching {scopeSummary}
+                {loading ? 'Searching' : 'Across'} {scopeSummary}
                 {latencyMs != null ? ` in ${latencyMs}ms` : ''}
               </div>
             </div>
@@ -140,95 +245,10 @@ export function SearchResults({
               </div>
             )}
           </div>
-
-          <div className="flex flex-wrap gap-4">
-            {!projectScope && projectFacets.length > 1 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Projects
-                </span>
-                {projectFacets.map((facet) => (
-                  <Button
-                    key={facet.slug}
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() => onProjectSelect(facet.slug)}
-                  >
-                    {facet.slug} ({facet.count})
-                  </Button>
-                ))}
-              </div>
-            )}
-
-            {signalFacets.length > 1 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Signals
-                </span>
-                {signalFacets.map((facet) => (
-                  <Button
-                    key={facet.value}
-                    type="button"
-                    variant={signalFacet === facet.value ? 'secondary' : 'outline'}
-                    size="xs"
-                    onClick={() => setSignalFacet(signalFacet === facet.value ? null : facet.value)}
-                  >
-                    {facet.value} ({facet.count})
-                  </Button>
-                ))}
-              </div>
-            )}
-
-            {termFacets.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Exact Terms
-                </span>
-                {termFacets.map((facet) => (
-                  <Button
-                    key={facet.value}
-                    type="button"
-                    variant={termFacet === facet.value ? 'secondary' : 'outline'}
-                    size="xs"
-                    onClick={() => setTermFacet(termFacet === facet.value ? null : facet.value)}
-                  >
-                    {facet.value} ({facet.count})
-                  </Button>
-                ))}
-              </div>
-            )}
-
-            {(projectScope || signalFacet || termFacet) && (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={() => {
-                    if (projectScope) {
-                      onProjectSelect('')
-                    }
-                    setSignalFacet(null)
-                    setTermFacet(null)
-                  }}
-                >
-                  Clear facets
-                </Button>
-              </div>
-            )}
-          </div>
         </div>
-      </div>
 
-      {filteredResults.map((result) => (
-        <Link
-          key={result.chunk_id || `${result.project_slug}:${result.document_path}:${result.version_number}`}
-          to="/projects/$slug/docs/$"
-          params={{ slug: result.project_slug, _splat: result.document_path }}
-          className="block"
-        >
-          <Card className="border border-border/80 transition-colors hover:bg-accent/40">
+        {filteredResults.map((result) => (
+          <Card key={result.chunk_id || `${result.project_slug}:${result.document_path}:${result.version_number}`} className="border border-border/80 bg-card/70">
             <CardHeader>
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
@@ -238,17 +258,17 @@ export function SearchResults({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
+                  <Badge variant="outline">{result.document_type}</Badge>
                   <Badge variant="outline">v{result.version_number}</Badge>
                   {(result.line_start > 0 || result.line_end > 0) && (
                     <Badge variant="outline">
                       lines {result.line_start}-{result.line_end}
                     </Badge>
                   )}
-                  <span className="text-muted-foreground">{result.fused_score.toFixed(4)}</span>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center gap-1.5">
                 {result.match_signals.map((signal) => (
                   <Badge key={signal} variant="secondary" className="text-xs">
@@ -273,10 +293,78 @@ export function SearchResults({
                   ))}
                 </div>
               )}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  to="/projects/$slug/docs/$"
+                  params={{ slug: result.project_slug, _splat: result.document_path }}
+                  search={{
+                    sourceQuery: query,
+                    sourceSnippet: result.snippet,
+                    sourceHeading: result.heading_path,
+                    sourceSignals: result.match_signals.join(','),
+                  }}
+                  className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+                >
+                  Open source
+                </Link>
+
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Why this result?
+                  </summary>
+                  <div className="mt-3 rounded-2xl border border-border/70 bg-background/70 p-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                          Matched signals
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {result.match_signals.map((signal) => (
+                            <Badge key={signal} variant="secondary">
+                              {signal}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                          Exact terms
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {result.matched_terms.length > 0 ? (
+                            result.matched_terms.map((term) => (
+                              <Badge key={term} variant="outline">
+                                {term}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="text-sm text-muted-foreground">No exact-term matches surfaced.</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-xs">
+                        <div className="text-muted-foreground">Heading path</div>
+                        <div className="mt-1">{result.heading_path || 'Top-level chunk'}</div>
+                      </div>
+                      <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-xs">
+                        <div className="text-muted-foreground">Document status</div>
+                        <div className="mt-1">{result.document_status}</div>
+                      </div>
+                      <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-xs">
+                        <div className="text-muted-foreground">Fused score</div>
+                        <div className="mt-1">{result.fused_score.toFixed(4)}</div>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </div>
             </CardContent>
           </Card>
-        </Link>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }

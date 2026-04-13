@@ -142,6 +142,8 @@ async def test_run_evaluation_uses_search_overrides(monkeypatch):
             SearchResult(
                 document_title="Search Doc",
                 document_path="docs/search.md",
+                document_type="note",
+                document_status="draft",
                 project_slug="p",
                 heading_path="Intro",
                 snippet="Use DATABASE_URL",

@@ -1,11 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { Command } from 'cmdk'
-import { useNavigate } from '@tanstack/react-router'
+import { useLocation, useNavigate } from '@tanstack/react-router'
 
-import { api, type DocumentMeta, type Project } from '@/lib/api'
+import { openTemplateDialog } from '@/components/CreateDocumentDialog'
+import { api, type DocumentMeta } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
+import { extractTechnicalTerms, stripFrontmatter, uniqueTechnicalTerms } from '@/lib/technical-terms'
+import { useProjectsQuery } from '@/lib/workspace-query'
 
 interface CommandDocument extends DocumentMeta {
   project_slug: string
+}
+
+interface CommandEntity {
+  projectSlug: string
+  rawText: string
+  termType: string
 }
 
 const TOGGLE_EVENT = 'datum:toggle-command-palette'
@@ -16,9 +27,12 @@ export function toggleCommandPalette() {
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false)
-  const [projects, setProjects] = useState<Project[]>([])
-  const [documents, setDocuments] = useState<CommandDocument[]>([])
   const navigate = useNavigate()
+  const location = useLocation()
+
+  const selectedProject = location.pathname.startsWith('/projects/')
+    ? decodeURIComponent(location.pathname.split('/')[2] ?? '')
+    : null
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -38,37 +52,93 @@ export function CommandPalette() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!open) {
-      return
-    }
+  const projectsQuery = useProjectsQuery()
+  const projects = open ? (projectsQuery.data ?? []) : []
+  const visibleProjects = useMemo(
+    () => (selectedProject ? projects.filter((project) => project.slug === selectedProject) : projects),
+    [projects, selectedProject],
+  )
 
-    api.projects.list().then(setProjects).catch(console.error)
-  }, [open])
+  const workspaceQueries = useQueries({
+    queries: open
+      ? visibleProjects.map((project) => ({
+          queryKey: queryKeys.workspace(project.slug),
+          queryFn: () => api.projects.workspace(project.slug),
+        }))
+      : [],
+  })
 
-  useEffect(() => {
-    if (!open || projects.length === 0) {
-      return
-    }
+  const documents = useMemo(
+    () =>
+      workspaceQueries.flatMap((query) => {
+        if (!query.data) {
+          return []
+        }
 
-    Promise.all(
-      projects.map((project) =>
-        api.documents
-          .list(project.slug)
-          .then((docs) =>
-            docs.map((document) => ({ ...document, project_slug: project.slug })),
-          ),
-      ),
-    )
-      .then((results) => setDocuments(results.flat()))
-      .catch(console.error)
-  }, [open, projects])
+        return query.data.documents.map((document) => ({
+          ...document,
+          project_slug: query.data.project.slug,
+        }))
+      }),
+    [workspaceQueries],
+  )
+
+  const entitySeed = useMemo(
+    () =>
+      documents
+        .slice(0, 10)
+        .map((document) => `${document.project_slug}:${document.relative_path}`)
+        .join('|'),
+    [documents],
+  )
+
+  const entitiesQuery = useQuery({
+    queryKey: queryKeys.commandPaletteEntities(selectedProject, entitySeed),
+    enabled: open && documents.length > 0,
+    queryFn: async () => {
+      const scopedDocuments = selectedProject
+        ? documents.filter((document) => document.project_slug === selectedProject).slice(0, 10)
+        : documents.slice(0, 10)
+
+      const items = await Promise.all(
+        scopedDocuments.map(async (document) => {
+          const fullDocument = await api.documents.get(document.project_slug, document.relative_path)
+          return {
+            projectSlug: document.project_slug,
+            terms: uniqueTechnicalTerms(
+              extractTechnicalTerms(stripFrontmatter(fullDocument.content)),
+              8,
+            ),
+          }
+        }),
+      )
+
+      const nextEntities: CommandEntity[] = []
+      const seen = new Set<string>()
+      for (const item of items) {
+        for (const term of item.terms) {
+          const key = `${item.projectSlug}:${term.termType}:${term.rawText}`
+          if (seen.has(key)) {
+            continue
+          }
+          seen.add(key)
+          nextEntities.push({
+            projectSlug: item.projectSlug,
+            rawText: term.rawText,
+            termType: term.termType,
+          })
+        }
+      }
+      return nextEntities.slice(0, 16)
+    },
+  })
+  const entities = entitiesQuery.data ?? []
+
+  const close = () => setOpen(false)
 
   if (!open) {
     return null
   }
-
-  const close = () => setOpen(false)
 
   return (
     <div
@@ -82,7 +152,7 @@ export function CommandPalette() {
         <Command className="overflow-hidden rounded-[1.5rem] border border-border/80 bg-card shadow-2xl">
           <Command.Input
             autoFocus
-            placeholder="Jump to search, a project, or a document…"
+            placeholder="Open a document, search, create an ADR, jump to an entity…"
             className="h-14 w-full border-b border-border bg-transparent px-5 text-sm outline-none"
           />
           <Command.List className="max-h-[24rem] overflow-auto p-3">
@@ -99,12 +169,37 @@ export function CommandPalette() {
                 }}
                 className="rounded-xl px-3 py-2 text-sm data-[selected=true]:bg-accent"
               >
-                Search documents
+                Search workspace
               </Command.Item>
+
+              {selectedProject && (
+                <>
+                  <Command.Item
+                    value={`create adr ${selectedProject}`}
+                    onSelect={() => {
+                      close()
+                      openTemplateDialog('adr')
+                    }}
+                    className="rounded-xl px-3 py-2 text-sm data-[selected=true]:bg-accent"
+                  >
+                    Create ADR
+                  </Command.Item>
+                  <Command.Item
+                    value={`review inbox ${selectedProject}`}
+                    onSelect={() => {
+                      close()
+                      navigate({ to: '/projects/$slug/review', params: { slug: selectedProject } })
+                    }}
+                    className="rounded-xl px-3 py-2 text-sm data-[selected=true]:bg-accent"
+                  >
+                    Review inbox
+                  </Command.Item>
+                </>
+              )}
             </Command.Group>
 
             <Command.Group heading="Projects" className="mb-3">
-              {projects.map((project) => (
+              {visibleProjects.map((project) => (
                 <Command.Item
                   key={project.slug}
                   value={`project ${project.name} ${project.slug}`}
@@ -122,32 +217,61 @@ export function CommandPalette() {
               ))}
             </Command.Group>
 
-            <Command.Group heading="Documents">
-              {documents.map((document) => (
-                <Command.Item
-                  key={`${document.project_slug}:${document.relative_path}`}
-                  value={`document ${document.title} ${document.project_slug} ${document.relative_path}`}
-                  onSelect={() => {
-                    close()
-                    navigate({
-                      to: '/projects/$slug/docs/$',
-                      params: {
-                        slug: document.project_slug,
-                        _splat: document.relative_path,
-                      },
-                    })
-                  }}
-                  className="rounded-xl px-3 py-2 text-sm data-[selected=true]:bg-accent"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate">{document.title}</div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {document.project_slug} / {document.relative_path}
+            <Command.Group heading="Documents" className="mb-3">
+              {documents
+                .filter((document) => (selectedProject ? document.project_slug === selectedProject : true))
+                .map((document) => (
+                  <Command.Item
+                    key={`${document.project_slug}:${document.relative_path}`}
+                    value={`document ${document.title} ${document.project_slug} ${document.relative_path}`}
+                    onSelect={() => {
+                      close()
+                      navigate({
+                        to: '/projects/$slug/docs/$',
+                        params: {
+                          slug: document.project_slug,
+                          _splat: document.relative_path,
+                        },
+                      })
+                    }}
+                    className="rounded-xl px-3 py-2 text-sm data-[selected=true]:bg-accent"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate">{document.title}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {document.project_slug} / {document.relative_path}
+                      </div>
                     </div>
-                  </div>
-                </Command.Item>
-              ))}
+                  </Command.Item>
+                ))}
             </Command.Group>
+
+            {entities.length > 0 && (
+              <Command.Group heading="Entities">
+                {entities.map((entity) => (
+                  <Command.Item
+                    key={`${entity.projectSlug}:${entity.termType}:${entity.rawText}`}
+                    value={`entity ${entity.rawText} ${entity.termType}`}
+                    onSelect={() => {
+                      close()
+                      navigate({
+                        to: '/search',
+                        search: {
+                          query: entity.rawText,
+                          project: entity.projectSlug,
+                        },
+                      })
+                    }}
+                    className="rounded-xl px-3 py-2 text-sm data-[selected=true]:bg-accent"
+                  >
+                    <div className="flex w-full items-center justify-between gap-3">
+                      <span>{entity.rawText}</span>
+                      <span className="text-xs text-muted-foreground">{entity.termType}</span>
+                    </div>
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
           </Command.List>
         </Command>
       </div>

@@ -122,7 +122,9 @@ async def sync_document_version_to_db(
         content_hash=content_hash,
         filesystem_path=filesystem_path,
         byte_size=byte_size,
+        label=version_info.label,
         change_source=change_source,
+        restored_from=version_info.restored_from,
         created_at=version_info.created_at,
     )
     session.add(version)
@@ -201,6 +203,39 @@ async def sync_document_version_to_db(
                 idempotency_key=idem_key,
             )
         )
+
+    await session.commit()
+
+
+async def move_document_path_in_db(
+    session: AsyncSession,
+    project_id: UUID,
+    old_canonical_path: str,
+    new_canonical_path: str,
+) -> None:
+    """Update derived DB rows after a cabinet document move/rename."""
+    document_result = await session.execute(
+        select(Document).where(
+            Document.project_id == project_id,
+            Document.canonical_path == old_canonical_path,
+        )
+    )
+    document = document_result.scalar_one_or_none()
+    if document is not None:
+        document.canonical_path = new_canonical_path
+        document.slug = new_canonical_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        document.updated_at = datetime.now(UTC)
+
+    source_file_result = await session.execute(
+        select(SourceFile).where(
+            SourceFile.project_id == project_id,
+            SourceFile.canonical_path == old_canonical_path,
+        )
+    )
+    source_file = source_file_result.scalar_one_or_none()
+    if source_file is not None:
+        source_file.canonical_path = new_canonical_path
+        source_file.last_seen_at = datetime.now(UTC)
 
     await session.commit()
 

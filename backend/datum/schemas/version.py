@@ -11,6 +11,8 @@ class VersionResponse(BaseModel):
     label: str | None = None
     change_source: str | None = None
     restored_from: int | None = None
+    created_by: str | None = None
+    indexing_status: str | None = None
 
 
 class VersionContentResponse(BaseModel):
@@ -25,3 +27,7 @@ class VersionDiffResponse(BaseModel):
     diff_text: str
     additions: int
     deletions: int
+
+
+class VersionRestoreRequest(BaseModel):
+    label: str | None = None

@@ -13,6 +13,10 @@ export function Layout({ children }: { children: ReactNode }) {
   const { content, open, setOpen, toggleOpen } = useContextPanel()
 
   useEffect(() => {
+    const focusSearch = () => {
+      window.dispatchEvent(new CustomEvent('datum:focus-search'))
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const tagName = target?.tagName ?? ''
@@ -28,17 +32,39 @@ export function Layout({ children }: { children: ReactNode }) {
         !isEditable
       ) {
         event.preventDefault()
+        if (location.pathname === '/search') {
+          focusSearch()
+          return
+        }
         navigate({ to: '/search' })
+        window.setTimeout(focusSearch, 0)
+      }
+
+      if (
+        event.key.toLowerCase() === 'e' &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isEditable &&
+        location.pathname.includes('/docs/')
+      ) {
+        event.preventDefault()
+        window.dispatchEvent(new CustomEvent('datum:enter-edit-mode'))
       }
 
       if (event.key === 'Escape' && content && open) {
         setOpen(false)
+        return
+      }
+
+      if (event.key === 'Escape' && location.pathname.includes('/docs/')) {
+        window.dispatchEvent(new CustomEvent('datum:exit-edit-mode'))
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [content, navigate, open, setOpen])
+  }, [content, location.pathname, navigate, open, setOpen])
 
   const pathLabel =
     location.pathname === '/'
@@ -50,7 +76,7 @@ export function Layout({ children }: { children: ReactNode }) {
           : 'Datum'
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(17,24,39,0.04),_transparent_38%),linear-gradient(180deg,_rgba(255,255,255,0.96),_rgba(244,244,245,0.92))] text-foreground">
+    <div className="dark flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.12),_transparent_26%),radial-gradient(circle_at_bottom_right,_rgba(56,189,248,0.08),_transparent_22%),linear-gradient(180deg,_rgba(2,6,23,0.98),_rgba(10,15,28,0.94))] text-foreground">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="border-b border-border/80 bg-background/85 px-6 py-3 backdrop-blur">
@@ -69,7 +95,16 @@ export function Layout({ children }: { children: ReactNode }) {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => navigate({ to: '/search' })}
+                onClick={() => {
+                  if (location.pathname === '/search') {
+                    window.dispatchEvent(new CustomEvent('datum:focus-search'))
+                    return
+                  }
+                  navigate({ to: '/search' })
+                  window.setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('datum:focus-search'))
+                  }, 0)
+                }}
               >
                 <Search />
                 Search

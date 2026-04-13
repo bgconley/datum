@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from datum.schemas.document import DocumentResponse, GeneratedFileResponse
+
 
 class ProjectCreate(BaseModel):
     name: str
@@ -16,3 +18,10 @@ class ProjectResponse(BaseModel):
     status: str
     tags: list[str]
     created: str | None = None
+    filesystem_path: str | None = None
+
+
+class WorkspaceSnapshotResponse(BaseModel):
+    project: ProjectResponse
+    documents: list[DocumentResponse]
+    generated_files: list[GeneratedFileResponse]

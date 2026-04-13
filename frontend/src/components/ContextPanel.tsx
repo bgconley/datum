@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Clock3, History, Tags } from 'lucide-react'
+import { Clock3, Hash, History, Tags } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -10,9 +10,15 @@ interface ContextPanelProps {
   projectSlug: string
   document: DocumentMeta
   versions: VersionInfo[]
+  headings?: Array<{ id: string; level: number; text: string }>
 }
 
-export function ContextPanel({ projectSlug, document, versions }: ContextPanelProps) {
+export function ContextPanel({
+  projectSlug,
+  document,
+  versions,
+  headings = [],
+}: ContextPanelProps) {
   const recentVersions = [...versions].slice(-5).reverse()
 
   return (
@@ -39,6 +45,27 @@ export function ContextPanel({ projectSlug, document, versions }: ContextPanelPr
           </div>
         </div>
 
+        {headings.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              <Hash className="size-3.5" />
+              Table of contents
+            </div>
+            <div className="space-y-1">
+              {headings.map((heading) => (
+                <a
+                  key={heading.id}
+                  href={`#${heading.id}`}
+                  className="block rounded-lg px-2 py-1 text-sm transition-colors hover:bg-accent/50"
+                  style={{ paddingLeft: `${0.5 + (heading.level - 1) * 0.5}rem` }}
+                >
+                  {heading.text}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {document.tags.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
@@ -64,8 +91,8 @@ export function ContextPanel({ projectSlug, document, versions }: ContextPanelPr
               Recent versions
             </div>
             <Link
-              to="/projects/$slug/history/$"
-              params={{ slug: projectSlug, _splat: document.relative_path }}
+              to="/projects/$slug/docs/$"
+              params={{ slug: projectSlug, _splat: `${document.relative_path}/history` }}
               className="inline-flex h-6 items-center rounded-lg border border-border bg-background px-2 text-xs font-medium transition-colors hover:bg-muted"
             >
               Full history
@@ -85,18 +112,20 @@ export function ContextPanel({ projectSlug, document, versions }: ContextPanelPr
                       v{version.version_number.toString().padStart(3, '0')}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {version.change_source ?? 'unknown'}
+                      {version.branch}
                     </div>
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                     <Clock3 className="size-3" />
                     {new Date(version.created_at).toLocaleString()}
                   </div>
-                  {version.label && (
-                    <div className="mt-2">
-                      <Badge variant="secondary">{version.label}</Badge>
-                    </div>
-                  )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {version.label && <Badge variant="secondary">{version.label}</Badge>}
+                    {version.created_by && <Badge variant="outline">{version.created_by}</Badge>}
+                    {version.indexing_status && (
+                      <Badge variant="outline">{version.indexing_status}</Badge>
+                    )}
+                  </div>
                 </div>
               ))
             )}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from '@tanstack/react-router'
-import { ArrowLeft, GitCompareArrows } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { ArrowLeft, GitCompareArrows, RotateCcw } from 'lucide-react'
 import { Diff, Hunk, parseDiff } from 'react-diff-view'
 import 'react-diff-view/style/index.css'
 
@@ -10,6 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { useContextPanel } from '@/lib/context-panel'
 import { api, type VersionDiff, type VersionInfo } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
+
+const EMPTY_VERSIONS: VersionInfo[] = []
 
 function HistoryContextPanel({
   versions,
@@ -30,7 +34,7 @@ function HistoryContextPanel({
         </div>
         <h2 className="mt-2 text-xl font-semibold tracking-tight">Version history</h2>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Compare immutable cabinet versions to inspect how a document evolved over time.
+          Compare immutable cabinet versions and restore prior states without rewriting history.
         </p>
       </div>
 
@@ -66,12 +70,15 @@ function HistoryContextPanel({
                 <span className="font-mono">
                   v{version.version_number.toString().padStart(3, '0')}
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  {version.change_source ?? 'unknown'}
-                </span>
+                <span className="text-xs text-muted-foreground">{version.branch}</span>
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {new Date(version.created_at).toLocaleString()}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {version.label && <Badge variant="secondary">{version.label}</Badge>}
+                {version.created_by && <Badge variant="outline">{version.created_by}</Badge>}
+                {version.indexing_status && <Badge variant="outline">{version.indexing_status}</Badge>}
               </div>
             </div>
           ))}
@@ -87,43 +94,40 @@ interface VersionHistoryProps {
 }
 
 export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
-  const [versions, setVersions] = useState<VersionInfo[]>([])
   const [selectedA, setSelectedA] = useState<number | null>(null)
   const [selectedB, setSelectedB] = useState<number | null>(null)
-  const [diff, setDiff] = useState<VersionDiff | null>(null)
-  const [loading, setLoading] = useState(true)
   const [viewType, setViewType] = useState<'split' | 'unified'>('split')
+  const queryClient = useQueryClient()
   const { setContent } = useContextPanel()
+  const navigate = useNavigate()
+
+  const versionsQuery = useQuery({
+    queryKey: queryKeys.versions(projectSlug, docPath),
+    queryFn: () => api.versions.list(projectSlug, docPath),
+  })
+  const versions = versionsQuery.data ?? EMPTY_VERSIONS
 
   useEffect(() => {
-    setLoading(true)
-    api.versions
-      .list(projectSlug, docPath)
-      .then((nextVersions) => {
-        setVersions(nextVersions)
-        if (nextVersions.length >= 2) {
-          setSelectedA(nextVersions.at(-2)?.version_number ?? null)
-          setSelectedB(nextVersions.at(-1)?.version_number ?? null)
-        } else if (nextVersions.length === 1) {
-          setSelectedA(nextVersions[0].version_number)
-          setSelectedB(nextVersions[0].version_number)
-        }
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [docPath, projectSlug])
-
-  useEffect(() => {
-    if (selectedA == null || selectedB == null || selectedA === selectedB) {
-      setDiff(null)
-      return
+    if (versions.length >= 2) {
+      const nextSelectedA = versions.at(-2)?.version_number ?? null
+      const nextSelectedB = versions.at(-1)?.version_number ?? null
+      setSelectedA((current) => (current === nextSelectedA ? current : nextSelectedA))
+      setSelectedB((current) => (current === nextSelectedB ? current : nextSelectedB))
+    } else if (versions.length === 1) {
+      setSelectedA((current) => (current === versions[0].version_number ? current : versions[0].version_number))
+      setSelectedB((current) => (current === versions[0].version_number ? current : versions[0].version_number))
     }
+  }, [versions])
 
-    api.versions
-      .diff(projectSlug, docPath, selectedA, selectedB)
-      .then(setDiff)
-      .catch(console.error)
-  }, [docPath, projectSlug, selectedA, selectedB])
+  const diffQuery = useQuery({
+    queryKey:
+      selectedA != null && selectedB != null
+        ? queryKeys.versionDiff(projectSlug, docPath, selectedA, selectedB)
+        : ['versions', 'diff', 'idle'],
+    queryFn: () => api.versions.diff(projectSlug, docPath, selectedA!, selectedB!),
+    enabled: selectedA != null && selectedB != null && selectedA !== selectedB,
+  })
+  const diff = diffQuery.data ?? null
 
   useEffect(() => {
     setContent(
@@ -142,7 +146,32 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
     [diff?.diff_text],
   )
 
-  if (loading) {
+  const restoreMutation = useMutation({
+    mutationFn: async (versionNumber: number) =>
+      api.versions.restore(projectSlug, docPath, versionNumber, {
+        label: `Restore v${versionNumber.toString().padStart(3, '0')}`,
+      }),
+    onSuccess: async (restored) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.document(projectSlug, restored.relative_path) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.versions(projectSlug, restored.relative_path) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workspace(projectSlug) }),
+      ])
+      navigate({
+        to: '/projects/$slug/docs/$',
+        params: { slug: projectSlug, _splat: restored.relative_path },
+      })
+    },
+    onError: (error) => {
+      alert(String(error))
+    },
+  })
+
+  const handleRestore = async (versionNumber: number) => {
+    await restoreMutation.mutateAsync(versionNumber)
+  }
+
+  if (versionsQuery.isLoading) {
     return <div className="p-8 text-muted-foreground">Loading version history…</div>
   }
 
@@ -155,7 +184,7 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
           </div>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">{docPath}</h1>
           <p className="mt-3 text-sm leading-7 text-muted-foreground">
-            Compare immutable document versions with split or unified diff rendering.
+            Compare immutable document versions, inspect technical state, and restore a prior head when needed.
           </p>
         </div>
         <Link
@@ -163,17 +192,17 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
           params={{ slug: projectSlug, _splat: docPath }}
           className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
         >
-          <ArrowLeft />
+          <ArrowLeft className="mr-1 size-4" />
           Back to document
         </Link>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[21rem_minmax(0,1fr)]">
         <Card className="bg-card/80">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <GitCompareArrows className="size-4" />
-              Compare
+              Compare and restore
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -188,7 +217,7 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
               >
                 {versions.map((version) => (
                   <option key={`base-${version.version_number}`} value={version.version_number}>
-                    v{version.version_number.toString().padStart(3, '0')}
+                    v{version.version_number.toString().padStart(3, '0')} · {version.branch}
                   </option>
                 ))}
               </select>
@@ -205,7 +234,7 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
               >
                 {versions.map((version) => (
                   <option key={`target-${version.version_number}`} value={version.version_number}>
-                    v{version.version_number.toString().padStart(3, '0')}
+                    v{version.version_number.toString().padStart(3, '0')} · {version.branch}
                   </option>
                 ))}
               </select>
@@ -238,29 +267,73 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
                   version.version_number === selectedA || version.version_number === selectedB
 
                 return (
-                  <button
+                  <div
                     key={version.version_number}
-                    type="button"
-                    onClick={() => {
-                      setSelectedA(selectedB)
-                      setSelectedB(version.version_number)
-                    }}
-                    className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
+                    className={`rounded-xl border px-3 py-3 transition-colors ${
                       active
                         ? 'border-foreground/20 bg-accent'
-                        : 'border-border/70 bg-background/70 hover:bg-accent/50'
+                        : 'border-border/70 bg-background/70'
                     }`}
                   >
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-mono">
-                        v{version.version_number.toString().padStart(3, '0')}
-                      </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedA(selectedB)
+                        setSelectedB(version.version_number)
+                      }}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-mono">
+                          v{version.version_number.toString().padStart(3, '0')}
+                        </span>
+                        <Badge variant="outline">{version.branch}</Badge>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {new Date(version.created_at).toLocaleString()}
+                      </div>
+                    </button>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
                       {version.label && <Badge variant="secondary">{version.label}</Badge>}
+                      {version.restored_from && (
+                        <Badge variant="outline">
+                          restored from v{version.restored_from.toString().padStart(3, '0')}
+                        </Badge>
+                      )}
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {new Date(version.created_at).toLocaleString()}
-                    </div>
-                  </button>
+
+                    <details className="mt-3 rounded-xl border border-border/70 bg-card/50 p-3 text-xs">
+                      <summary className="cursor-pointer font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                        Technical panel
+                      </summary>
+                      <div className="mt-3 space-y-2 font-mono leading-5 text-muted-foreground">
+                        <div>hash: {version.content_hash}</div>
+                        <div>path: {docPath}</div>
+                        <div>created_by: {version.created_by ?? version.change_source ?? 'unknown'}</div>
+                        <div>indexing_status: {version.indexing_status ?? 'unknown'}</div>
+                        <div>version_file: {version.version_file}</div>
+                      </div>
+                    </details>
+
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      className="mt-3"
+                      onClick={() => handleRestore(version.version_number)}
+                      disabled={
+                        restoreMutation.isPending &&
+                        restoreMutation.variables === version.version_number
+                      }
+                    >
+                      <RotateCcw className="size-3" />
+                      {restoreMutation.isPending &&
+                      restoreMutation.variables === version.version_number
+                        ? 'Restoring…'
+                        : 'Restore'}
+                    </Button>
+                  </div>
                 )
               })}
             </div>

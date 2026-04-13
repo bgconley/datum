@@ -31,6 +31,11 @@ const VersionHistory = lazy(() =>
     default: module.VersionHistory,
   })),
 )
+const ReviewInbox = lazy(() =>
+  import('@/components/ReviewInbox').then((module) => ({
+    default: module.ReviewInbox,
+  })),
+)
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -111,24 +116,41 @@ function ProjectDocsRouteComponent() {
 
 function DocumentRouteComponent() {
   const { slug, _splat } = documentRoute.useParams()
+  const search = documentRoute.useSearch()
   if (!_splat) {
     return <div className="p-8 text-muted-foreground">Document path missing.</div>
   }
+
+  if (_splat.endsWith('/history')) {
+    const docPath = _splat.slice(0, -'/history'.length)
+    return (
+      <Suspense fallback={<div className="p-8 text-muted-foreground">Loading history…</div>}>
+        <VersionHistory projectSlug={slug} docPath={docPath} />
+      </Suspense>
+    )
+  }
+
   return (
     <Suspense fallback={<div className="p-8 text-muted-foreground">Loading document…</div>}>
-      <DocumentViewer projectSlug={slug} docPath={_splat} />
+      <DocumentViewer
+        projectSlug={slug}
+        docPath={_splat}
+        sourceContext={{
+          query: search.sourceQuery,
+          snippet: search.sourceSnippet,
+          heading: search.sourceHeading,
+          signals: search.sourceSignals ? search.sourceSignals.split(',').filter(Boolean) : [],
+        }}
+      />
     </Suspense>
   )
 }
 
-function DocumentHistoryRouteComponent() {
-  const { slug, _splat } = documentHistoryRoute.useParams()
-  if (!_splat) {
-    return <div className="p-8 text-muted-foreground">Document path missing.</div>
-  }
+function ReviewInboxRouteComponent() {
+  const { slug } = reviewInboxRoute.useParams()
   return (
-    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading history…</div>}>
-      <VersionHistory projectSlug={slug} docPath={_splat} />
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading review inbox…</div>}>
+      <ReviewInbox projectSlug={slug} />
     </Suspense>
   )
 }
@@ -149,6 +171,13 @@ const searchRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): SearchRouteState => {
     const scope =
       search.scope === 'all' || search.scope === 'as_of' ? search.scope : 'current'
+    const mode =
+      search.mode === 'ask_question' ||
+      search.mode === 'find_decisions' ||
+      search.mode === 'search_history' ||
+      search.mode === 'compare_over_time'
+        ? search.mode
+        : 'find_docs'
     const rawLimit =
       typeof search.limit === 'number'
         ? search.limit
@@ -164,6 +193,7 @@ const searchRoute = createRoute({
     return {
       query: typeof search.query === 'string' ? search.query : undefined,
       project: typeof search.project === 'string' ? search.project : undefined,
+      mode,
       scope,
       as_of: typeof search.as_of === 'string' ? search.as_of : undefined,
       limit,
@@ -193,21 +223,34 @@ const projectDocsRoute = createRoute({
 const documentRoute = createRoute({
   getParentRoute: () => projectDocsRoute,
   path: '$',
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
+    sourceQuery?: string
+    sourceSnippet?: string
+    sourceHeading?: string
+    sourceSignals?: string
+  } => ({
+    sourceQuery: typeof search.sourceQuery === 'string' ? search.sourceQuery : undefined,
+    sourceSnippet: typeof search.sourceSnippet === 'string' ? search.sourceSnippet : undefined,
+    sourceHeading: typeof search.sourceHeading === 'string' ? search.sourceHeading : undefined,
+    sourceSignals: typeof search.sourceSignals === 'string' ? search.sourceSignals : undefined,
+  }),
   component: DocumentRouteComponent,
 })
 
-const documentHistoryRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: 'projects/$slug/history/$',
-  component: DocumentHistoryRouteComponent,
+const reviewInboxRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'review',
+  component: ReviewInboxRouteComponent,
 })
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   searchRoute,
-  documentHistoryRoute,
   projectRoute.addChildren([
     projectIndexRoute,
+    reviewInboxRoute,
     projectDocsRoute.addChildren([
       documentRoute,
     ]),

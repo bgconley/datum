@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Activity, AlertTriangle, Files, FolderKanban } from 'lucide-react'
+import { Activity, AlertTriangle, Files, FolderKanban, Sparkles, Waypoints } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { useContextPanel } from '@/lib/context-panel'
 import { api, type DocumentMeta, type Project } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
+import { extractTechnicalTerms, stripFrontmatter, uniqueTechnicalTerms } from '@/lib/technical-terms'
+import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
 function sortByRecency(documents: DocumentMeta[]) {
   return [...documents].sort((left, right) =>
@@ -17,13 +21,23 @@ function sortByRecency(documents: DocumentMeta[]) {
 function buildAttentionAlerts(documents: DocumentMeta[]) {
   const alerts: string[] = []
   const draftCount = documents.filter((document) => document.status === 'draft').length
-  const untaggedCount = documents.filter((document) => document.tags.length === 0).length
+  const decisionCount = documents.filter((document) => document.doc_type === 'decision').length
+  const staleDocs = documents.filter((document) => {
+    const dateValue = document.updated || document.created
+    if (!dateValue) {
+      return true
+    }
+    return Date.now() - new Date(dateValue).getTime() > 1000 * 60 * 60 * 24 * 14
+  })
 
   if (draftCount > 0) {
     alerts.push(`${draftCount} document${draftCount === 1 ? '' : 's'} still in draft`)
   }
-  if (untaggedCount > 0) {
-    alerts.push(`${untaggedCount} document${untaggedCount === 1 ? '' : 's'} missing tags`)
+  if (decisionCount === 0) {
+    alerts.push('No decision records yet')
+  }
+  if (staleDocs.length > 0) {
+    alerts.push(`${staleDocs.length} document${staleDocs.length === 1 ? '' : 's'} look stale`)
   }
   if (documents.length === 0) {
     alerts.push('Project has no cabinet documents yet')
@@ -35,9 +49,11 @@ function buildAttentionAlerts(documents: DocumentMeta[]) {
 function DashboardContextPanel({
   project,
   documents,
+  keyEntities,
 }: {
   project: Project
   documents: DocumentMeta[]
+  keyEntities: string[]
 }) {
   const byType = documents.reduce<Record<string, number>>((accumulator, document) => {
     accumulator[document.doc_type] = (accumulator[document.doc_type] ?? 0) + 1
@@ -87,6 +103,21 @@ function DashboardContextPanel({
         </div>
       )}
 
+      {keyEntities.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+            Key entities
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {keyEntities.map((entity) => (
+              <Badge key={entity} variant="secondary">
+                {entity}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
       <Separator />
 
       <div className="space-y-2">
@@ -113,31 +144,46 @@ interface ProjectDashboardProps {
   projectSlug: string
 }
 
-export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
-  const [project, setProject] = useState<Project | null>(null)
-  const [documents, setDocuments] = useState<DocumentMeta[]>([])
-  const [loading, setLoading] = useState(true)
-  const { setContent } = useContextPanel()
+const EMPTY_DOCUMENTS: DocumentMeta[] = []
+const EMPTY_ENTITIES: string[] = []
 
-  useEffect(() => {
-    setLoading(true)
-    Promise.all([api.projects.get(projectSlug), api.documents.list(projectSlug)])
-      .then(([nextProject, nextDocuments]) => {
-        setProject(nextProject)
-        setDocuments(nextDocuments)
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [projectSlug])
+export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
+  const { setContent } = useContextPanel()
+  const workspaceQuery = useProjectWorkspaceQuery(projectSlug)
+  const project = workspaceQuery.data?.project ?? null
+  const documents = workspaceQuery.data?.documents ?? EMPTY_DOCUMENTS
+
+  const entitySeed = sortByRecency(documents)
+    .slice(0, 8)
+    .map((document) => document.relative_path)
+    .join('|')
+
+  const keyEntitiesQuery = useQuery({
+    queryKey: queryKeys.dashboardEntities(projectSlug, entitySeed),
+    enabled: documents.length > 0,
+    queryFn: async () => {
+      const entitySeedDocuments = sortByRecency(documents).slice(0, 8)
+      const loadedDocuments = await Promise.all(
+        entitySeedDocuments.map((document) => api.documents.get(projectSlug, document.relative_path)),
+      )
+      const terms = loadedDocuments.flatMap((document) =>
+        uniqueTechnicalTerms(extractTechnicalTerms(stripFrontmatter(document.content)), 6),
+      )
+      return [...new Set(terms.map((term) => term.rawText))].slice(0, 10)
+    },
+  })
+  const keyEntities = keyEntitiesQuery.data ?? EMPTY_ENTITIES
 
   useEffect(() => {
     if (project) {
-      setContent(<DashboardContextPanel project={project} documents={documents} />)
+      setContent(
+        <DashboardContextPanel project={project} documents={documents} keyEntities={keyEntities} />,
+      )
     }
     return () => setContent(null)
-  }, [documents, project, setContent])
+  }, [documents, keyEntities, project, setContent])
 
-  if (loading) {
+  if (workspaceQuery.isLoading) {
     return <div className="p-8 text-muted-foreground">Loading project dashboard…</div>
   }
 
@@ -151,9 +197,14 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
     return accumulator
   }, {})
   const alerts = buildAttentionAlerts(documents)
+  const decisionDocs = documents.filter((document) => document.doc_type === 'decision').slice(0, 5)
+  const questionDocs = documents.filter((document) => {
+    const lowerTitle = document.title.toLowerCase()
+    return lowerTitle.includes('question') || document.title.includes('?') || document.doc_type === 'brainstorm'
+  }).slice(0, 5)
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
       <div className="rounded-[2rem] border border-border/80 bg-card/80 p-8 shadow-sm">
         <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
           Project dashboard
@@ -179,44 +230,123 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card className="bg-card/80">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="size-4" />
-              Recent activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {recentDocuments.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No documents yet.</div>
-            ) : (
-              recentDocuments.map((document) => (
-                <Link
-                  key={document.relative_path}
-                  to="/projects/$slug/docs/$"
-                  params={{ slug: projectSlug, _splat: document.relative_path }}
-                  className="block rounded-2xl border border-border/70 bg-background/70 px-4 py-3 transition-colors hover:bg-accent/50"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate font-medium">{document.title}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {document.relative_path}
+      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid gap-6">
+          <Card className="bg-card/80">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="size-4" />
+                Recent activity
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {recentDocuments.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No documents yet.</div>
+              ) : (
+                recentDocuments.map((document) => (
+                  <Link
+                    key={document.relative_path}
+                    to="/projects/$slug/docs/$"
+                    params={{ slug: projectSlug, _splat: document.relative_path }}
+                    className="block rounded-2xl border border-border/70 bg-background/70 px-4 py-3 transition-colors hover:bg-accent/50"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">{document.title}</div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {document.relative_path}
+                        </div>
                       </div>
+                      <Badge variant="outline">v{document.version}</Badge>
                     </div>
-                    <Badge variant="outline">v{document.version}</Badge>
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    Updated {document.updated || document.created || 'unknown'}
-                  </div>
-                </Link>
-              ))
-            )}
-          </CardContent>
-        </Card>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Updated {document.updated || document.created || 'unknown'}
+                    </div>
+                  </Link>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="bg-card/80">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Waypoints className="size-4" />
+                  Decisions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {decisionDocs.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No recorded decisions yet.</div>
+                ) : (
+                  decisionDocs.map((document) => (
+                    <Link
+                      key={document.relative_path}
+                      to="/projects/$slug/docs/$"
+                      params={{ slug: projectSlug, _splat: document.relative_path }}
+                      className="block rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
+                    >
+                      {document.title}
+                    </Link>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/80">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FolderKanban className="size-4" />
+                  Open questions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {questionDocs.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No open-question docs surfaced yet.</div>
+                ) : (
+                  questionDocs.map((document) => (
+                    <Link
+                      key={document.relative_path}
+                      to="/projects/$slug/docs/$"
+                      params={{ slug: projectSlug, _splat: document.relative_path }}
+                      className="block rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
+                    >
+                      {document.title}
+                    </Link>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
 
         <div className="grid gap-6">
+          <Card className="bg-card/80">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="size-4" />
+                Key entities
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              {keyEntities.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No entities surfaced yet.</div>
+              ) : (
+                keyEntities.map((entity) => (
+                  <Link
+                    key={entity}
+                    to="/search"
+                    search={{ query: entity, project: projectSlug }}
+                    className="inline-flex items-center rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs transition-colors hover:bg-accent"
+                  >
+                    {entity}
+                  </Link>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
           <Card className="bg-card/80">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -260,20 +390,6 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
                   </div>
                 ))
               )}
-            </CardContent>
-          </Card>
-
-          <Card className="bg-card/80">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FolderKanban className="size-4" />
-                Next moves
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <div>Use the command palette to jump between documents and dashboards.</div>
-              <div>Open search to traverse current, historical, or as-of cabinet state.</div>
-              <div>Phase 5 can extend this shell with inbox counts and candidate curation routes.</div>
             </CardContent>
           </Card>
         </div>

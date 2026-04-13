@@ -3,6 +3,8 @@
 Documents are filesystem-first: the .md/.sql/.yaml file on disk is canonical.
 Frontmatter stores human metadata. Hashes and versions live in .piq/ manifests.
 """
+
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,12 +13,16 @@ import frontmatter
 
 from datum.services.filesystem import (
     compute_content_hash,
+    read_manifest,
+    resolve_manifest_dir,
     validate_canonical_path,
+    write_manifest,
 )
 from datum.services.versioning import (
     VersionInfo,
     create_version,
     get_current_version,
+    read_version_content,
 )
 
 # Document paths must live under docs/ per design doc filesystem schema.
@@ -26,10 +32,13 @@ _ALLOWED_DOC_PREFIXES = ("docs/",)
 
 class ConflictError(Exception):
     """Raised when a save conflicts with the current file state."""
+
     def __init__(self, current_hash: str, base_hash: str):
         self.current_hash = current_hash
         self.base_hash = base_hash
-        super().__init__(f"Conflict: file changed (current={current_hash}, base={base_hash})")
+        super().__init__(
+            f"Conflict: file changed (current={current_hash}, base={base_hash})"
+        )
 
 
 def _validate_document_path(relative_path: str) -> str:
@@ -42,6 +51,17 @@ def _validate_document_path(relative_path: str) -> str:
         raise ValueError(
             f"Document path must be under docs/, got: {relative_path}"
         )
+    return normalized_path
+
+
+def _validate_document_folder_path(relative_path: str) -> str:
+    """Enforce that folder paths live under docs/ and return the normalized path."""
+    resolved = validate_canonical_path(relative_path)
+    normalized_path = resolved.as_posix()
+    if normalized_path == ".":
+        raise ValueError("Folder path must be under docs/, got project root")
+    if len(resolved.parts) < 1 or resolved.parts[0] != "docs":
+        raise ValueError(f"Folder path must be under docs/, got: {relative_path}")
     return normalized_path
 
 
@@ -191,6 +211,108 @@ def get_document(project_path: Path, relative_path: str) -> DocumentInfo | None:
 
     ver = get_current_version(project_path, normalized_path)
     return _build_doc_info(post, normalized_path, ver)
+
+
+def create_document_folder(project_path: Path, relative_path: str) -> str:
+    """Create a folder under docs/ and return its normalized relative path."""
+    normalized_path = _validate_document_folder_path(relative_path)
+    folder_path = project_path / normalized_path
+    folder_path.mkdir(parents=True, exist_ok=True)
+    return normalized_path
+
+
+def move_document(
+    project_path: Path,
+    relative_path: str,
+    new_relative_path: str,
+) -> DocumentInfo:
+    """Move or rename a document and its manifest history to a new docs/ path."""
+    normalized_path = _validate_document_path(relative_path)
+    normalized_new_path = _validate_document_path(new_relative_path)
+
+    if normalized_path == normalized_new_path:
+        info = get_document(project_path, normalized_path)
+        if info is None:
+            raise FileNotFoundError(f"Document not found: {normalized_path}")
+        return info
+
+    source_path = project_path / normalized_path
+    destination_path = project_path / normalized_new_path
+    if not source_path.exists():
+        raise FileNotFoundError(f"Document not found: {normalized_path}")
+    if destination_path.exists():
+        raise FileExistsError(f"Document already exists: {normalized_new_path}")
+
+    source_manifest_dir = resolve_manifest_dir(
+        project_path,
+        normalized_path,
+        for_write=True,
+    )
+    destination_manifest_dir = resolve_manifest_dir(
+        project_path,
+        normalized_new_path,
+        for_write=False,
+    )
+    if (destination_manifest_dir / "manifest.yaml").exists():
+        raise FileExistsError(f"Manifest already exists for: {normalized_new_path}")
+
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    destination_manifest_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    os.rename(source_path, destination_path)
+    os.rename(source_manifest_dir, destination_manifest_dir)
+
+    manifest_path = destination_manifest_dir / "manifest.yaml"
+    manifest = read_manifest(manifest_path)
+    manifest["canonical_path"] = normalized_new_path
+    write_manifest(manifest_path, manifest)
+
+    info = get_document(project_path, normalized_new_path)
+    if info is None:
+        raise RuntimeError(f"Moved document could not be loaded: {normalized_new_path}")
+    return info
+
+
+def restore_document_version(
+    project_path: Path,
+    relative_path: str,
+    version_number: int,
+    branch: str = "main",
+    label: str | None = None,
+) -> DocumentInfo:
+    """Restore a prior version by creating a new head version from its content."""
+    normalized_path = _validate_document_path(relative_path)
+    content = read_version_content(
+        project_path,
+        normalized_path,
+        version_number,
+        branch=branch,
+    )
+    if content is None:
+        raise FileNotFoundError(
+            f"Version {version_number} not found for {normalized_path}"
+        )
+
+    next_label = label or f"Restore v{version_number:03d}"
+    version_info = create_version(
+        project_path=project_path,
+        canonical_path=normalized_path,
+        content=content,
+        change_source="restore",
+        branch=branch,
+        label=next_label,
+        restored_from=version_number,
+    )
+    if version_info is None:
+        info = get_document(project_path, normalized_path)
+        if info is None:
+            raise FileNotFoundError(f"Document not found: {normalized_path}")
+        return info
+
+    restored = get_document(project_path, normalized_path)
+    if restored is None:
+        raise RuntimeError(f"Restored document could not be loaded: {normalized_path}")
+    return restored
 
 
 def list_documents(project_path: Path) -> list[DocumentInfo]:

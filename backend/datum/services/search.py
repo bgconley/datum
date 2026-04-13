@@ -64,6 +64,8 @@ class FusedResult:
 class SearchResult:
     document_title: str
     document_path: str
+    document_type: str
+    document_status: str
     project_slug: str
     heading_path: str
     snippet: str
@@ -736,6 +738,8 @@ async def _build_search_result(
         return SearchResult(
             document_title=document.title,
             document_path=document.canonical_path,
+            document_type=document.doc_type,
+            document_status=document.status,
             project_slug=project.slug,
             heading_path=" > ".join(chunk.heading_path or []),
             snippet=snippet,

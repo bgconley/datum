@@ -15,6 +15,20 @@ class DocumentSave(BaseModel):
     base_hash: str
 
 
+class DocumentMoveRequest(BaseModel):
+    new_relative_path: str
+
+
+class FolderCreateRequest(BaseModel):
+    relative_path: str
+
+
+class GeneratedFileResponse(BaseModel):
+    relative_path: str
+    absolute_path: str
+    size_bytes: int
+
+
 class DocumentResponse(BaseModel):
     title: str
     doc_type: str

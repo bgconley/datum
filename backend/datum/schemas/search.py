@@ -30,6 +30,8 @@ class SearchRequest(BaseModel):
 class SearchResultResponse(BaseModel):
     document_title: str
     document_path: str
+    document_type: str
+    document_status: str
     project_slug: str
     heading_path: str
     snippet: str

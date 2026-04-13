@@ -1,8 +1,15 @@
 export type SearchVersionMode = 'current' | 'all' | 'as_of'
+export type SearchMode =
+  | 'find_docs'
+  | 'ask_question'
+  | 'find_decisions'
+  | 'search_history'
+  | 'compare_over_time'
 
 export interface SearchDraft {
   query: string
   project: string
+  mode: SearchMode
   versionMode: SearchVersionMode
   asOf: string
   limit: number
@@ -11,6 +18,7 @@ export interface SearchDraft {
 export interface SearchRouteState {
   query?: string
   project?: string
+  mode?: SearchMode
   scope?: SearchVersionMode
   as_of?: string
   limit?: number
@@ -19,6 +27,7 @@ export interface SearchRouteState {
 export const DEFAULT_SEARCH_DRAFT: SearchDraft = {
   query: '',
   project: '',
+  mode: 'find_docs',
   versionMode: 'current',
   asOf: '',
   limit: 20,
@@ -42,6 +51,7 @@ export function draftsEqual(left: SearchDraft, right: SearchDraft): boolean {
   return (
     left.query === right.query &&
     left.project === right.project &&
+    left.mode === right.mode &&
     left.versionMode === right.versionMode &&
     left.asOf === right.asOf &&
     left.limit === right.limit
@@ -50,6 +60,7 @@ export function draftsEqual(left: SearchDraft, right: SearchDraft): boolean {
 
 export function draftFromRouteSearch(search: SearchRouteState): SearchDraft {
   const scope = search.scope ?? 'current'
+  const mode = search.mode ?? DEFAULT_SEARCH_DRAFT.mode
   const parsedLimit = Number(search.limit ?? DEFAULT_SEARCH_DRAFT.limit)
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : DEFAULT_SEARCH_DRAFT.limit
 
@@ -57,6 +68,7 @@ export function draftFromRouteSearch(search: SearchRouteState): SearchDraft {
     return {
       query: search.query ?? '',
       project: search.project ?? '',
+      mode,
       versionMode: 'as_of',
       asOf: search.as_of ? toDatetimeLocalValue(search.as_of) : '',
       limit,
@@ -66,6 +78,7 @@ export function draftFromRouteSearch(search: SearchRouteState): SearchDraft {
   return {
     query: search.query ?? '',
     project: search.project ?? '',
+    mode,
     versionMode: scope === 'all' ? 'all' : 'current',
     asOf: '',
     limit,
@@ -81,6 +94,9 @@ export function routeSearchFromDraft(draft: SearchDraft): SearchRouteState {
   }
   if (draft.project) {
     next.project = draft.project
+  }
+  if (draft.mode !== DEFAULT_SEARCH_DRAFT.mode) {
+    next.mode = draft.mode
   }
   if (draft.versionMode !== DEFAULT_SEARCH_DRAFT.versionMode) {
     next.scope = draft.versionMode

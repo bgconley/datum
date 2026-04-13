@@ -10,15 +10,24 @@ from datum.models.core import Project
 from datum.schemas.document import (
     DocumentContentResponse,
     DocumentCreate,
+    DocumentMoveRequest,
     DocumentResponse,
     DocumentSave,
+    FolderCreateRequest,
+    GeneratedFileResponse,
 )
-from datum.services.db_sync import log_audit_event, sync_document_version_to_db
+from datum.services.db_sync import (
+    log_audit_event,
+    move_document_path_in_db,
+    sync_document_version_to_db,
+)
 from datum.services.document_manager import (
     ConflictError,
     create_document,
+    create_document_folder,
     get_document,
     list_documents,
+    move_document,
     save_document,
 )
 from datum.services.filesystem import ManifestLayoutConflictError
@@ -112,6 +121,7 @@ async def api_create_document(
         if project_db_id:
             canonical_path = doc_info.relative_path
             from datum.services.versioning import get_current_version
+
             ver = get_current_version(project_path, canonical_path)
             if ver:
                 file_bytes = (project_path / canonical_path).read_bytes()
@@ -130,11 +140,99 @@ async def api_create_document(
                     filesystem_path=ver.version_file,
                 )
                 await log_audit_event(
-                    session, "web", "create_document", project_db_id,
-                    canonical_path, new_hash=doc_info.content_hash,
+                    session,
+                    "web",
+                    "create_document",
+                    project_db_id,
+                    canonical_path,
+                    new_hash=doc_info.content_hash,
                 )
     except Exception:
         logger.debug("DB sync skipped for document create", exc_info=True)
+
+    return DocumentResponse(**doc_info.__dict__)
+
+
+@router.post("/folders", response_model=dict[str, str], status_code=201)
+async def api_create_folder(slug: str, body: FolderCreateRequest):
+    project_path = _get_project_path(slug)
+    try:
+        relative_path = create_document_folder(project_path, body.relative_path)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"relative_path": relative_path}
+
+
+@router.get("/generated", response_model=list[GeneratedFileResponse])
+async def api_list_generated_files(slug: str):
+    project_path = _get_project_path(slug)
+    generated_root = project_path / ".piq"
+    if not generated_root.exists():
+        return []
+
+    files: list[GeneratedFileResponse] = []
+    for path in sorted(generated_root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(project_path).as_posix()
+        files.append(
+            GeneratedFileResponse(
+                relative_path=relative_path,
+                absolute_path=str(path),
+                size_bytes=path.stat().st_size,
+            )
+        )
+    return files
+
+
+@router.post("/{doc_path:path}/move", response_model=DocumentResponse)
+async def api_move_document(
+    slug: str,
+    doc_path: str,
+    body: DocumentMoveRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    project_path = _get_project_path(slug)
+    try:
+        original = get_document(project_path, doc_path)
+        if original is None:
+            raise FileNotFoundError(f"Document '{doc_path}' not found")
+        doc_info = move_document(project_path, doc_path, body.new_relative_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ManifestLayoutConflictError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Manifest layout conflict — run datum doctor or migration to resolve",
+                "canonical_path": e.canonical_path,
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        project_db_id = await _get_project_db_id(slug, session)
+        if project_db_id and original is not None:
+            await move_document_path_in_db(
+                session=session,
+                project_id=project_db_id,
+                old_canonical_path=original.relative_path,
+                new_canonical_path=doc_info.relative_path,
+            )
+            await log_audit_event(
+                session,
+                "web",
+                "move_document",
+                project_db_id,
+                doc_info.relative_path,
+                old_hash=original.content_hash,
+                new_hash=doc_info.content_hash,
+            )
+    except Exception:
+        logger.debug("DB sync skipped for document move", exc_info=True)
 
     return DocumentResponse(**doc_info.__dict__)
 
@@ -208,6 +306,7 @@ async def api_save_document(
         if project_db_id:
             canonical_path = doc_info.relative_path
             from datum.services.versioning import get_current_version
+
             ver = get_current_version(project_path, canonical_path)
             if ver:
                 file_bytes = (project_path / canonical_path).read_bytes()
