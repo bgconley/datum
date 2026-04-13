@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # datum/scripts/bootstrap-gpu-node.sh
 #
-# Creates or updates the dedicated datum venv on the GPU node.
+# Creates or updates the dedicated datum app/test venv on the GPU node.
 # Run this once after cloning, and again after changing backend dependencies.
 #
 # Usage: bash scripts/bootstrap-gpu-node.sh
 #
 # Venv path: /tank/venvs/datum (persistent ZFS, outside repo)
 # Installs: backend/.[dev] (datum package + test dependencies)
+#
+# Note: GLiNER runs in its own dedicated venv to avoid dependency drift
+# against the embedder/reranker runtime:
+#   bash scripts/bootstrap-gliner-gpu-node.sh
 
 set -euo pipefail
 
@@ -148,3 +152,4 @@ echo ""
 echo "To activate manually: source $VENV_PATH/bin/activate"
 echo "To run tests: source $VENV_PATH/bin/activate && cd $BACKEND_DIR && pytest tests/ -v"
 echo "Compose will use: DATUM_UID=$(id -u) DATUM_GID=$(id -g)"
+echo "GLiNER bootstrap: bash $REPO_DIR/scripts/bootstrap-gliner-gpu-node.sh"

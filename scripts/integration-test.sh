@@ -8,6 +8,8 @@
 # Prerequisites:
 #   - ZFS datasets created (scripts/create-zfs-datasets.sh)
 #   - Datum venv bootstrapped (scripts/bootstrap-gpu-node.sh)
+#   - GLiNER NER service bootstrapped and running
+#     (scripts/bootstrap-gliner-gpu-node.sh + scripts/run-gliner-gpu-node.sh)
 #
 # Usage: bash scripts/integration-test.sh
 
@@ -641,6 +643,8 @@ if ner_endpoint_healthy; then
     echo "  NER endpoint: OK (${DATUM_NER_ENDPOINT})"
 else
     echo "  FAIL: NER endpoint unavailable (${DATUM_NER_ENDPOINT})"
+    echo "  Bootstrap: bash scripts/bootstrap-gliner-gpu-node.sh"
+    echo "  Run: CUDA_VISIBLE_DEVICES=1 DATUM_GLINER_DEVICE=cuda:0 DATUM_GLINER_HOST=0.0.0.0 bash scripts/run-gliner-gpu-node.sh"
     exit 1
 fi
 

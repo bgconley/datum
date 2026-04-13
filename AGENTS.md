@@ -27,6 +27,7 @@ Datum is a filesystem-canonical project intelligence platform. It stores, versio
 - `scripts/` — integration and operational scripts
 - `qwen3-embedder-service/` — native Datum embedding service
 - `qwen3-reranker-service/` — native Datum reranker service
+- `gliner-ner-service/` — native Datum NER service
 
 ## Current Runtime Contract
 
@@ -34,9 +35,14 @@ Datum is a filesystem-canonical project intelligence platform. It stores, versio
 - Repo path on the node: `/tank/repos/datum`
 - Datum app/test venv on the node: `/tank/venvs/datum`
 - Datum model-services venv on the node: `/tank/venvs/datum-model-services`
+- Datum GLiNER venv on the node: `/tank/venvs/datum-gliner`
 - Native model services are the current production path:
   - embedder: `qwen3_embedder` on `:8010`
   - reranker: `qwen3_reranker` on `:8011`
+  - NER: `gliner_ner_service` on `:8012`
+- Keep GLiNER in its own venv on the GPU node.
+  - Do not install it into `/tank/venvs/datum-model-services`; that couples
+    unrelated dependency trees and risks breaking embedder/reranker runtime.
 - Inference endpoints are intentionally unauthenticated in this deployment model.
   - This is a deliberate private-network tradeoff, not an omission.
   - See `SECURITY_ASSUMPTIONS.md` for accepted-risk and boundary expectations.
