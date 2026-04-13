@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 
 import pytest
 
@@ -104,6 +105,115 @@ async def test_create_document_rejects_docs_prefix_traversal(client):
         "content": "# Bad",
     })
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_document_db_sync_uses_normalized_canonical_path(client, monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_get_project_db_id(slug, session):
+        del slug, session
+        return uuid4()
+
+    async def fake_sync_document_version_to_db(
+        session,
+        project_id,
+        version_info,
+        canonical_path,
+        **kwargs,
+    ):
+        del session, project_id, version_info, kwargs
+        captured["canonical_path"] = canonical_path
+
+    async def fake_log_audit_event(
+        session,
+        actor_type,
+        operation,
+        project_id,
+        target_path,
+        **kwargs,
+    ):
+        del session, actor_type, operation, project_id, kwargs
+        captured["target_path"] = target_path
+
+    monkeypatch.setattr("datum.api.documents._get_project_db_id", fake_get_project_db_id)
+    monkeypatch.setattr(
+        "datum.api.documents.sync_document_version_to_db",
+        fake_sync_document_version_to_db,
+    )
+    monkeypatch.setattr("datum.api.documents.log_audit_event", fake_log_audit_event)
+
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    resp = await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/../docs/normalized.md",
+        "title": "Normalized",
+        "doc_type": "plan",
+        "content": "# normalized",
+    })
+
+    assert resp.status_code == 201
+    assert resp.json()["relative_path"] == "docs/normalized.md"
+    assert captured["canonical_path"] == "docs/normalized.md"
+    assert captured["target_path"] == "docs/normalized.md"
+
+
+@pytest.mark.asyncio
+async def test_save_document_db_sync_uses_normalized_canonical_path(client, monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_get_project_db_id(slug, session):
+        del slug, session
+        return uuid4()
+
+    async def fake_sync_document_version_to_db(
+        session,
+        project_id,
+        version_info,
+        canonical_path,
+        **kwargs,
+    ):
+        del session, project_id, version_info, kwargs
+        captured["canonical_path"] = canonical_path
+
+    async def fake_log_audit_event(
+        session,
+        actor_type,
+        operation,
+        project_id,
+        target_path,
+        **kwargs,
+    ):
+        del session, actor_type, operation, project_id, kwargs
+        captured["target_path"] = target_path
+
+    monkeypatch.setattr("datum.api.documents._get_project_db_id", fake_get_project_db_id)
+    monkeypatch.setattr(
+        "datum.api.documents.sync_document_version_to_db",
+        fake_sync_document_version_to_db,
+    )
+    monkeypatch.setattr("datum.api.documents.log_audit_event", fake_log_audit_event)
+
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    create_resp = await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/normalized-save.md",
+        "title": "Normalized Save",
+        "doc_type": "plan",
+        "content": "# V1",
+    })
+    assert create_resp.status_code == 201
+
+    current = await client.get("/api/v1/projects/p/docs/docs/normalized-save.md")
+    current_hash = current.json()["metadata"]["content_hash"]
+    updated = current.json()["content"].replace("# V1", "# V2")
+
+    resp = await client.put("/api/v1/projects/p/docs/docs/../docs/normalized-save.md", json={
+        "content": updated,
+        "base_hash": current_hash,
+    })
+    assert resp.status_code == 200
+    assert resp.json()["relative_path"] == "docs/normalized-save.md"
+    assert captured["canonical_path"] == "docs/normalized-save.md"
+    assert captured["target_path"] == "docs/normalized-save.md"
 
 
 @pytest.mark.asyncio

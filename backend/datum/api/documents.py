@@ -110,15 +110,16 @@ async def api_create_document(
     try:
         project_db_id = await _get_project_db_id(slug, session)
         if project_db_id:
+            canonical_path = doc_info.relative_path
             from datum.services.versioning import get_current_version
-            ver = get_current_version(project_path, body.relative_path)
+            ver = get_current_version(project_path, canonical_path)
             if ver:
-                file_bytes = (project_path / body.relative_path).read_bytes()
+                file_bytes = (project_path / canonical_path).read_bytes()
                 await sync_document_version_to_db(
                     session=session,
                     project_id=project_db_id,
                     version_info=ver,
-                    canonical_path=body.relative_path,
+                    canonical_path=canonical_path,
                     title=doc_info.title,
                     doc_type=doc_info.doc_type,
                     status=doc_info.status,
@@ -130,7 +131,7 @@ async def api_create_document(
                 )
                 await log_audit_event(
                     session, "web", "create_document", project_db_id,
-                    body.relative_path, new_hash=doc_info.content_hash,
+                    canonical_path, new_hash=doc_info.content_hash,
                 )
     except Exception:
         logger.debug("DB sync skipped for document create", exc_info=True)
@@ -155,7 +156,7 @@ async def api_get_document(slug: str, doc_path: str):
         raise HTTPException(status_code=422, detail=str(e))
     if not info:
         raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
-    content = (project_path / doc_path).read_text()
+    content = (project_path / info.relative_path).read_text()
     return DocumentContentResponse(content=content, metadata=DocumentResponse(**info.__dict__))
 
 
@@ -205,15 +206,16 @@ async def api_save_document(
     try:
         project_db_id = await _get_project_db_id(slug, session)
         if project_db_id:
+            canonical_path = doc_info.relative_path
             from datum.services.versioning import get_current_version
-            ver = get_current_version(project_path, doc_path)
+            ver = get_current_version(project_path, canonical_path)
             if ver:
-                file_bytes = (project_path / doc_path).read_bytes()
+                file_bytes = (project_path / canonical_path).read_bytes()
                 await sync_document_version_to_db(
                     session=session,
                     project_id=project_db_id,
                     version_info=ver,
-                    canonical_path=doc_path,
+                    canonical_path=canonical_path,
                     title=doc_info.title,
                     doc_type=doc_info.doc_type,
                     status=doc_info.status,
@@ -225,7 +227,7 @@ async def api_save_document(
                 )
                 await log_audit_event(
                     session, "web", "save_document", project_db_id,
-                    doc_path, old_hash=old_hash, new_hash=doc_info.content_hash,
+                    canonical_path, old_hash=old_hash, new_hash=doc_info.content_hash,
                 )
     except Exception:
         logger.debug("DB sync skipped for document save", exc_info=True)

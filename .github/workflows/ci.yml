@@ -64,6 +64,68 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+  qwen-embedder-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen3-embedder-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync service dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Ruff
+        run: uv run ruff check src tests
+
+      - name: Mypy
+        run: uv run mypy src
+
+      - name: Pytest
+        run: uv run pytest -q
+
+      - name: Pip audit
+        run: uv run --with pip-audit pip-audit
+
+  qwen-reranker-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen3-reranker-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync service dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Ruff
+        run: uv run ruff check src tests
+
+      - name: Mypy
+        run: uv run mypy src
+
+      - name: Pytest
+        run: uv run pytest -q
+
+      - name: Pip audit
+        run: uv run --with pip-audit pip-audit
+
   compose-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -76,7 +138,7 @@ jobs:
         run: docker compose config
 
       - name: Start stack
-        run: docker compose up -d --build paradedb datum-api datum-frontend caddy
+        run: docker compose up -d --build paradedb datum-api datum-worker datum-frontend caddy
 
       - name: Wait for services
         run: |

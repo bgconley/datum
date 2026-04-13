@@ -224,7 +224,12 @@ async def health_check(http_request: Request) -> HealthResponse:
             embedding_dimension=backend.embedding_dimension() if backend.is_loaded else None,
         )
 
-    return HealthResponse(status="starting")
+    return HealthResponse(
+        status="starting",
+        backend=None,
+        model=None,
+        embedding_dimension=None,
+    )
 
 
 @router.get(
