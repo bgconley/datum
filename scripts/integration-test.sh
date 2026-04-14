@@ -829,17 +829,13 @@ echo "$AUDIT_RESP" | python3 -c 'import sys,json; data=json.load(sys.stdin); ops
 echo "    Audit query: OK"
 
 echo "  Checking MCP SSE endpoint..."
-MCP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://localhost:8001/mcp/sse")
-if [ "$MCP_STATUS" != "200" ] && [ "$MCP_STATUS" != "307" ]; then
-  echo "    FAIL: datum-api MCP SSE endpoint returned $MCP_STATUS"
-  exit 1
-fi
-MCP_CADDY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://localhost:3080/mcp/sse")
-if [ "$MCP_CADDY_STATUS" != "200" ] && [ "$MCP_CADDY_STATUS" != "307" ]; then
-  echo "    FAIL: Caddy MCP SSE endpoint returned $MCP_CADDY_STATUS"
-  exit 1
-fi
-echo "    MCP SSE: datum-api $MCP_STATUS, Caddy $MCP_CADDY_STATUS"
+MCP_EVENT="$(curl -sS -N --max-time 5 "http://localhost:8001/mcp/sse" 2>/dev/null | head -n 2 || true)"
+echo "$MCP_EVENT" | grep -q "event: endpoint" || { echo "    FAIL: datum-api MCP SSE did not emit endpoint event"; exit 1; }
+echo "$MCP_EVENT" | grep -q "data: /mcp/" || { echo "    FAIL: datum-api MCP SSE did not emit endpoint data"; exit 1; }
+MCP_CADDY_EVENT="$(curl -sS -N --max-time 5 "http://localhost:3080/mcp/sse" 2>/dev/null | head -n 2 || true)"
+echo "$MCP_CADDY_EVENT" | grep -q "event: endpoint" || { echo "    FAIL: Caddy MCP SSE did not emit endpoint event"; exit 1; }
+echo "$MCP_CADDY_EVENT" | grep -q "data: /mcp/" || { echo "    FAIL: Caddy MCP SSE did not emit endpoint data"; exit 1; }
+echo "    MCP SSE: datum-api + Caddy emitted endpoint event"
 
 echo "  Verifying idempotent session creation..."
 IDEM_RESP1=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
