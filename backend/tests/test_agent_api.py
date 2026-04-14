@@ -73,6 +73,7 @@ async def test_session_create_list_and_idempotency(client, monkeypatch, tmp_path
         },
     )
     assert second.status_code == 201
+    assert second.text == resp.text
     assert second.json()["path"] == payload["path"]
 
     listed = await client.get("/api/v1/projects/api-test/sessions")

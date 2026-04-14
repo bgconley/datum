@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +48,14 @@ def _get_project_dir(slug: str):
 async def _get_project_row(slug: str, session: AsyncSession) -> Project | None:
     result = await session.execute(select(Project).where(Project.slug == slug))
     return result.scalar_one_or_none()
+
+
+def _stable_json_response(status_code: int, body: dict) -> Response:
+    return Response(
+        content=json.dumps(body, sort_keys=True, separators=(",", ":")),
+        media_type="application/json",
+        status_code=status_code,
+    )
 
 
 async def _sync_session_note(
@@ -97,7 +106,7 @@ async def api_create_session(
     if idempotency_key:
         cached = await check_idempotency(session, idempotency_key, scope=scope)
         if cached is not None:
-            return JSONResponse(status_code=cached["status_code"], content=cached["body"])
+            return _stable_json_response(cached["status_code"], cached["body"])
 
     existing = find_session_note(project_dir, body.session_id)
     if existing is not None:
@@ -146,7 +155,7 @@ async def api_create_session(
     if idempotency_key:
         await store_idempotency(session, idempotency_key, scope, 201, response)
     await session.commit()
-    return JSONResponse(status_code=201, content=response)
+    return _stable_json_response(201, response)
 
 
 @router.put("/{session_id}")
@@ -165,7 +174,7 @@ async def api_append_session(
     if idempotency_key:
         cached = await check_idempotency(session, idempotency_key, scope=scope)
         if cached is not None:
-            return JSONResponse(status_code=cached["status_code"], content=cached["body"])
+            return _stable_json_response(cached["status_code"], cached["body"])
 
     session_file = find_session_note(project_dir, session_id)
     if session_file is None:
@@ -211,7 +220,7 @@ async def api_append_session(
     if idempotency_key:
         await store_idempotency(session, idempotency_key, scope, 200, response)
     await session.commit()
-    return response
+    return _stable_json_response(200, response)
 
 
 @router.get("", response_model=SessionListResponse)
