@@ -11,6 +11,7 @@ from datum.schemas.inbox import (
     CandidateActionResponse,
     CandidateResponse,
     EntitySummaryResponse,
+    OpenQuestionSummaryResponse,
     ProjectIntelligenceSummaryResponse,
 )
 from datum.services.intelligence import (
@@ -108,5 +109,9 @@ async def api_get_project_intelligence_summary(
         key_entities=[
             EntitySummaryResponse.model_validate(entity, from_attributes=True)
             for entity in summary.key_entities
+        ],
+        open_questions=[
+            OpenQuestionSummaryResponse.model_validate(question, from_attributes=True)
+            for question in summary.open_questions
         ],
     )

@@ -32,6 +32,13 @@ class EntityRelationshipDetailResponse(BaseModel):
     relationship_type: str
     direction: str
     evidence_text: str | None = None
+    evidence_document_path: str | None = None
+    evidence_document_title: str | None = None
+    evidence_heading_path: str | None = None
+    evidence_version_number: int | None = None
+    evidence_chunk_id: str | None = None
+    evidence_start_char: int | None = None
+    evidence_end_char: int | None = None
 
 
 class EntityDetailResponse(BaseModel):

@@ -57,9 +57,23 @@ class EntitySummary:
 
 
 @dataclass(slots=True)
+class OpenQuestionSummary:
+    id: str
+    question: str
+    context: str | None
+    age_days: int
+    is_stale: bool
+    source_doc_path: str | None = None
+    source_version: int | None = None
+    canonical_record_path: str | None = None
+    created_at: str | None = None
+
+
+@dataclass(slots=True)
 class ProjectIntelligenceSummary:
     pending_candidate_count: int
     key_entities: list[EntitySummary]
+    open_questions: list[OpenQuestionSummary]
 
 
 def decision_signature(title: str, decision_text: str | None, consequences: str | None) -> str:
@@ -345,8 +359,10 @@ async def get_project_intelligence_summary(
     slug: str,
     *,
     entity_limit: int = 10,
+    open_question_limit: int = 5,
 ) -> ProjectIntelligenceSummary:
     project = await get_project_or_404(session, slug)
+    source_info = await _source_info_map(session, project.id)
     pending_candidate_count = 0
     for table in (Decision, Requirement, OpenQuestion):
         result = await session.execute(
@@ -374,9 +390,16 @@ async def get_project_intelligence_summary(
         EntitySummary(entity_type=row[0], canonical_name=row[1], count=int(row[2]))
         for row in entities_result.fetchall()
     ]
+    open_questions = await _list_curated_open_questions(
+        session,
+        project,
+        source_info,
+        limit=open_question_limit,
+    )
     return ProjectIntelligenceSummary(
         pending_candidate_count=pending_candidate_count,
         key_entities=key_entities,
+        open_questions=open_questions,
     )
 
 
@@ -500,6 +523,58 @@ async def _list_open_question_candidates(
         )
         for row in rows
     ]
+
+
+async def _list_curated_open_questions(
+    session: AsyncSession,
+    project: Project,
+    source_info: dict[UUID, tuple[str | None, int | None]],
+    *,
+    limit: int,
+) -> list[OpenQuestionSummary]:
+    result = await session.execute(
+        select(OpenQuestion)
+        .where(
+            OpenQuestion.project_id == project.id,
+            OpenQuestion.status == "open",
+            OpenQuestion.curation_status.in_(["accepted", "edited"]),
+        )
+        .order_by(OpenQuestion.created_at.asc().nullslast(), OpenQuestion.question.asc())
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+    now = datetime.now(UTC)
+    summaries: list[OpenQuestionSummary] = []
+    for row in rows:
+        created_at = row.created_at
+        if created_at is None:
+            age_days = 0
+        else:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=UTC)
+            age_days = max((now - created_at).days, 0)
+        summaries.append(
+            OpenQuestionSummary(
+                id=str(row.id),
+                question=row.question,
+                context=row.context,
+                age_days=age_days,
+                is_stale=age_days >= 30,
+                source_doc_path=(
+                    source_info[row.source_version_id][0]
+                    if row.source_version_id in source_info
+                    else None
+                ),
+                source_version=(
+                    source_info[row.source_version_id][1]
+                    if row.source_version_id in source_info
+                    else None
+                ),
+                canonical_record_path=row.canonical_record_path,
+                created_at=row.created_at.isoformat() if row.created_at else None,
+            )
+        )
+    return summaries
 
 
 async def _source_info_map(

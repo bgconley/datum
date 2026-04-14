@@ -142,9 +142,14 @@ function DocumentRouteComponent() {
         docPath={_splat}
         sourceContext={{
           query: search.sourceQuery,
+          queryLabel: search.sourceQueryLabel,
           snippet: search.sourceSnippet,
           heading: search.sourceHeading,
           signals: search.sourceSignals ? search.sourceSignals.split(',').filter(Boolean) : [],
+          versionNumber: search.sourceVersion,
+          startChar: search.sourceStart,
+          endChar: search.sourceEnd,
+          chunkId: search.sourceChunkId,
         }}
       />
     </Suspense>
@@ -259,14 +264,41 @@ const documentRoute = createRoute({
     search: Record<string, unknown>,
   ): {
     sourceQuery?: string
+    sourceQueryLabel?: string
     sourceSnippet?: string
     sourceHeading?: string
     sourceSignals?: string
+    sourceVersion?: number
+    sourceStart?: number
+    sourceEnd?: number
+    sourceChunkId?: string
   } => ({
     sourceQuery: typeof search.sourceQuery === 'string' ? search.sourceQuery : undefined,
+    sourceQueryLabel:
+      typeof search.sourceQueryLabel === 'string' ? search.sourceQueryLabel : undefined,
     sourceSnippet: typeof search.sourceSnippet === 'string' ? search.sourceSnippet : undefined,
     sourceHeading: typeof search.sourceHeading === 'string' ? search.sourceHeading : undefined,
     sourceSignals: typeof search.sourceSignals === 'string' ? search.sourceSignals : undefined,
+    sourceVersion:
+      typeof search.sourceVersion === 'number'
+        ? search.sourceVersion
+        : typeof search.sourceVersion === 'string'
+          ? Number(search.sourceVersion)
+          : undefined,
+    sourceStart:
+      typeof search.sourceStart === 'number'
+        ? search.sourceStart
+        : typeof search.sourceStart === 'string'
+          ? Number(search.sourceStart)
+          : undefined,
+    sourceEnd:
+      typeof search.sourceEnd === 'number'
+        ? search.sourceEnd
+        : typeof search.sourceEnd === 'string'
+          ? Number(search.sourceEnd)
+          : undefined,
+    sourceChunkId:
+      typeof search.sourceChunkId === 'string' ? search.sourceChunkId : undefined,
   }),
   component: DocumentRouteComponent,
 })

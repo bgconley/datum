@@ -7,7 +7,14 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { useContextPanel } from '@/lib/context-panel'
-import { api, type Candidate, type DocumentMeta, type InsightSummary, type Project } from '@/lib/api'
+import {
+  api,
+  type Candidate,
+  type DocumentMeta,
+  type InsightSummary,
+  type OpenQuestionSummary,
+  type Project,
+} from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
@@ -17,7 +24,11 @@ function sortByRecency(documents: DocumentMeta[]) {
   )
 }
 
-function buildAttentionAlerts(documents: DocumentMeta[], pendingCandidateCount: number) {
+function buildAttentionAlerts(
+  documents: DocumentMeta[],
+  pendingCandidateCount: number,
+  openQuestions: OpenQuestionSummary[],
+) {
   const alerts: string[] = []
   const draftCount = documents.filter((document) => document.status === 'draft').length
   const decisionCount = documents.filter((document) => document.doc_type === 'decision').length
@@ -40,6 +51,12 @@ function buildAttentionAlerts(documents: DocumentMeta[], pendingCandidateCount: 
   }
   if (pendingCandidateCount > 0) {
     alerts.push(`${pendingCandidateCount} inbox item${pendingCandidateCount === 1 ? '' : 's'} need review`)
+  }
+  const agedOpenQuestions = openQuestions.filter((question) => question.is_stale)
+  if (agedOpenQuestions.length > 0) {
+    alerts.push(
+      `${agedOpenQuestions.length} open question${agedOpenQuestions.length === 1 ? '' : 's'} older than 30 days`,
+    )
   }
   if (documents.length === 0) {
     alerts.push('Project has no cabinet documents yet')
@@ -72,11 +89,13 @@ function DashboardContextPanel({
   documents,
   keyEntities,
   pendingCandidateCount,
+  openQuestionCount,
 }: {
   project: Project
   documents: DocumentMeta[]
   keyEntities: string[]
   pendingCandidateCount: number
+  openQuestionCount: number
 }) {
   const byType = documents.reduce<Record<string, number>>((accumulator, document) => {
     accumulator[document.doc_type] = (accumulator[document.doc_type] ?? 0) + 1
@@ -111,6 +130,10 @@ function DashboardContextPanel({
           <div>
             <div className="text-muted-foreground">Inbox</div>
             <div className="mt-1 font-medium">{pendingCandidateCount}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Open questions</div>
+            <div className="mt-1 font-medium">{openQuestionCount}</div>
           </div>
         </div>
       </div>
@@ -174,6 +197,7 @@ interface ProjectDashboardProps {
 const EMPTY_DOCUMENTS: DocumentMeta[] = []
 const EMPTY_ENTITIES: string[] = []
 const EMPTY_CANDIDATES: Candidate[] = []
+const EMPTY_OPEN_QUESTIONS: OpenQuestionSummary[] = []
 
 export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
   const { setContent } = useContextPanel()
@@ -200,6 +224,7 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
   const pendingCandidateCount = intelligenceQuery.data?.pending_candidate_count ?? 0
   const inboxCandidates = inboxQuery.data ?? EMPTY_CANDIDATES
   const openInsights = insightsQuery.data?.insights ?? []
+  const openQuestions = intelligenceQuery.data?.open_questions ?? EMPTY_OPEN_QUESTIONS
 
   useEffect(() => {
     if (project) {
@@ -209,11 +234,12 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
           documents={documents}
           keyEntities={keyEntities}
           pendingCandidateCount={pendingCandidateCount}
+          openQuestionCount={openQuestions.length}
         />,
       )
     }
     return () => setContent(null)
-  }, [documents, keyEntities, pendingCandidateCount, project, setContent])
+  }, [documents, keyEntities, openQuestions, pendingCandidateCount, project, setContent])
 
   if (workspaceQuery.isLoading) {
     return <div className="p-8 text-muted-foreground">Loading project dashboard…</div>
@@ -228,13 +254,13 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
     accumulator[document.doc_type] = (accumulator[document.doc_type] ?? 0) + 1
     return accumulator
   }, {})
-  const alerts = buildAttentionAlerts(documents, pendingCandidateCount)
+  const alerts = buildAttentionAlerts(documents, pendingCandidateCount, openQuestions)
   const decisionCandidates = inboxCandidates
     .filter((candidate) => candidate.candidate_type === 'decision')
     .slice(0, 5)
-  const openQuestionCandidates = inboxCandidates
-    .filter((candidate) => candidate.candidate_type === 'open_question')
-    .slice(0, 5)
+  const pendingOpenQuestionCount = inboxCandidates.filter(
+    (candidate) => candidate.candidate_type === 'open_question',
+  ).length
   const decisionDocs = documents.filter((document) => document.doc_type === 'decision').slice(0, 5)
 
   return (
@@ -351,21 +377,82 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {openQuestionCandidates.length === 0 ? (
+                {openQuestions.length === 0 ? (
                   <div className="text-sm text-muted-foreground">
-                    No open questions surfaced from the intelligence layer yet.
+                    No curated open questions yet.
+                    {pendingOpenQuestionCount > 0 && (
+                      <>
+                        {' '}
+                        <Link
+                          to="/projects/$slug/inbox"
+                          params={{ slug: projectSlug }}
+                          className="underline-offset-4 hover:underline"
+                        >
+                          Review {pendingOpenQuestionCount} candidate
+                          {pendingOpenQuestionCount === 1 ? '' : 's'} in inbox.
+                        </Link>
+                      </>
+                    )}
                   </div>
                 ) : (
-                  openQuestionCandidates.map((candidate) => (
-                    <Link
-                      key={candidate.id}
-                      to="/projects/$slug/inbox"
-                      params={{ slug: projectSlug }}
-                      className="block rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
-                    >
-                      {candidate.title}
-                    </Link>
-                  ))
+                  openQuestions.map((question) => {
+                    const content = (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={question.is_stale ? 'secondary' : 'outline'}>
+                            {question.is_stale ? '30d+' : `${question.age_days}d`}
+                          </Badge>
+                          {question.source_version !== null && (
+                            <Badge variant="outline">v{question.source_version}</Badge>
+                          )}
+                        </div>
+                        <div className="mt-3 font-medium">{question.question}</div>
+                        {question.context && (
+                          <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                            {question.context}
+                          </div>
+                        )}
+                        <div className="mt-3 text-xs text-muted-foreground">
+                          {question.source_doc_path ?? question.canonical_record_path ?? 'Curated project memory'}
+                        </div>
+                      </>
+                    )
+
+                    if (!question.source_doc_path) {
+                      return (
+                        <div
+                          key={question.id}
+                          className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm"
+                        >
+                          {content}
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <Link
+                        key={question.id}
+                        to="/projects/$slug/docs/$"
+                        params={{ slug: projectSlug, _splat: question.source_doc_path }}
+                        search={{
+                          sourceQuery: question.question,
+                          sourceQueryLabel: 'Open question',
+                          sourceSnippet: question.context ?? question.question,
+                          sourceSignals: [
+                            'open-question',
+                            question.is_stale ? 'aged' : 'active',
+                          ].join(','),
+                          sourceVersion:
+                            question.source_version !== null
+                              ? String(question.source_version)
+                              : undefined,
+                        }}
+                        className="block rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm transition-colors hover:bg-accent/50"
+                      >
+                        {content}
+                      </Link>
+                    )
+                  })
                 )}
               </CardContent>
             </Card>

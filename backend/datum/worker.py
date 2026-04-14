@@ -317,6 +317,13 @@ async def _handle_schema_parse_job(
         job.error_message = "no schema entities detected"
         return
 
+    chunk_result = await session.execute(
+        select(DocumentChunk)
+        .where(DocumentChunk.version_id == version.id)
+        .order_by(DocumentChunk.chunk_index.asc())
+    )
+    chunks = chunk_result.scalars().all()
+
     entity_map: dict[tuple[str, str], Entity] = {}
     for schema_entity in entities:
         entity_row = await _get_or_create_entity(
@@ -339,13 +346,22 @@ async def _handle_schema_parse_job(
         target_entity = _resolve_schema_relationship_entity(relationship.target, entity_map)
         if source_entity is None or target_entity is None:
             continue
+        evidence_text = relationship.evidence_text.strip() or None
+        evidence_chunk_id, evidence_start_char, evidence_end_char = _resolve_evidence_span(
+            chunks,
+            version_text.content,
+            evidence_text,
+        )
         session.add(
             EntityRelationship(
                 source_entity_id=source_entity.id,
                 target_entity_id=target_entity.id,
                 relationship_type=relationship.relationship_type,
                 evidence_version_id=version.id,
-                evidence_text=relationship.evidence_text,
+                evidence_chunk_id=evidence_chunk_id,
+                evidence_text=evidence_text,
+                evidence_start_char=evidence_start_char,
+                evidence_end_char=evidence_end_char,
                 extraction_method="parser",
                 confidence=1.0,
             )
@@ -672,14 +688,31 @@ async def _handle_relationship_job(
             target_entity = entity_by_name.get(candidate.target_entity)
             if source_entity is None or target_entity is None:
                 continue
+            evidence_text = (candidate.evidence_text or "").strip()
+            local_start = chunk.content.find(evidence_text) if evidence_text else -1
+            if local_start >= 0:
+                evidence_start_char = chunk.start_char + local_start
+                evidence_end_char = evidence_start_char + len(evidence_text)
+                evidence_chunk_id = chunk.id
+                persisted_evidence_text = evidence_text
+            else:
+                persisted_evidence_text = chunk.content[:240]
+                evidence_start_char = chunk.start_char
+                evidence_end_char = min(
+                    chunk.start_char + len(persisted_evidence_text),
+                    chunk.end_char,
+                )
+                evidence_chunk_id = chunk.id
             session.add(
                 EntityRelationship(
                     source_entity_id=source_entity.id,
                     target_entity_id=target_entity.id,
                     relationship_type=candidate.relationship_type,
                     evidence_version_id=version.id,
-                    evidence_chunk_id=chunk.id,
-                    evidence_text=candidate.evidence_text or chunk.content[:240],
+                    evidence_chunk_id=evidence_chunk_id,
+                    evidence_text=persisted_evidence_text,
+                    evidence_start_char=evidence_start_char,
+                    evidence_end_char=evidence_end_char,
                     extraction_method="llm",
                     model_run_id=model_run.id if model_run is not None else None,
                     confidence=candidate.confidence,
@@ -1314,6 +1347,22 @@ def _match_chunk_for_span(
             best_overlap = overlap
             best_chunk_id = chunk.id
     return best_chunk_id
+
+
+def _resolve_evidence_span(
+    chunks: Sequence[DocumentChunk],
+    content: str,
+    evidence_text: str | None,
+) -> tuple[UUID | None, int | None, int | None]:
+    if not evidence_text:
+        return None, None, None
+
+    start_char = content.find(evidence_text)
+    if start_char < 0:
+        return None, None, None
+
+    end_char = start_char + len(evidence_text)
+    return _match_chunk_for_span(chunks, start_char, end_char), start_char, end_char
 
 
 async def worker_loop() -> None:

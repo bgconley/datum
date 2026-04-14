@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.models.core import Document, DocumentVersion, Project
+from datum.models.intelligence import OpenQuestion
 from datum.services.link_detection import detect_all_links
 from datum.services.versioning import read_version_content
 
@@ -84,6 +85,47 @@ def detect_broken_links(
     return candidates
 
 
+def detect_aged_open_questions(
+    questions: list[dict[str, Any]],
+    *,
+    max_age_days: int = 30,
+) -> list[StalenessCandidate]:
+    now = datetime.now(UTC)
+    threshold = now - timedelta(days=max_age_days)
+    candidates: list[StalenessCandidate] = []
+    for question in questions:
+        created_at = question["created_at"]
+        if created_at is None:
+            continue
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        if created_at >= threshold:
+            continue
+        age_days = (now - created_at).days
+        title = f"Aging open question: {question['question']}"
+        candidates.append(
+            StalenessCandidate(
+                insight_type="open_question_aging",
+                severity="warning" if age_days < 90 else "critical",
+                title=title,
+                explanation=(
+                    f"Open question has remained unresolved for {age_days} days."
+                ),
+                confidence=1.0,
+                evidence={
+                    "question": question["question"],
+                    "document_path": question.get("document_path"),
+                    "source_version": question.get("source_version"),
+                    "canonical_record_path": question.get("canonical_record_path"),
+                    "created_at": created_at.isoformat(),
+                    "age_days": age_days,
+                    "threshold_days": max_age_days,
+                },
+            )
+        )
+    return candidates
+
+
 async def detect_staleness_for_project(
     session: AsyncSession,
     project_id,
@@ -133,4 +175,39 @@ async def detect_staleness_for_project(
             )
 
     candidates.extend(detect_broken_links(broken_link_rows, existing_paths))
+
+    question_rows_result = await session.execute(
+        select(OpenQuestion).where(
+            OpenQuestion.project_id == project_id,
+            OpenQuestion.status == "open",
+            OpenQuestion.curation_status.in_(["accepted", "edited"]),
+        )
+    )
+    open_questions = question_rows_result.scalars().all()
+    enriched_questions: list[dict[str, Any]] = []
+    for question in open_questions:
+        source_path = None
+        source_version = None
+        if question.source_version_id is not None:
+            source_doc_version = await session.get(DocumentVersion, question.source_version_id)
+            if source_doc_version is not None:
+                source_version = source_doc_version.version_number
+                source_document = await session.get(Document, source_doc_version.document_id)
+                if source_document is not None:
+                    source_path = source_document.canonical_path
+        enriched_questions.append(
+            {
+                "question": question.question,
+                "created_at": question.created_at,
+                "document_path": source_path,
+                "source_version": source_version,
+                "canonical_record_path": question.canonical_record_path,
+            }
+        )
+    candidates.extend(
+        detect_aged_open_questions(
+            enriched_questions,
+            max_age_days=30,
+        )
+    )
     return candidates

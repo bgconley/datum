@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 
 from datum.models.core import Document, DocumentVersion
 from datum.models.intelligence import Entity, EntityMention, EntityRelationship
+from datum.models.search import DocumentChunk
 from datum.services.intelligence import get_project_or_404
 
 
@@ -38,6 +39,13 @@ class EntityRelationshipDetailRecord:
     relationship_type: str
     direction: str
     evidence_text: str | None
+    evidence_document_path: str | None = None
+    evidence_document_title: str | None = None
+    evidence_heading_path: str | None = None
+    evidence_version_number: int | None = None
+    evidence_chunk_id: str | None = None
+    evidence_start_char: int | None = None
+    evidence_end_char: int | None = None
 
 
 @dataclass(slots=True)
@@ -146,16 +154,25 @@ async def get_project_entity_detail(
     target_entity = aliased(Entity)
     evidence_version = aliased(DocumentVersion)
     evidence_document = aliased(Document)
+    evidence_chunk = aliased(DocumentChunk)
     outgoing_rows = (
         await session.execute(
             select(
                 target_entity.canonical_name,
                 EntityRelationship.relationship_type,
                 EntityRelationship.evidence_text,
+                evidence_document.canonical_path,
+                evidence_document.title,
+                evidence_version.version_number,
+                EntityRelationship.evidence_chunk_id,
+                EntityRelationship.evidence_start_char,
+                EntityRelationship.evidence_end_char,
+                evidence_chunk.heading_path,
             )
             .join(target_entity, EntityRelationship.target_entity_id == target_entity.id)
             .join(evidence_version, EntityRelationship.evidence_version_id == evidence_version.id)
             .join(evidence_document, evidence_version.document_id == evidence_document.id)
+            .outerjoin(evidence_chunk, EntityRelationship.evidence_chunk_id == evidence_chunk.id)
             .where(
                 EntityRelationship.source_entity_id == entity.id,
                 evidence_document.project_id == project.id,
@@ -168,10 +185,18 @@ async def get_project_entity_detail(
                 source_entity.canonical_name,
                 EntityRelationship.relationship_type,
                 EntityRelationship.evidence_text,
+                evidence_document.canonical_path,
+                evidence_document.title,
+                evidence_version.version_number,
+                EntityRelationship.evidence_chunk_id,
+                EntityRelationship.evidence_start_char,
+                EntityRelationship.evidence_end_char,
+                evidence_chunk.heading_path,
             )
             .join(source_entity, EntityRelationship.source_entity_id == source_entity.id)
             .join(evidence_version, EntityRelationship.evidence_version_id == evidence_version.id)
             .join(evidence_document, evidence_version.document_id == evidence_document.id)
+            .outerjoin(evidence_chunk, EntityRelationship.evidence_chunk_id == evidence_chunk.id)
             .where(
                 EntityRelationship.target_entity_id == entity.id,
                 evidence_document.project_id == project.id,
@@ -200,6 +225,13 @@ async def get_project_entity_detail(
             relationship_type=row[1],
             direction="outgoing",
             evidence_text=row[2],
+            evidence_document_path=row[3],
+            evidence_document_title=row[4],
+            evidence_version_number=row[5],
+            evidence_chunk_id=str(row[6]) if row[6] is not None else None,
+            evidence_start_char=row[7],
+            evidence_end_char=row[8],
+            evidence_heading_path=" > ".join(row[9] or []) or None,
         )
         for row in outgoing_rows
     ]
@@ -209,6 +241,13 @@ async def get_project_entity_detail(
             relationship_type=row[1],
             direction="incoming",
             evidence_text=row[2],
+            evidence_document_path=row[3],
+            evidence_document_title=row[4],
+            evidence_version_number=row[5],
+            evidence_chunk_id=str(row[6]) if row[6] is not None else None,
+            evidence_start_char=row[7],
+            evidence_end_char=row[8],
+            evidence_heading_path=" > ".join(row[9] or []) or None,
         )
         for row in incoming_rows
     )

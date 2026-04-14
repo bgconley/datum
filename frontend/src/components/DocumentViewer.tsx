@@ -23,9 +23,14 @@ interface DocumentViewerProps {
   docPath: string
   sourceContext?: {
     query?: string
+    queryLabel?: string
     snippet?: string
     heading?: string
     signals: string[]
+    versionNumber?: number
+    startChar?: number
+    endChar?: number
+    chunkId?: string
   }
 }
 
@@ -195,7 +200,20 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
   const language = detectLanguage(metadata.relative_path)
   const breadcrumbs = buildBreadcrumbs(projectSlug, metadata.relative_path)
   const historySplat = `${metadata.relative_path}/history`
-  const showSearchSource = Boolean(sourceContext?.query && viewMode !== 'edit' && viewMode !== 'split')
+  const showSearchSource =
+    Boolean(
+      (
+        sourceContext?.query ||
+        sourceContext?.snippet ||
+        sourceContext?.heading ||
+        sourceContext?.versionNumber != null ||
+        sourceContext?.startChar != null ||
+        sourceContext?.endChar != null ||
+        sourceContext?.chunkId
+      ) &&
+        viewMode !== 'edit' &&
+        viewMode !== 'split',
+    )
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
@@ -320,10 +338,15 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           </CardShell>
           {showSearchSource && sourceContext && (
             <SearchSourceCard
-              query={sourceContext.query ?? ''}
-              snippet={sourceContext.snippet ?? ''}
+              query={sourceContext.query}
+              queryLabel={sourceContext.queryLabel}
+              snippet={sourceContext.snippet}
               heading={sourceContext.heading}
               signals={sourceContext.signals}
+              versionNumber={sourceContext.versionNumber}
+              startChar={sourceContext.startChar}
+              endChar={sourceContext.endChar}
+              chunkId={sourceContext.chunkId}
             />
           )}
         </div>
@@ -338,10 +361,15 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           </CardShell>
           {showSearchSource && sourceContext && (
             <SearchSourceCard
-              query={sourceContext.query ?? ''}
-              snippet={sourceContext.snippet ?? ''}
+              query={sourceContext.query}
+              queryLabel={sourceContext.queryLabel}
+              snippet={sourceContext.snippet}
               heading={sourceContext.heading}
               signals={sourceContext.signals}
+              versionNumber={sourceContext.versionNumber}
+              startChar={sourceContext.startChar}
+              endChar={sourceContext.endChar}
+              chunkId={sourceContext.chunkId}
             />
           )}
         </div>
@@ -372,32 +400,76 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
 
 function SearchSourceCard({
   query,
+  queryLabel,
   snippet,
   heading,
   signals,
+  versionNumber,
+  startChar,
+  endChar,
+  chunkId,
 }: {
-  query: string
-  snippet: string
+  query?: string
+  queryLabel?: string
+  snippet?: string
   heading?: string
   signals: string[]
+  versionNumber?: number
+  startChar?: number
+  endChar?: number
+  chunkId?: string
 }) {
   return (
-    <CardShell title="Search source">
+    <CardShell title="Source evidence">
       <div className="space-y-4 text-sm">
-        <div>
-          <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Query
+        {query && (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              {queryLabel ?? 'Query'}
+            </div>
+            <div className="mt-2 rounded-xl border border-border/70 bg-background/70 px-3 py-2 font-mono text-xs">
+              {query}
+            </div>
           </div>
-          <div className="mt-2 rounded-xl border border-border/70 bg-background/70 px-3 py-2 font-mono text-xs">
-            {query}
-          </div>
-        </div>
+        )}
         {heading && (
           <div>
             <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Heading
             </div>
             <div className="mt-2 text-sm text-foreground/85">{heading}</div>
+          </div>
+        )}
+        {(versionNumber != null || startChar != null || endChar != null || chunkId) && (
+          <div className="grid gap-3 md:grid-cols-3">
+            {versionNumber != null && (
+              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Version
+                </div>
+                <div className="mt-2 text-sm text-foreground/85">v{versionNumber}</div>
+              </div>
+            )}
+            {(startChar != null || endChar != null) && (
+              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Characters
+                </div>
+                <div className="mt-2 text-sm text-foreground/85">
+                  {startChar ?? '?'}-{endChar ?? '?'}
+                </div>
+              </div>
+            )}
+            {chunkId && (
+              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Chunk
+                </div>
+                <div className="mt-2 break-all font-mono text-xs text-foreground/85">
+                  {chunkId}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {signals.length > 0 && (
@@ -409,9 +481,11 @@ function SearchSourceCard({
             ))}
           </div>
         )}
-        <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-4 leading-6 text-foreground/85">
-          {snippet}
-        </div>
+        {snippet && (
+          <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-4 leading-6 text-foreground/85">
+            {snippet}
+          </div>
+        )}
       </div>
     </CardShell>
   )

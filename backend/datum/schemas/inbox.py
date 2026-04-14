@@ -44,6 +44,19 @@ class EntitySummaryResponse(BaseModel):
     count: int
 
 
+class OpenQuestionSummaryResponse(BaseModel):
+    id: str
+    question: str
+    context: str | None = None
+    age_days: int
+    is_stale: bool
+    source_doc_path: str | None = None
+    source_version: int | None = None
+    canonical_record_path: str | None = None
+    created_at: str | None = None
+
+
 class ProjectIntelligenceSummaryResponse(BaseModel):
     pending_candidate_count: int = 0
     key_entities: list[EntitySummaryResponse] = Field(default_factory=list)
+    open_questions: list[OpenQuestionSummaryResponse] = Field(default_factory=list)

@@ -430,6 +430,19 @@ async def test_intelligence_inbox_and_summary_endpoints(client, monkeypatch):
                     count=2,
                 )
             ],
+            open_questions=[
+                SimpleNamespace(
+                    id="oq-1",
+                    question="What is the rollback plan?",
+                    context="Need a production fallback before rollout.",
+                    age_days=41,
+                    is_stale=True,
+                    source_doc_path="docs/ops/rollout.md",
+                    source_version=3,
+                    canonical_record_path=".piq/records/open-questions/oq_1.yaml",
+                    created_at="2026-04-13T00:00:00+00:00",
+                )
+            ],
         )
 
     monkeypatch.setattr("datum.api.inbox.list_candidates", fake_list_candidates)
@@ -451,6 +464,8 @@ async def test_intelligence_inbox_and_summary_endpoints(client, monkeypatch):
     assert summary_payload["pending_candidate_count"] == 2
     assert summary_payload["key_entities"][0]["canonical_name"] == "paradedb"
     assert summary_payload["key_entities"][0]["count"] == 2
+    assert summary_payload["open_questions"][0]["question"] == "What is the rollback plan?"
+    assert summary_payload["open_questions"][0]["is_stale"] is True
 
 
 @pytest.mark.asyncio
@@ -884,6 +899,13 @@ async def test_traceability_and_insights_endpoints(client, monkeypatch):
                 relationship_type="uses",
                 extraction_method="llm",
                 evidence_text="Auth service stores sessions in PostgreSQL.",
+                evidence_document_path="docs/architecture.md",
+                evidence_document_title="Architecture",
+                evidence_heading_path="Storage",
+                evidence_version_number=4,
+                evidence_chunk_id="chunk-rel-1",
+                evidence_start_char=128,
+                evidence_end_char=168,
                 confidence=0.82,
                 created_at="2026-04-13T00:00:00+00:00",
             )
@@ -1007,6 +1029,9 @@ async def test_traceability_and_insights_endpoints(client, monkeypatch):
     relationship = relationships.json()["relationships"][0]
     assert relationship["source_entity"] == "auth service"
     assert relationship["relationship_type"] == "uses"
+    assert relationship["evidence_document_path"] == "docs/architecture.md"
+    assert relationship["evidence_version_number"] == 4
+    assert relationship["evidence_chunk_id"] == "chunk-rel-1"
 
     insights = await client.get("/api/v1/projects/intel/insights", params={"status": "open"})
     assert insights.status_code == 200
@@ -1075,6 +1100,13 @@ async def test_entities_endpoints(client, monkeypatch):
                     relationship_type="used_by",
                     direction="incoming",
                     evidence_text="Auth service writes to PostgreSQL.",
+                    evidence_document_path="docs/architecture.md",
+                    evidence_document_title="Architecture",
+                    evidence_heading_path="Storage",
+                    evidence_version_number=2,
+                    evidence_chunk_id="chunk-42",
+                    evidence_start_char=44,
+                    evidence_end_char=78,
                 )
             ],
         )
@@ -1095,6 +1127,8 @@ async def test_entities_endpoints(client, monkeypatch):
     assert payload["canonical_name"] == "postgresql"
     assert payload["mentions"][0]["document_path"] == "docs/architecture.md"
     assert payload["relationships"][0]["related_entity"] == "auth service"
+    assert payload["relationships"][0]["evidence_document_path"] == "docs/architecture.md"
+    assert payload["relationships"][0]["evidence_chunk_id"] == "chunk-42"
 
 
 class _EvalScalarResult:

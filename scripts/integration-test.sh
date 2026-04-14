@@ -43,6 +43,161 @@ export PHASE6_KEY_NAME_PREFIX="${PHASE6_KEY_NAME_PREFIX:-integration-test-phase6
 export PHASE6_IDEMPOTENCY_PREFIX="${PHASE6_IDEMPOTENCY_PREFIX:-phase6-integration}"
 API_TEST_SLUG="api-test"
 
+run_project_graph_cleanup() {
+    local project_selector_sql="$1"
+
+    (
+        cd "$REPO_DIR"
+        docker compose exec -T paradedb psql -v ON_ERROR_STOP=1 -q -U datum -d datum >/dev/null <<SQL
+DO \$\$
+DECLARE
+    fk RECORD;
+BEGIN
+    CREATE TEMP TABLE _target_projects (id uuid PRIMARY KEY) ON COMMIT DROP;
+    INSERT INTO _target_projects
+    ${project_selector_sql};
+
+    IF NOT EXISTS (SELECT 1 FROM _target_projects) THEN
+        RETURN;
+    END IF;
+
+    CREATE TEMP TABLE _target_project_slugs (slug text PRIMARY KEY) ON COMMIT DROP;
+    INSERT INTO _target_project_slugs
+    SELECT slug FROM projects WHERE id IN (SELECT id FROM _target_projects);
+
+    CREATE TEMP TABLE _target_documents (id uuid PRIMARY KEY) ON COMMIT DROP;
+    INSERT INTO _target_documents
+    SELECT id FROM documents WHERE project_id IN (SELECT id FROM _target_projects);
+
+    CREATE TEMP TABLE _target_versions (id uuid PRIMARY KEY) ON COMMIT DROP;
+    INSERT INTO _target_versions
+    SELECT id FROM document_versions WHERE document_id IN (SELECT id FROM _target_documents);
+
+    CREATE TEMP TABLE _target_chunks (id uuid PRIMARY KEY) ON COMMIT DROP;
+    INSERT INTO _target_chunks
+    SELECT id FROM document_chunks WHERE version_id IN (SELECT id FROM _target_versions);
+
+    -- Delete leaf rows that point at chunks.
+    FOR fk IN
+        SELECT tc.table_schema, tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name
+         AND tc.table_schema = ccu.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND ccu.table_schema = 'public'
+          AND ccu.table_name = 'document_chunks'
+          AND ccu.column_name = 'id'
+    LOOP
+        IF fk.table_name <> 'document_chunks' THEN
+            EXECUTE format(
+                'DELETE FROM %I.%I WHERE %I IN (SELECT id FROM _target_chunks)',
+                fk.table_schema, fk.table_name, fk.column_name
+            );
+        END IF;
+    END LOOP;
+
+    -- Delete rows that point at document versions.
+    FOR fk IN
+        SELECT tc.table_schema, tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name
+         AND tc.table_schema = ccu.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND ccu.table_schema = 'public'
+          AND ccu.table_name = 'document_versions'
+          AND ccu.column_name = 'id'
+    LOOP
+        IF fk.table_name <> 'document_versions' THEN
+            EXECUTE format(
+                'DELETE FROM %I.%I WHERE %I IN (SELECT id FROM _target_versions)',
+                fk.table_schema, fk.table_name, fk.column_name
+            );
+        END IF;
+    END LOOP;
+
+    -- Delete rows that point at documents.
+    FOR fk IN
+        SELECT tc.table_schema, tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name
+         AND tc.table_schema = ccu.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND ccu.table_schema = 'public'
+          AND ccu.table_name = 'documents'
+          AND ccu.column_name = 'id'
+    LOOP
+        IF fk.table_name <> 'documents' THEN
+            EXECUTE format(
+                'DELETE FROM %I.%I WHERE %I IN (SELECT id FROM _target_documents)',
+                fk.table_schema, fk.table_name, fk.column_name
+            );
+        END IF;
+    END LOOP;
+
+    -- Delete rows that point at projects.
+    FOR fk IN
+        SELECT tc.table_schema, tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name
+         AND tc.table_schema = ccu.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND ccu.table_schema = 'public'
+          AND ccu.table_name = 'projects'
+          AND ccu.column_name = 'id'
+    LOOP
+        IF fk.table_name <> 'projects' THEN
+            EXECUTE format(
+                'DELETE FROM %I.%I WHERE %I IN (SELECT id FROM _target_projects)',
+                fk.table_schema, fk.table_name, fk.column_name
+            );
+        END IF;
+    END LOOP;
+
+    -- Non-FK selectors that still need deterministic cleanup.
+    IF to_regclass('public.search_runs') IS NOT NULL THEN
+        DELETE FROM search_runs
+        WHERE project_scope IN (SELECT slug FROM _target_project_slugs);
+    END IF;
+
+    -- Remove core graph roots.
+    DELETE FROM document_chunks WHERE id IN (SELECT id FROM _target_chunks);
+    DELETE FROM document_versions WHERE id IN (SELECT id FROM _target_versions);
+    DELETE FROM documents WHERE id IN (SELECT id FROM _target_documents);
+    DELETE FROM source_files WHERE project_id IN (SELECT id FROM _target_projects);
+    DELETE FROM projects WHERE id IN (SELECT id FROM _target_projects);
+
+    -- Keep entities table compact after mention deletion.
+    DELETE FROM entities e
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM entity_mentions em
+        WHERE em.entity_id = e.id
+    );
+END \$\$;
+SQL
+    )
+}
+
 cleanup_api_test_state() {
     local slug="${1:-$API_TEST_SLUG}"
     local quiet="${2:-0}"
@@ -51,170 +206,19 @@ cleanup_api_test_state() {
         echo "  Cleaning previous test data..."
     fi
 
+    rm -rf "${DATUM_PROJECTS_ROOT}/${slug}" 2>/dev/null || true
     (
         cd "$REPO_DIR"
         docker compose exec -T datum-api sh -lc "rm -rf '/tank/datum/projects/${slug}'" >/dev/null 2>&1 || true
+    )
+
+    run_project_graph_cleanup "SELECT id FROM projects WHERE slug = '${slug}'"
+
+    (
+        cd "$REPO_DIR"
         docker compose exec -T paradedb psql -v ON_ERROR_STOP=1 -q -U datum -d datum >/dev/null <<SQL
-DELETE FROM search_run_results
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-);
-DELETE FROM search_runs
-WHERE project_scope = '${slug}';
-DELETE FROM entity_mentions
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-)
-   OR version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-);
-DELETE FROM open_questions
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
-DELETE FROM requirements
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
-DELETE FROM decisions
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
-DELETE FROM chunk_embeddings
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-);
-DELETE FROM technical_terms
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-)
-   OR version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-);
-DELETE FROM document_chunks
-WHERE version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-);
-DELETE FROM version_texts
-WHERE version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.slug = '${slug}'
-);
-DELETE FROM ingestion_jobs
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
-   OR version_id IN (
-       SELECT dv.id
-       FROM document_versions dv
-       JOIN documents d ON dv.document_id = d.id
-       JOIN projects p ON d.project_id = p.id
-       WHERE p.slug = '${slug}'
-   );
-DELETE FROM version_head_events
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
-   OR document_id IN (
-       SELECT id FROM documents
-       WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
-   );
-DELETE FROM audit_events
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
 DO \$\$
 BEGIN
-    IF to_regclass('public.document_links') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM document_links
-                 WHERE source_version_id IN (
-                     SELECT dv.id
-                     FROM document_versions dv
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.slug = ''${slug}''
-                 )
-                    OR target_version_id IN (
-                     SELECT dv.id
-                     FROM document_versions dv
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.slug = ''${slug}''
-                 )
-                    OR target_document_id IN (
-                     SELECT d.id
-                     FROM documents d
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.slug = ''${slug}''
-                 )';
-    END IF;
-
-    IF to_regclass('public.entity_relationships') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM entity_relationships
-                 WHERE evidence_chunk_id IN (
-                     SELECT dc.id
-                     FROM document_chunks dc
-                     JOIN document_versions dv ON dc.version_id = dv.id
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.slug = ''${slug}''
-                 )
-                    OR evidence_version_id IN (
-                     SELECT dv.id
-                     FROM document_versions dv
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.slug = ''${slug}''
-                 )';
-    END IF;
-
-    IF to_regclass('public.insights') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM insights
-                 WHERE project_id IN (
-                     SELECT id FROM projects WHERE slug = ''${slug}''
-                 )';
-    END IF;
-
-    IF to_regclass('public.session_deltas') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM session_deltas
-                 WHERE agent_session_id IN (
-                     SELECT id FROM agent_sessions
-                     WHERE project_id IN (
-                         SELECT id FROM projects WHERE slug = ''${slug}''
-                     )
-                 )';
-    END IF;
-
-    IF to_regclass('public.agent_sessions') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM agent_sessions
-                 WHERE project_id IN (
-                     SELECT id FROM projects WHERE slug = ''${slug}''
-                 )';
-    END IF;
-
     IF to_regclass('public.idempotency_records') IS NOT NULL THEN
         DELETE FROM idempotency_records
         WHERE idempotency_key LIKE '${PHASE6_IDEMPOTENCY_PREFIX}-%';
@@ -225,25 +229,8 @@ BEGIN
         WHERE name LIKE '${PHASE6_KEY_NAME_PREFIX}-%';
     END IF;
 END \$\$;
-DELETE FROM document_versions
-WHERE document_id IN (
-    SELECT id FROM documents
-    WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
-);
-DELETE FROM source_files
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
-DELETE FROM documents
-WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
-DELETE FROM projects
-WHERE slug = '${slug}';
-DELETE FROM entities e
-WHERE NOT EXISTS (
-    SELECT 1 FROM entity_mentions em WHERE em.entity_id = e.id
-);
 SQL
     )
-
-    rm -rf "${DATUM_PROJECTS_ROOT}/${slug}" 2>/dev/null || true
 
     if [ "$quiet" != "1" ]; then
         echo "    OK"
@@ -257,184 +244,7 @@ cleanup_pytest_db_state() {
         echo "  Cleaning pytest temp DB state..."
     fi
 
-    (
-        cd "$REPO_DIR"
-        docker compose exec -T paradedb psql -v ON_ERROR_STOP=1 -q -U datum -d datum >/dev/null <<SQL
-DELETE FROM search_run_results
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-);
-DELETE FROM chunk_embeddings
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-);
-DELETE FROM technical_terms
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-)
-   OR version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-);
-DELETE FROM document_chunks
-WHERE version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-);
-DELETE FROM version_texts
-WHERE version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-);
-DELETE FROM ingestion_jobs
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%')
-   OR version_id IN (
-       SELECT dv.id
-       FROM document_versions dv
-       JOIN documents d ON dv.document_id = d.id
-       JOIN projects p ON d.project_id = p.id
-       WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-   );
-DELETE FROM version_head_events
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%')
-   OR document_id IN (
-       SELECT id FROM documents
-       WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%')
-   );
-DELETE FROM audit_events
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
-DO \$\$
-BEGIN
-    IF to_regclass('public.document_links') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM document_links
-                 WHERE source_version_id IN (
-                     SELECT dv.id
-                     FROM document_versions dv
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
-                 )
-                    OR target_version_id IN (
-                     SELECT dv.id
-                     FROM document_versions dv
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
-                 )
-                    OR target_document_id IN (
-                     SELECT d.id
-                     FROM documents d
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
-                 )';
-    END IF;
-
-    IF to_regclass('public.entity_relationships') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM entity_relationships
-                 WHERE evidence_chunk_id IN (
-                     SELECT dc.id
-                     FROM document_chunks dc
-                     JOIN document_versions dv ON dc.version_id = dv.id
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
-                 )
-                    OR evidence_version_id IN (
-                     SELECT dv.id
-                     FROM document_versions dv
-                     JOIN documents d ON dv.document_id = d.id
-                     JOIN projects p ON d.project_id = p.id
-                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
-                 )';
-    END IF;
-
-    IF to_regclass('public.insights') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM insights
-                 WHERE project_id IN (
-                     SELECT id FROM projects WHERE filesystem_path LIKE ''/tmp/pytest-of-%''
-                 )';
-    END IF;
-
-    IF to_regclass('public.session_deltas') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM session_deltas
-                 WHERE agent_session_id IN (
-                     SELECT id FROM agent_sessions
-                     WHERE project_id IN (
-                         SELECT id FROM projects WHERE filesystem_path LIKE ''/tmp/pytest-of-%''
-                     )
-                 )';
-    END IF;
-
-    IF to_regclass('public.agent_sessions') IS NOT NULL THEN
-        EXECUTE 'DELETE FROM agent_sessions
-                 WHERE project_id IN (
-                     SELECT id FROM projects WHERE filesystem_path LIKE ''/tmp/pytest-of-%''
-                 )';
-    END IF;
-END \$\$;
-DELETE FROM entity_mentions
-WHERE chunk_id IN (
-    SELECT dc.id
-    FROM document_chunks dc
-    JOIN document_versions dv ON dc.version_id = dv.id
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-)
-   OR version_id IN (
-    SELECT dv.id
-    FROM document_versions dv
-    JOIN documents d ON dv.document_id = d.id
-    JOIN projects p ON d.project_id = p.id
-    WHERE p.filesystem_path LIKE '/tmp/pytest-of-%'
-);
-DELETE FROM open_questions
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
-DELETE FROM requirements
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
-DELETE FROM decisions
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
-DELETE FROM document_versions
-WHERE document_id IN (
-    SELECT id FROM documents
-    WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%')
-);
-DELETE FROM source_files
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
-DELETE FROM documents
-WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
-DELETE FROM projects
-WHERE filesystem_path LIKE '/tmp/pytest-of-%';
-DELETE FROM entities e
-WHERE NOT EXISTS (
-    SELECT 1 FROM entity_mentions em WHERE em.entity_id = e.id
-);
-SQL
-    )
+    run_project_graph_cleanup "SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%'"
 
     if [ "$quiet" != "1" ]; then
         echo "    OK"

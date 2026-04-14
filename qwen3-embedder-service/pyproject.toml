@@ -59,6 +59,7 @@ dev = [
     "httpx>=0.25.0",
     "ruff>=0.1.0",
     "mypy>=1.7.0",
+    "types-PyYAML>=6.0.12",
 ]
 all = [
     "qwen3-embedder[cuda,vllm,mlx,dev]",

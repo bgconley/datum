@@ -142,9 +142,22 @@ export interface IntelligenceEntitySummary {
   count: number
 }
 
+export interface OpenQuestionSummary {
+  id: string
+  question: string
+  context: string | null
+  age_days: number
+  is_stale: boolean
+  source_doc_path: string | null
+  source_version: number | null
+  canonical_record_path: string | null
+  created_at: string | null
+}
+
 export interface ProjectIntelligenceSummary {
   pending_candidate_count: number
   key_entities: IntelligenceEntitySummary[]
+  open_questions: OpenQuestionSummary[]
 }
 
 export interface InsightSummary {
@@ -182,6 +195,13 @@ export interface EntityRelationshipDetail {
   relationship_type: string
   direction: 'incoming' | 'outgoing'
   evidence_text: string | null
+  evidence_document_path: string | null
+  evidence_document_title: string | null
+  evidence_heading_path: string | null
+  evidence_version_number: number | null
+  evidence_chunk_id: string | null
+  evidence_start_char: number | null
+  evidence_end_char: number | null
 }
 
 export interface EntityDetail {

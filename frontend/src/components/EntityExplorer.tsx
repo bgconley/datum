@@ -269,6 +269,18 @@ export function EntityExplorer({
                               <Link
                                 to="/projects/$slug/docs/$"
                                 params={{ slug: projectSlug, _splat: mention.document_path }}
+                                search={{
+                                  sourceQuery: selected.canonical_name,
+                                  sourceQueryLabel: 'Entity',
+                                  sourceSnippet: mention.chunk_content_snippet,
+                                  sourceSignals: 'entity-mention',
+                                  sourceVersion:
+                                    mention.version_number !== null
+                                      ? String(mention.version_number)
+                                      : undefined,
+                                  sourceStart: String(mention.start_char),
+                                  sourceEnd: String(mention.end_char),
+                                }}
                                 className="inline-flex items-center gap-2 text-sm text-foreground/80 transition-colors hover:text-foreground"
                               >
                                 Open source
@@ -306,6 +318,73 @@ export function EntityExplorer({
                               <p className="mt-3 text-sm leading-7 text-muted-foreground">
                                 {relationship.evidence_text}
                               </p>
+                            )}
+                            {(relationship.evidence_document_path || relationship.evidence_text) && (
+                              <div className="mt-4 flex items-center justify-between gap-3">
+                                <div className="text-xs text-muted-foreground">
+                                  {relationship.evidence_document_title ??
+                                    relationship.evidence_document_path ??
+                                    'Relationship evidence'}
+                                  {relationship.evidence_version_number !== null &&
+                                    relationship.evidence_version_number !== undefined && (
+                                      <> · v{relationship.evidence_version_number}</>
+                                    )}
+                                  {relationship.evidence_start_char !== null &&
+                                    relationship.evidence_start_char !== undefined &&
+                                    relationship.evidence_end_char !== null &&
+                                    relationship.evidence_end_char !== undefined && (
+                                      <>
+                                        {' '}
+                                        · chars {relationship.evidence_start_char}-
+                                        {relationship.evidence_end_char}
+                                      </>
+                                    )}
+                                </div>
+                                {relationship.evidence_document_path && (
+                                  <Link
+                                    to="/projects/$slug/docs/$"
+                                    params={{
+                                      slug: projectSlug,
+                                      _splat: relationship.evidence_document_path,
+                                    }}
+                                    search={{
+                                      sourceQuery:
+                                        relationship.direction === 'incoming'
+                                          ? `${relationship.related_entity} → ${selected.canonical_name}`
+                                          : `${selected.canonical_name} → ${relationship.related_entity}`,
+                                      sourceQueryLabel: 'Relationship',
+                                      sourceSnippet: relationship.evidence_text ?? undefined,
+                                      sourceHeading:
+                                        relationship.evidence_heading_path ?? undefined,
+                                      sourceSignals: [
+                                        'relationship-evidence',
+                                        relationship.relationship_type,
+                                      ].join(','),
+                                      sourceVersion:
+                                        relationship.evidence_version_number !== null &&
+                                        relationship.evidence_version_number !== undefined
+                                          ? String(relationship.evidence_version_number)
+                                          : undefined,
+                                      sourceStart:
+                                        relationship.evidence_start_char !== null &&
+                                        relationship.evidence_start_char !== undefined
+                                          ? String(relationship.evidence_start_char)
+                                          : undefined,
+                                      sourceEnd:
+                                        relationship.evidence_end_char !== null &&
+                                        relationship.evidence_end_char !== undefined
+                                          ? String(relationship.evidence_end_char)
+                                          : undefined,
+                                      sourceChunkId:
+                                        relationship.evidence_chunk_id ?? undefined,
+                                    }}
+                                    className="inline-flex items-center gap-2 text-sm text-foreground/80 transition-colors hover:text-foreground"
+                                  >
+                                    Open source
+                                    <ArrowRightLeft className="size-3.5" />
+                                  </Link>
+                                )}
+                              </div>
                             )}
                           </div>
                         ))

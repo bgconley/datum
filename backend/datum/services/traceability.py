@@ -19,6 +19,7 @@ from datum.models.intelligence import (
     Insight,
     Requirement,
 )
+from datum.models.search import DocumentChunk
 from datum.services.insight_analysis import AnalysisResult, run_insight_analysis
 from datum.services.intelligence import get_project_or_404
 
@@ -43,8 +44,15 @@ class EntityRelationshipRecord:
     relationship_type: str
     extraction_method: str
     evidence_text: str | None
-    confidence: float | None
-    created_at: datetime | None
+    evidence_document_path: str | None = None
+    evidence_document_title: str | None = None
+    evidence_heading_path: str | None = None
+    evidence_version_number: int | None = None
+    evidence_chunk_id: str | None = None
+    evidence_start_char: int | None = None
+    evidence_end_char: int | None = None
+    confidence: float | None = None
+    created_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -137,6 +145,7 @@ async def list_project_entity_relationships(
     target_entity = aliased(Entity)
     evidence_version = aliased(DocumentVersion)
     evidence_document = aliased(Document)
+    evidence_chunk = aliased(DocumentChunk)
 
     query = (
         select(
@@ -146,6 +155,13 @@ async def list_project_entity_relationships(
             EntityRelationship.relationship_type,
             EntityRelationship.extraction_method,
             EntityRelationship.evidence_text,
+            evidence_document.canonical_path,
+            evidence_document.title,
+            evidence_version.version_number,
+            EntityRelationship.evidence_chunk_id,
+            EntityRelationship.evidence_start_char,
+            EntityRelationship.evidence_end_char,
+            evidence_chunk.heading_path,
             EntityRelationship.confidence,
             EntityRelationship.created_at,
         )
@@ -153,6 +169,7 @@ async def list_project_entity_relationships(
         .join(target_entity, EntityRelationship.target_entity_id == target_entity.id)
         .join(evidence_version, EntityRelationship.evidence_version_id == evidence_version.id)
         .join(evidence_document, evidence_version.document_id == evidence_document.id)
+        .outerjoin(evidence_chunk, EntityRelationship.evidence_chunk_id == evidence_chunk.id)
         .where(evidence_document.project_id == project.id)
     )
     if entity_name:
@@ -176,8 +193,15 @@ async def list_project_entity_relationships(
             relationship_type=row[3],
             extraction_method=row[4],
             evidence_text=row[5],
-            confidence=row[6],
-            created_at=row[7],
+            evidence_document_path=row[6],
+            evidence_document_title=row[7],
+            evidence_version_number=row[8],
+            evidence_chunk_id=str(row[9]) if row[9] is not None else None,
+            evidence_start_char=row[10],
+            evidence_end_char=row[11],
+            evidence_heading_path=" > ".join(row[12] or []) or None,
+            confidence=row[13],
+            created_at=row[14],
         )
         for row in result.fetchall()
     ]

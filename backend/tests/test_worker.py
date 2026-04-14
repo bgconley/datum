@@ -1,12 +1,21 @@
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from datum.models.core import Document, DocumentVersion, Project
+from datum.models.intelligence import EntityRelationship
 from datum.models.search import ChunkEmbedding, DocumentChunk, IngestionJob, VersionText
 from datum.services.chunking import Chunk
-from datum.worker import _handle_chunk_job, _handle_embed_job, _handle_extract_job, process_job
+from datum.worker import (
+    _handle_chunk_job,
+    _handle_embed_job,
+    _handle_extract_job,
+    _handle_relationship_job,
+    _handle_schema_parse_job,
+    process_job,
+)
 
 
 class _FakeSession:
@@ -38,6 +47,14 @@ class _ScalarListResult:
 
     def all(self):
         return self._values
+
+
+class _RowResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
 
 
 class _ChunkJobSession:
@@ -92,6 +109,57 @@ class _ExtractJobSession:
     async def execute(self, statement, params=None):
         del params
         self.executed_statements.append(str(statement))
+        return _ScalarOneResult(None)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        return None
+
+
+class _SchemaParseSession:
+    def __init__(self, document: Document, chunks: list[DocumentChunk]):
+        self.document = document
+        self.chunks = chunks
+        self.executed_statements: list[str] = []
+        self.added = []
+
+    async def get(self, model, key):
+        if model is Document and key == self.document.id:
+            return self.document
+        return None
+
+    async def execute(self, statement, params=None):
+        del params
+        rendered = str(statement)
+        self.executed_statements.append(rendered)
+        if "FROM document_chunks" in rendered:
+            return _ScalarListResult(self.chunks)
+        return _ScalarOneResult(None)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        return None
+
+
+class _RelationshipJobSession:
+    def __init__(self, chunks: list[DocumentChunk], mentions: list[tuple[object, object]]):
+        self.chunks = chunks
+        self.mentions = mentions
+        self.executed_statements: list[str] = []
+        self.added = []
+
+    async def execute(self, statement, params=None):
+        del params
+        rendered = str(statement)
+        self.executed_statements.append(rendered)
+        if "FROM document_chunks" in rendered:
+            return _ScalarListResult(self.chunks)
+        if "FROM entity_mentions" in rendered:
+            return _RowResult(self.mentions)
         return _ScalarOneResult(None)
 
     def add(self, obj):
@@ -261,6 +329,99 @@ async def test_chunk_job_deletes_dependents_before_replacing_chunks(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_schema_parse_job_persists_relationship_evidence_spans(monkeypatch):
+    version_id = uuid4()
+    document = Document(
+        id=uuid4(),
+        project_id=uuid4(),
+        uid="doc_schema",
+        slug="schema",
+        canonical_path="docs/schema.sql",
+        title="Schema",
+        doc_type="reference",
+    )
+    version = DocumentVersion(
+        id=version_id,
+        document_id=document.id,
+        version_number=1,
+        branch="main",
+        content_hash="sha256:schema",
+        filesystem_path="/tmp/docs/schema.sql",
+    )
+    version_text = VersionText(
+        version_id=version_id,
+        text_kind="raw",
+        content="CREATE TABLE sessions (\n  user_id uuid REFERENCES users(id)\n);\n",
+        content_hash="sha256:text",
+    )
+    chunk = DocumentChunk(
+        id=uuid4(),
+        version_id=version_id,
+        chunk_index=0,
+        content=version_text.content,
+        heading_path=["Schema"],
+        start_char=0,
+        end_char=len(version_text.content),
+        token_count=10,
+        content_hash="sha256:chunk",
+        source_text_hash="sha256:text",
+    )
+    session = _SchemaParseSession(document=document, chunks=[chunk])
+    job = IngestionJob(
+        id=uuid4(),
+        project_id=document.project_id,
+        version_id=version_id,
+        job_type="schema_parse",
+        status="queued",
+    )
+
+    async def fake_load_latest_version_text(session, version_id):
+        del session, version_id
+        return version_text
+
+    async def fake_get_or_create_entity(session, entity_type, canonical_name, metadata=None):
+        del session, metadata
+        return SimpleNamespace(id=uuid4(), entity_type=entity_type, canonical_name=canonical_name)
+
+    monkeypatch.setattr("datum.worker._load_latest_version_text", fake_load_latest_version_text)
+    monkeypatch.setattr("datum.worker._get_or_create_entity", fake_get_or_create_entity)
+    monkeypatch.setattr(
+        "datum.worker.extract_schema_intelligence",
+        lambda content, suffix: (
+            [
+                SimpleNamespace(
+                    name="sessions.user_id",
+                    entity_type="column",
+                    properties={},
+                ),
+                SimpleNamespace(
+                    name="users.id",
+                    entity_type="column",
+                    properties={},
+                ),
+            ],
+            [
+                SimpleNamespace(
+                    source="sessions.user_id",
+                    target="users.id",
+                    relationship_type="foreign_key",
+                    evidence_text="user_id uuid REFERENCES users(id)",
+                )
+            ],
+        ),
+    )
+
+    await _handle_schema_parse_job(session, job, version)
+
+    persisted = [obj for obj in session.added if isinstance(obj, EntityRelationship)]
+    assert len(persisted) == 1
+    assert persisted[0].evidence_chunk_id == chunk.id
+    assert persisted[0].evidence_start_char is not None
+    assert persisted[0].evidence_end_char is not None
+    assert persisted[0].evidence_text == "user_id uuid REFERENCES users(id)"
+
+
+@pytest.mark.asyncio
 async def test_embed_job_persists_typed_chunk_embeddings(monkeypatch):
     version_id = uuid4()
     model_run_id = uuid4()
@@ -320,6 +481,83 @@ async def test_embed_job_persists_typed_chunk_embeddings(monkeypatch):
     assert persisted[0].model_run_id == model_run_id
     assert len(persisted[0].embedding) == 1024
     assert all("INSERT INTO chunk_embeddings" not in stmt for stmt in session.executed_statements)
+
+
+@pytest.mark.asyncio
+async def test_relationship_job_persists_chunk_span_metadata(monkeypatch):
+    version_id = uuid4()
+    chunk = DocumentChunk(
+        id=uuid4(),
+        version_id=version_id,
+        chunk_index=0,
+        content="Auth service writes to PostgreSQL for session state.",
+        heading_path=["Storage"],
+        start_char=100,
+        end_char=152,
+        token_count=10,
+        content_hash="sha256:chunk",
+        source_text_hash="sha256:text",
+    )
+    source_entity = SimpleNamespace(id=uuid4(), canonical_name="auth service")
+    target_entity = SimpleNamespace(id=uuid4(), canonical_name="postgresql")
+    mentions = [
+        (SimpleNamespace(chunk_id=chunk.id), source_entity),
+        (SimpleNamespace(chunk_id=chunk.id), target_entity),
+    ]
+    session = _RelationshipJobSession([chunk], mentions)
+    job = IngestionJob(
+        id=uuid4(),
+        project_id=uuid4(),
+        version_id=version_id,
+        job_type="relate_llm",
+        status="queued",
+    )
+    version = DocumentVersion(
+        id=version_id,
+        document_id=uuid4(),
+        version_number=1,
+        branch="main",
+        content_hash="sha256:test",
+        filesystem_path="/tmp/docs/architecture.md",
+    )
+
+    async def fake_extract_relationships_llm(content, names, gateway):
+        del content, names, gateway
+        return [
+            SimpleNamespace(
+                source_entity="auth service",
+                target_entity="postgresql",
+                relationship_type="uses",
+                evidence_text="writes to PostgreSQL",
+                confidence=0.83,
+            )
+        ]
+
+    async def fake_model_run(session, job, gateway):
+        del session, job, gateway
+        return SimpleNamespace(id=uuid4(), items_processed=0)
+
+    class _Gateway:
+        llm = object()
+
+        async def check_health(self, model_type):
+            assert model_type == "llm"
+            return True
+
+    monkeypatch.setattr("datum.worker.extract_relationships_llm", fake_extract_relationships_llm)
+    monkeypatch.setattr("datum.worker._resolve_llm_model_run", fake_model_run)
+
+    await _handle_relationship_job(session, job, version, gateway=_Gateway())
+
+    persisted = [obj for obj in session.added if isinstance(obj, EntityRelationship)]
+    assert len(persisted) == 1
+    assert persisted[0].evidence_chunk_id == chunk.id
+    assert persisted[0].evidence_start_char == chunk.start_char + chunk.content.index(
+        "writes to PostgreSQL"
+    )
+    assert persisted[0].evidence_end_char == persisted[0].evidence_start_char + len(
+        "writes to PostgreSQL"
+    )
 
 
 @pytest.mark.asyncio
