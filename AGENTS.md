@@ -3,6 +3,7 @@
 This file is the operating contract for agents working in this repo. It is derived from the design doc and Phase 1-9 implementation plans, but it is intentionally shorter than those documents.
 
 Source of truth:
+- [`./IMPLEMENTATION_STATUS.md`](./IMPLEMENTATION_STATUS.md)
 - [`../docs/plans/2026-04-10-datum-design.md`](../docs/plans/2026-04-10-datum-design.md)
 - [`../docs/plans/2026-04-10-datum-phase1-implementation.md`](../docs/plans/2026-04-10-datum-phase1-implementation.md)
 - [`../docs/plans/2026-04-10-datum-phase2-implementation.md`](../docs/plans/2026-04-10-datum-phase2-implementation.md)
@@ -15,6 +16,16 @@ Source of truth:
 - [`../docs/plans/2026-04-11-datum-phase9-implementation.md`](../docs/plans/2026-04-11-datum-phase9-implementation.md)
 
 If this file and the detailed plans diverge, preserve the design invariants first, then update the docs so they agree again.
+
+## Implementation Status At HEAD
+
+- Implemented and validated: Phase 1 through Phase 6
+- Planned and not yet implemented: Phase 7 through Phase 9
+- Treat Phase 7-9 plan docs as forward work items, not active runtime guarantees.
+- Do not assume these Phase 7-9 artifacts exist yet:
+  - DB tables such as `document_links`, `entity_relationships`, `insights`, `agent_sessions`, `session_deltas`
+  - Server-side lifecycle write barriers
+  - Advanced traceability/insight APIs
 
 ## Purpose
 
@@ -79,6 +90,9 @@ For work that uses Datum APIs or MCP tools:
 The lifecycle rule is:
 
 `read-before-write, append-after-write, finalize-before-stop`
+
+This is currently a policy contract in Phase 6. Strict server-side enforcement
+and lifecycle state services are Phase 9 work.
 
 ## Read vs Write Surfaces
 
@@ -163,14 +177,14 @@ When adding a new write surface, wire all of these:
   - `create_session_note` / `append_session_note`
   - `generate_api_key(...)`
 
-### Phase 7
+### Phase 7 (Planned, Not Implemented At HEAD)
 
 - Links, relationships, schema intelligence, contradictions, staleness, and insights are intelligence features layered on top of canonical files.
 - Broken links must be representable even when unresolved.
 - Traceability must be project-scoped and evidence-backed.
 - Scope cuts versus the design doc must be explicit in summaries and deferred lists.
 
-### Phase 8
+### Phase 8 (Planned, Not Implemented At HEAD)
 
 - Saved searches, collections, and annotations are operational-backed-up features.
 - Rename/delete/mkdir must respect filesystem and manifest contracts.
@@ -179,7 +193,7 @@ When adding a new write surface, wire all of these:
 - Blob GC and doctor must scan attachment metadata, not invented schema columns.
 - Hardening work must be wired, not just defined.
 
-### Phase 9
+### Phase 9 (Planned, Not Implemented At HEAD)
 
 - Lifecycle enforcement is real enforcement, not guidance text.
 - Claude Code integration uses hooks.

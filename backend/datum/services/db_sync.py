@@ -110,8 +110,7 @@ async def sync_document_version_to_db(
         )
     )
     if existing_version.scalar_one_or_none():
-        # Version already synced — just commit any doc metadata updates
-        await session.commit()
+        # Version already synced — caller owns transaction commit.
         return
 
     # Insert version
@@ -204,9 +203,6 @@ async def sync_document_version_to_db(
             )
         )
 
-    await session.commit()
-
-
 async def move_document_path_in_db(
     session: AsyncSession,
     project_id: UUID,
@@ -237,9 +233,6 @@ async def move_document_path_in_db(
         source_file.canonical_path = new_canonical_path
         source_file.last_seen_at = datetime.now(UTC)
 
-    await session.commit()
-
-
 async def log_audit_event(
     session: AsyncSession,
     actor_type: str,
@@ -264,4 +257,4 @@ async def log_audit_event(
         request_id=request_id,
         metadata_=metadata,
     ))
-    await session.commit()
+    await session.flush()

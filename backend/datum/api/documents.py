@@ -147,7 +147,9 @@ async def api_create_document(
                     canonical_path,
                     new_hash=doc_info.content_hash,
                 )
+                await session.commit()
     except Exception:
+        await session.rollback()
         logger.debug("DB sync skipped for document create", exc_info=True)
 
     return DocumentResponse(**doc_info.__dict__)
@@ -231,7 +233,9 @@ async def api_move_document(
                 old_hash=original.content_hash,
                 new_hash=doc_info.content_hash,
             )
+            await session.commit()
     except Exception:
+        await session.rollback()
         logger.debug("DB sync skipped for document move", exc_info=True)
 
     return DocumentResponse(**doc_info.__dict__)
@@ -328,7 +332,9 @@ async def api_save_document(
                     session, "web", "save_document", project_db_id,
                     canonical_path, old_hash=old_hash, new_hash=doc_info.content_hash,
                 )
+                await session.commit()
     except Exception:
+        await session.rollback()
         logger.debug("DB sync skipped for document save", exc_info=True)
 
     return DocumentResponse(**doc_info.__dict__)

@@ -10,6 +10,7 @@ from uuid import UUID
 import yaml
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import settings
 from datum.db import async_session_factory
@@ -75,13 +76,13 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
     def _project_dir(slug: str) -> Path:
         return root / slug
 
-    async def _get_project_row(slug: str) -> Project | None:
-        async with async_session_factory() as session:
-            result = await session.execute(select(Project).where(Project.slug == slug))
-            return result.scalar_one_or_none()
+    async def _get_project_row(slug: str, session: AsyncSession) -> Project | None:
+        result = await session.execute(select(Project).where(Project.slug == slug))
+        return result.scalar_one_or_none()
 
     async def _sync_note_or_document(
         *,
+        session: AsyncSession,
         slug: str,
         relative_path: str,
         title: str,
@@ -94,27 +95,26 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         if version is None:
             return None, None
 
-        async with async_session_factory() as session:
-            project_row = await _get_project_row(slug)
-            if project_row is None:
-                return version.content_hash, None
+        project_row = await _get_project_row(slug, session)
+        if project_row is None:
+            return version.content_hash, None
 
-            file_bytes = (project_dir / relative_path).read_bytes()
-            await sync_document_version_to_db(
-                session=session,
-                project_id=project_row.id,
-                version_info=version,
-                canonical_path=relative_path,
-                title=title,
-                doc_type=doc_type,
-                status=status,
-                tags=tags or [],
-                change_source="agent",
-                content_hash=version.content_hash,
-                byte_size=len(file_bytes),
-                filesystem_path=version.version_file,
-            )
-            return version.content_hash, project_row.id
+        file_bytes = (project_dir / relative_path).read_bytes()
+        await sync_document_version_to_db(
+            session=session,
+            project_id=project_row.id,
+            version_info=version,
+            canonical_path=relative_path,
+            title=title,
+            doc_type=doc_type,
+            status=status,
+            tags=tags or [],
+            change_source="agent",
+            content_hash=version.content_hash,
+            byte_size=len(file_bytes),
+            filesystem_path=version.version_file,
+        )
+        return version.content_hash, project_row.id
 
     def _json_text(payload: object) -> str:
         return json.dumps(payload, indent=2, default=str)
@@ -390,6 +390,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 created_path = create_session_note(project_dir, meta)
                 relative_path = created_path.relative_to(project_dir).as_posix()
                 content_hash, project_id = await _sync_note_or_document(
+                    session=session,
                     slug=project,
                     relative_path=relative_path,
                     title=summary,
@@ -409,6 +410,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 updated = parse_session_frontmatter(existing.read_text())
                 relative_path = existing.relative_to(project_dir).as_posix()
                 content_hash, project_id = await _sync_note_or_document(
+                    session=session,
                     slug=project,
                     relative_path=relative_path,
                     title=updated.summary,
@@ -450,7 +452,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 if cached is not None:
                     return cached["body"]
 
-            project_row = await _get_project_row(project)
+            project_row = await _get_project_row(project, session)
             if project_row is None:
                 return {"error": f"Project '{project}' not found"}
             project_dir = _project_dir(project)
@@ -532,6 +534,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
 
             doc_info = create_project_document(project_dir, path, title, doc_type, content)
             content_hash, project_id = await _sync_note_or_document(
+                session=session,
                 slug=project,
                 relative_path=doc_info.relative_path,
                 title=doc_info.title,
@@ -598,6 +601,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 }
 
             content_hash, project_id = await _sync_note_or_document(
+                session=session,
                 slug=project,
                 relative_path=doc_info.relative_path,
                 title=doc_info.title,

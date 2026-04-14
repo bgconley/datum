@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,7 +90,7 @@ async def api_revoke_api_key(
 
 @router.get("/audit", response_model=AuditListResponse)
 async def api_query_audit(
-    project_id: str | None = Query(None),
+    project_id: UUID | None = Query(None),
     actor_type: str | None = Query(None),
     actor_name: str | None = Query(None),
     operation: str | None = Query(None),

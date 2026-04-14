@@ -162,6 +162,7 @@ class DebouncedHandler(FileSystemEventHandler):
                         project.id, canonical_path,
                         new_hash=compute_content_hash(content),
                     )
+                    await session.commit()
 
             asyncio.run(_sync())
         except Exception:

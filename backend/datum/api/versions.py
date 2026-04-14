@@ -287,7 +287,9 @@ async def api_restore_version(
                     canonical_path,
                     new_hash=restored.content_hash,
                 )
+                await session.commit()
     except Exception:
+        await session.rollback()
         logger.debug("DB sync skipped for restore", exc_info=True)
 
     latest = get_document(project_path, canonical_path)

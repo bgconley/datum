@@ -14,7 +14,7 @@ from datum.models.core import AuditEvent
 
 @dataclass(slots=True)
 class AuditFilter:
-    project_id: str | None = None
+    project_id: UUID | None = None
     actor_type: str | None = None
     actor_name: str | None = None
     operation: str | None = None
@@ -59,7 +59,7 @@ async def query_audit_events(
 ) -> list[AuditEvent]:
     query = select(AuditEvent).order_by(AuditEvent.created_at.desc())
     if audit_filter.project_id is not None:
-        query = query.where(AuditEvent.project_id == UUID(audit_filter.project_id))
+        query = query.where(AuditEvent.project_id == audit_filter.project_id)
     if audit_filter.actor_type is not None:
         query = query.where(AuditEvent.actor_type == audit_filter.actor_type)
     if audit_filter.actor_name is not None:

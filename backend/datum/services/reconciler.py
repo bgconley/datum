@@ -125,7 +125,9 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                                     project.id, canonical_path,
                                     new_hash=content_hash,
                                 )
+                                await db_session.commit()
                         except Exception:
+                            await db_session.rollback()
                             logger.debug(
                                 "Reconciler DB sync failed for %s", canonical_path,
                                 exc_info=True,
@@ -164,13 +166,14 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                         existing_proj.description = data.get("description")
                         existing_proj.tags = data.get("tags", [])
                         existing_proj.project_yaml_hash = compute_content_hash(content)
-                        await db_session.commit()
                         await log_audit_event(
                             db_session, "reconciler", "project_metadata_updated",
                             existing_proj.id, "project.yaml",
                             new_hash=compute_content_hash(content),
                         )
+                        await db_session.commit()
                 except Exception:
+                    await db_session.rollback()
                     logger.debug("Reconciler project.yaml DB sync failed", exc_info=True)
             else:
                 # No session provided — use standalone best-effort sync

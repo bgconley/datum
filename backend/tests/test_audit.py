@@ -47,7 +47,7 @@ async def test_query_audit_events_builds_expected_filter():
     events = await query_audit_events(
         FakeSession(),
         AuditFilter(
-            project_id=str(uuid4()),
+            project_id=uuid4(),
             actor_type="agent",
             actor_name="codex",
             operation="append_session_notes",

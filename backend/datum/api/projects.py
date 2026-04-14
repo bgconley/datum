@@ -91,7 +91,9 @@ async def api_create_project(body: ProjectCreate, session: AsyncSession = Depend
             tags=info.tags,
         )
         await log_audit_event(session, "web", "create_project", project_db_id, info.slug)
+        await session.commit()
     except Exception:
+        await session.rollback()
         logger.debug("DB sync skipped (no database connection)", exc_info=True)
 
     return ProjectResponse(**info.__dict__)

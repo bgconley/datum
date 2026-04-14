@@ -148,6 +148,73 @@ DELETE FROM audit_events
 WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
 DO \$\$
 BEGIN
+    IF to_regclass('public.document_links') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM document_links
+                 WHERE source_version_id IN (
+                     SELECT dv.id
+                     FROM document_versions dv
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.slug = ''${slug}''
+                 )
+                    OR target_version_id IN (
+                     SELECT dv.id
+                     FROM document_versions dv
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.slug = ''${slug}''
+                 )
+                    OR target_document_id IN (
+                     SELECT d.id
+                     FROM documents d
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.slug = ''${slug}''
+                 )';
+    END IF;
+
+    IF to_regclass('public.entity_relationships') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM entity_relationships
+                 WHERE evidence_chunk_id IN (
+                     SELECT dc.id
+                     FROM document_chunks dc
+                     JOIN document_versions dv ON dc.version_id = dv.id
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.slug = ''${slug}''
+                 )
+                    OR evidence_version_id IN (
+                     SELECT dv.id
+                     FROM document_versions dv
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.slug = ''${slug}''
+                 )';
+    END IF;
+
+    IF to_regclass('public.insights') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM insights
+                 WHERE project_id IN (
+                     SELECT id FROM projects WHERE slug = ''${slug}''
+                 )';
+    END IF;
+
+    IF to_regclass('public.session_deltas') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM session_deltas
+                 WHERE agent_session_id IN (
+                     SELECT id FROM agent_sessions
+                     WHERE project_id IN (
+                         SELECT id FROM projects WHERE slug = ''${slug}''
+                     )
+                 )';
+    END IF;
+
+    IF to_regclass('public.agent_sessions') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM agent_sessions
+                 WHERE project_id IN (
+                     SELECT id FROM projects WHERE slug = ''${slug}''
+                 )';
+    END IF;
+
     IF to_regclass('public.idempotency_records') IS NOT NULL THEN
         DELETE FROM idempotency_records
         WHERE idempotency_key LIKE '${PHASE6_IDEMPOTENCY_PREFIX}-%';
@@ -260,6 +327,75 @@ WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/py
    );
 DELETE FROM audit_events
 WHERE project_id IN (SELECT id FROM projects WHERE filesystem_path LIKE '/tmp/pytest-of-%');
+DO \$\$
+BEGIN
+    IF to_regclass('public.document_links') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM document_links
+                 WHERE source_version_id IN (
+                     SELECT dv.id
+                     FROM document_versions dv
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
+                 )
+                    OR target_version_id IN (
+                     SELECT dv.id
+                     FROM document_versions dv
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
+                 )
+                    OR target_document_id IN (
+                     SELECT d.id
+                     FROM documents d
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
+                 )';
+    END IF;
+
+    IF to_regclass('public.entity_relationships') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM entity_relationships
+                 WHERE evidence_chunk_id IN (
+                     SELECT dc.id
+                     FROM document_chunks dc
+                     JOIN document_versions dv ON dc.version_id = dv.id
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
+                 )
+                    OR evidence_version_id IN (
+                     SELECT dv.id
+                     FROM document_versions dv
+                     JOIN documents d ON dv.document_id = d.id
+                     JOIN projects p ON d.project_id = p.id
+                     WHERE p.filesystem_path LIKE ''/tmp/pytest-of-%''
+                 )';
+    END IF;
+
+    IF to_regclass('public.insights') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM insights
+                 WHERE project_id IN (
+                     SELECT id FROM projects WHERE filesystem_path LIKE ''/tmp/pytest-of-%''
+                 )';
+    END IF;
+
+    IF to_regclass('public.session_deltas') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM session_deltas
+                 WHERE agent_session_id IN (
+                     SELECT id FROM agent_sessions
+                     WHERE project_id IN (
+                         SELECT id FROM projects WHERE filesystem_path LIKE ''/tmp/pytest-of-%''
+                     )
+                 )';
+    END IF;
+
+    IF to_regclass('public.agent_sessions') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM agent_sessions
+                 WHERE project_id IN (
+                     SELECT id FROM projects WHERE filesystem_path LIKE ''/tmp/pytest-of-%''
+                 )';
+    END IF;
+END \$\$;
 DELETE FROM entity_mentions
 WHERE chunk_id IN (
     SELECT dc.id

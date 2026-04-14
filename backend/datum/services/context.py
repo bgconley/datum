@@ -73,7 +73,7 @@ def _fit_section(items: list[dict], budget_remaining: int) -> tuple[list[dict], 
     for item in items:
         item_tokens = count_tokens(str(item))
         if item_tokens > budget_remaining:
-            break
+            continue
         fitted.append(item)
         budget_remaining -= item_tokens
         if budget_remaining <= 0:
@@ -138,8 +138,8 @@ def build_project_context(project_dir: Path, config: ContextConfig) -> dict:
                         max(budget_remaining - 50, 0),
                     )
                     entry_tokens = count_tokens(str(entry))
-                else:
-                    break
+                if entry_tokens > budget_remaining:
+                    continue
 
             document_entries.append(entry)
             budget_remaining -= entry_tokens

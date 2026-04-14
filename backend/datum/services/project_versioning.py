@@ -103,6 +103,7 @@ def sync_project_yaml_to_db(project_slug: str, project_path: Path):
                     project_db_id, "project.yaml",
                     new_hash=compute_content_hash(content),
                 )
+                await session.commit()
 
         asyncio.run(_sync())
     except Exception:
