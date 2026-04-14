@@ -28,6 +28,9 @@ def test_backup_export_is_not_polluted_by_trace_logs(tmp_path):
         encoding="utf-8",
     )
     fake_docker.chmod(0o755)
+    fake_zfs = fake_bin / "zfs"
+    fake_zfs.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_zfs.chmod(0o755)
 
     backup_root = tmp_path / "backups"
     env = os.environ.copy()
