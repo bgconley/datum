@@ -2,6 +2,7 @@ from datum.services.sessions import (
     SessionMetadata,
     append_session_note,
     create_session_note,
+    detect_session_document_links,
     find_session_note,
     list_session_notes,
     parse_session_frontmatter,
@@ -47,3 +48,18 @@ def test_create_and_append_session_note(tmp_path):
     assert find_session_note(project_dir, "sess-1") == created
     sessions = list_session_notes(project_dir)
     assert sessions[0]["session_id"] == "sess-1"
+
+
+def test_detect_session_document_links():
+    links = detect_session_document_links(
+        """
+        ## Files Modified
+        - [auth spec](docs/specs/auth.md)
+        - docs/schemas/init.sql
+        """,
+        {"docs/specs/auth.md", "docs/schemas/init.sql"},
+    )
+    assert [link.target_path for link in links] == [
+        "docs/specs/auth.md",
+        "docs/schemas/init.sql",
+    ]

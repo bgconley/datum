@@ -65,3 +65,13 @@ class TestExtractText:
 
         assert result is not None
         assert result.text_kind == "unsupported"
+
+    def test_redacts_secrets_in_extracted_text(self, tmp_path: Path):
+        file_path = tmp_path / "secret.md"
+        file_path.write_text('Deploy with PASSWORD="super_secret_123" before release.')
+
+        result = extract_text(file_path)
+
+        assert result is not None
+        assert "super_secret_123" not in result.content
+        assert "[REDACTED:password]" in result.content

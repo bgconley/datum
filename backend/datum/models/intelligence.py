@@ -3,7 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -149,4 +158,80 @@ class OpenQuestion(Base):
         PG_UUID(as_uuid=True), ForeignKey("model_runs.id")
     )
     confidence: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentLink(Base):
+    __tablename__ = "document_links"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    source_version_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    target_document_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL")
+    )
+    target_version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("document_versions.id", ondelete="SET NULL")
+    )
+    link_type: Mapped[str] = mapped_column(String, nullable=False)
+    anchor_text: Mapped[str | None] = mapped_column(Text)
+    auto_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EntityRelationship(Base):
+    __tablename__ = "entity_relationships"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    source_entity_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    target_entity_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    relationship_type: Mapped[str] = mapped_column(String, nullable=False)
+    evidence_version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("document_versions.id", ondelete="CASCADE")
+    )
+    evidence_chunk_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("document_chunks.id", ondelete="CASCADE")
+    )
+    evidence_text: Mapped[str | None] = mapped_column(Text)
+    evidence_start_char: Mapped[int | None] = mapped_column(Integer)
+    evidence_end_char: Mapped[int | None] = mapped_column(Integer)
+    extraction_method: Mapped[str] = mapped_column(String, nullable=False)
+    model_run_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("model_runs.id")
+    )
+    confidence: Mapped[float | None] = mapped_column(Float)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Insight(Base):
+    __tablename__ = "insights"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    project_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    insight_type: Mapped[str] = mapped_column(String, nullable=False)
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    explanation: Mapped[str | None] = mapped_column(Text)
+    evidence: Mapped[dict | None] = mapped_column(JSONB)
+    created_by_run_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("model_runs.id")
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)

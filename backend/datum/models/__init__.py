@@ -39,10 +39,19 @@ from datum.models.intelligence import (
     Decision as Decision,
 )
 from datum.models.intelligence import (
+    DocumentLink as DocumentLink,
+)
+from datum.models.intelligence import (
     Entity as Entity,
 )
 from datum.models.intelligence import (
     EntityMention as EntityMention,
+)
+from datum.models.intelligence import (
+    EntityRelationship as EntityRelationship,
+)
+from datum.models.intelligence import (
+    Insight as Insight,
 )
 from datum.models.intelligence import (
     OpenQuestion as OpenQuestion,
@@ -81,12 +90,15 @@ __all__ = [
     "DocumentChunk",
     "DocumentVersion",
     "Decision",
+    "DocumentLink",
     "EvaluationRun",
     "EvaluationSet",
     "IdempotencyRecord",
     "Entity",
     "EntityMention",
+    "EntityRelationship",
     "IngestionJob",
+    "Insight",
     "ModelRun",
     "OpenQuestion",
     "PipelineConfig",

@@ -29,6 +29,9 @@ async def test_mcp_server_registers_expected_tools_and_resources(tmp_path):
         "update_document",
         "accept_candidate",
         "reject_candidate",
+        "get_insights",
+        "search_entity_relationships",
+        "get_traceability",
     ]
 
     resources = await mcp.list_resources()
@@ -44,6 +47,7 @@ async def test_mcp_server_registers_expected_tools_and_resources(tmp_path):
         "datum://projects/{slug}/decisions",
         "datum://projects/{slug}/requirements",
         "datum://projects/{slug}/open-questions",
+        "datum://projects/{slug}/insights",
     }
 
 

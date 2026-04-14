@@ -9,6 +9,12 @@ export const queryKeys = {
     ['projects', slug, 'docs', docPath, 'versions', 'diff', versionA, versionB] as const,
   inbox: (slug: string) => ['projects', slug, 'inbox'] as const,
   intelligenceSummary: (slug: string) => ['projects', slug, 'intelligence', 'summary'] as const,
+  insights: (slug: string, status: string = 'open') =>
+    ['projects', slug, 'insights', status] as const,
+  entities: (slug: string, entityType?: string) =>
+    ['projects', slug, 'entities', entityType ?? 'all'] as const,
+  entityDetail: (slug: string, entityId: string) =>
+    ['projects', slug, 'entities', entityId] as const,
   commandPaletteEntities: (projectSlug: string | null, seed: string) =>
     ['command-palette', 'entities', projectSlug ?? 'all', seed] as const,
 }

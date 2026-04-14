@@ -86,6 +86,9 @@ def test_intelligence_models_registered():
         "decisions",
         "requirements",
         "open_questions",
+        "document_links",
+        "entity_relationships",
+        "insights",
     }
     assert expected.issubset(table_names)
 

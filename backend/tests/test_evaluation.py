@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from datum.cli import eval as eval_cli
+from datum.cli import insights as insights_cli
 from datum.cli import main as root_cli
 from datum.models.evaluation import EvaluationRun, EvaluationSet
 from datum.services.evaluation import (
@@ -77,12 +78,31 @@ def test_root_cli_dispatches_eval_subcommand(monkeypatch):
     assert captured == {"argv": ["stats"], "prog": "datum eval"}
 
 
+def test_insights_parser_supports_root_cli_prog_name():
+    parser = insights_cli.build_parser(prog="datum insights")
+    assert parser.prog == "datum insights"
+
+
+def test_root_cli_dispatches_insights_subcommand(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_main(argv=None, *, prog="datum-insights"):
+        captured["argv"] = argv
+        captured["prog"] = prog
+
+    monkeypatch.setattr("datum.cli.insights.main", fake_main)
+
+    root_cli.main(["insights", "list", "api-test"])
+
+    assert captured == {"argv": ["list", "api-test"], "prog": "datum insights"}
+
+
 def test_root_cli_help_prints_available_commands(capsys):
     root_cli.main(["--help"])
     output = capsys.readouterr().out
 
     assert "usage: datum" in output
-    assert "{eval}" in output
+    assert "{eval,insights}" in output
 
 
 def test_compare_runs_prefers_higher_ndcg():

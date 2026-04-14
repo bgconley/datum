@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datum.config import settings
 from datum.db import get_session
 from datum.models.agent import ApiKey
-from datum.models.core import Project
+from datum.models.core import Document, Project
 from datum.schemas.agent import (
     SessionAppendRequest,
     SessionCreateRequest,
@@ -25,6 +25,7 @@ from datum.services.audit import log_agent_audit
 from datum.services.auth import extract_api_key
 from datum.services.db_sync import sync_document_version_to_db
 from datum.services.idempotency import check_idempotency, store_idempotency
+from datum.services.session_links import auto_link_session_note
 from datum.services.sessions import (
     SessionMetadata,
     append_session_note,
@@ -89,6 +90,20 @@ async def _sync_session_note(
         byte_size=len(file_bytes),
         filesystem_path=version.version_file,
     )
+    doc_result = await session.execute(
+        select(Document).where(
+            Document.project_id == project_row.id,
+            Document.canonical_path == relative_path,
+        )
+    )
+    document_row = doc_result.scalar_one_or_none()
+    if document_row is not None and document_row.current_version_id is not None:
+        await auto_link_session_note(
+            session,
+            project_id=project_row.id,
+            version_id=document_row.current_version_id,
+            content=meta.content,
+        )
 
 
 @router.post("", status_code=201, response_model=SessionResponse)

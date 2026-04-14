@@ -847,6 +847,256 @@ async def test_search_stream_emits_phases(client, monkeypatch):
     assert lines[1]["rerank_applied"] is True
 
 
+@pytest.mark.asyncio
+async def test_traceability_and_insights_endpoints(client, monkeypatch):
+    async def fake_list_links(session, slug, limit=200):
+        del session, limit
+        assert slug == "intel"
+        return [
+            SimpleNamespace(
+                id="link-1",
+                source_document_path="docs/requirements/auth.md",
+                target_document_path="docs/decisions/adr-auth.md",
+                link_type="implements",
+                anchor_text="ADR auth",
+                auto_detected=True,
+                confidence=0.98,
+                created_at="2026-04-13T00:00:00+00:00",
+            )
+        ]
+
+    async def fake_list_relationships(
+        session,
+        slug,
+        entity_name=None,
+        relationship_type=None,
+        limit=200,
+    ):
+        del session, limit
+        assert slug == "intel"
+        assert entity_name == "postgresql"
+        assert relationship_type == "uses"
+        return [
+            SimpleNamespace(
+                id="rel-1",
+                source_entity="auth service",
+                target_entity="postgresql",
+                relationship_type="uses",
+                extraction_method="llm",
+                evidence_text="Auth service stores sessions in PostgreSQL.",
+                confidence=0.82,
+                created_at="2026-04-13T00:00:00+00:00",
+            )
+        ]
+
+    async def fake_list_insights(session, slug, status=None, limit=100):
+        del session, limit
+        assert slug == "intel"
+        assert status == "open"
+        return [
+            SimpleNamespace(
+                id="insight-1",
+                insight_type="stale_document",
+                severity="warning",
+                status="open",
+                title="Architecture doc looks stale",
+                explanation="No updates in 75 days.",
+                confidence=0.77,
+                evidence={"document_path": "docs/architecture.md"},
+                created_at="2026-04-13T00:00:00+00:00",
+                resolved_at=None,
+            )
+        ]
+
+    async def fake_analyze_insights(session, slug, max_age_days=60):
+        del session
+        assert slug == "intel"
+        assert max_age_days == 45
+        return SimpleNamespace(
+            contradictions_found=1,
+            staleness_found=2,
+            insights_created=2,
+            insights_skipped=1,
+        )
+
+    async def fake_update_insight_status(session, slug, insight_id, status):
+        del session
+        assert slug == "intel"
+        assert insight_id == "insight-1"
+        assert status == "resolved"
+        return SimpleNamespace(
+            id="insight-1",
+            insight_type="stale_document",
+            severity="warning",
+            status="resolved",
+            title="Architecture doc looks stale",
+            explanation="No updates in 75 days.",
+            confidence=0.77,
+            evidence={"document_path": "docs/architecture.md"},
+            created_at="2026-04-13T00:00:00+00:00",
+            resolved_at="2026-04-13T01:00:00+00:00",
+        )
+
+    async def fake_traceability(session, slug):
+        del session
+        assert slug == "intel"
+        return [
+            SimpleNamespace(
+                requirement=SimpleNamespace(
+                    uid="req_auth",
+                    title="System must support JWT auth",
+                    status="active",
+                    description="JWT login support",
+                    priority="must",
+                    decision=None,
+                    name=None,
+                    entity_type=None,
+                ),
+                decisions=[
+                    SimpleNamespace(
+                        uid="dec_auth",
+                        title="Use signed JWT tokens",
+                        status="accepted",
+                        description="docs/decisions/adr-auth.md",
+                        priority=None,
+                        decision="Adopt JWT",
+                        name=None,
+                        entity_type=None,
+                    )
+                ],
+                schema_entities=[
+                    SimpleNamespace(
+                        uid=None,
+                        title=None,
+                        status=None,
+                        description=None,
+                        priority=None,
+                        decision=None,
+                        name="sessions.user_id",
+                        entity_type="column",
+                    )
+                ],
+            )
+        ]
+
+    monkeypatch.setattr("datum.api.traceability.list_project_links", fake_list_links)
+    monkeypatch.setattr(
+        "datum.api.traceability.list_project_entity_relationships",
+        fake_list_relationships,
+    )
+    monkeypatch.setattr("datum.api.traceability.list_project_insights", fake_list_insights)
+    monkeypatch.setattr(
+        "datum.api.traceability.analyze_project_insights",
+        fake_analyze_insights,
+    )
+    monkeypatch.setattr(
+        "datum.api.traceability.update_project_insight_status",
+        fake_update_insight_status,
+    )
+    monkeypatch.setattr("datum.api.traceability.get_traceability_chains", fake_traceability)
+
+    links = await client.get("/api/v1/projects/intel/links")
+    assert links.status_code == 200
+    assert links.json()["links"][0]["target_document_path"] == "docs/decisions/adr-auth.md"
+
+    relationships = await client.get(
+        "/api/v1/projects/intel/relationships",
+        params={"entity_name": "postgresql", "relationship_type": "uses"},
+    )
+    assert relationships.status_code == 200
+    relationship = relationships.json()["relationships"][0]
+    assert relationship["source_entity"] == "auth service"
+    assert relationship["relationship_type"] == "uses"
+
+    insights = await client.get("/api/v1/projects/intel/insights", params={"status": "open"})
+    assert insights.status_code == 200
+    assert insights.json()["insights"][0]["title"] == "Architecture doc looks stale"
+
+    analysis = await client.post(
+        "/api/v1/projects/intel/insights/analyze",
+        params={"max_age_days": 45},
+    )
+    assert analysis.status_code == 200
+    assert analysis.json()["insights_created"] == 2
+
+    resolved = await client.post(
+        "/api/v1/projects/intel/insights/insight-1/status",
+        json={"status": "resolved"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+
+    traceability = await client.get("/api/v1/projects/intel/traceability")
+    assert traceability.status_code == 200
+    chain = traceability.json()[0]
+    assert chain["requirement"]["uid"] == "req_auth"
+    assert chain["decisions"][0]["uid"] == "dec_auth"
+    assert chain["schema_entities"][0]["name"] == "sessions.user_id"
+
+
+@pytest.mark.asyncio
+async def test_entities_endpoints(client, monkeypatch):
+    async def fake_list_entities(session, slug, entity_type=None, limit=100):
+        del session, limit
+        assert slug == "intel"
+        assert entity_type == "technology"
+        return [
+            SimpleNamespace(
+                id="entity-1",
+                entity_type="technology",
+                canonical_name="postgresql",
+                mention_count=3,
+            )
+        ]
+
+    async def fake_get_entity_detail(session, slug, entity_id):
+        del session
+        assert slug == "intel"
+        assert entity_id == "entity-1"
+        return SimpleNamespace(
+            id="entity-1",
+            entity_type="technology",
+            canonical_name="postgresql",
+            mention_count=3,
+            mentions=[
+                SimpleNamespace(
+                    document_path="docs/architecture.md",
+                    document_title="Architecture",
+                    chunk_content_snippet="PostgreSQL stores session state.",
+                    start_char=12,
+                    end_char=22,
+                    confidence=0.94,
+                    version_number=2,
+                )
+            ],
+            relationships=[
+                SimpleNamespace(
+                    related_entity="auth service",
+                    relationship_type="used_by",
+                    direction="incoming",
+                    evidence_text="Auth service writes to PostgreSQL.",
+                )
+            ],
+        )
+
+    monkeypatch.setattr("datum.api.entities.list_project_entities", fake_list_entities)
+    monkeypatch.setattr("datum.api.entities.get_project_entity_detail", fake_get_entity_detail)
+
+    entities = await client.get(
+        "/api/v1/projects/intel/entities",
+        params={"entity_type": "technology"},
+    )
+    assert entities.status_code == 200
+    assert entities.json()["entities"][0]["canonical_name"] == "postgresql"
+
+    detail = await client.get("/api/v1/projects/intel/entities/entity-1")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["canonical_name"] == "postgresql"
+    assert payload["mentions"][0]["document_path"] == "docs/architecture.md"
+    assert payload["relationships"][0]["related_entity"] == "auth service"
+
+
 class _EvalScalarResult:
     def __init__(self, items):
         self._items = items

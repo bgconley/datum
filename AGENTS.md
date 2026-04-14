@@ -19,13 +19,13 @@ If this file and the detailed plans diverge, preserve the design invariants firs
 
 ## Implementation Status At HEAD
 
-- Implemented and validated: Phase 1 through Phase 6
-- Planned and not yet implemented: Phase 7 through Phase 9
-- Treat Phase 7-9 plan docs as forward work items, not active runtime guarantees.
-- Do not assume these Phase 7-9 artifacts exist yet:
-  - DB tables such as `document_links`, `entity_relationships`, `insights`, `agent_sessions`, `session_deltas`
+- Implemented and validated locally: Phase 1 through Phase 7
+- Planned and not yet implemented: Phase 8 through Phase 9
+- Treat Phase 8-9 plan docs as forward work items, not active runtime guarantees.
+- Do not assume these Phase 8-9 artifacts exist yet:
+  - DB tables such as `agent_sessions`, `session_deltas`
   - Server-side lifecycle write barriers
-  - Advanced traceability/insight APIs
+  - Phase 8 saved-search/annotation/collection hardening
 
 ## Purpose
 
@@ -177,12 +177,29 @@ When adding a new write surface, wire all of these:
   - `create_session_note` / `append_session_note`
   - `generate_api_key(...)`
 
-### Phase 7 (Planned, Not Implemented At HEAD)
+### Phase 7 (Implemented At HEAD)
 
+- `document_links`, `entity_relationships`, and `insights` are live schema at `HEAD`.
 - Links, relationships, schema intelligence, contradictions, staleness, and insights are intelligence features layered on top of canonical files.
-- Broken links must be representable even when unresolved.
+- `document_links` stores resolved project-local links; unresolved/broken links are surfaced through staleness analysis and insights.
 - Traceability must be project-scoped and evidence-backed.
-- Scope cuts versus the design doc must be explicit in summaries and deferred lists.
+- Worker DAG now fans out from extraction into:
+  - link detection
+  - schema parsing for structured artifacts
+  - LLM relationship extraction
+  - LLM candidate extraction
+- Traceability, insights, and entity-detail REST APIs are part of the active runtime.
+- Operator CLI now includes `datum insights ...` for Phase 7 analysis and listing.
+- MCP now exposes:
+  - `get_insights`
+  - `search_entity_relationships`
+  - `get_traceability`
+  - `datum://projects/{slug}/insights`
+- Session-note auto-linking is active.
+- Agent-facing content redaction contract at `HEAD`:
+  - secrets are always redacted from agent-facing wrapped content
+  - PII redaction is opt-in via project-level `pii_redact_in_api: true` in `project.yaml`
+  - extraction redacts detected secrets before indexed text is persisted
 
 ### Phase 8 (Planned, Not Implemented At HEAD)
 

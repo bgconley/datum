@@ -388,7 +388,7 @@ async def test_extract_job_queues_candidate_and_ner_stages(monkeypatch, tmp_path
     )
 
     assert isinstance(session.added[0], VersionText)
-    assert queued_job_types == ["chunk", "extract_candidates", "ner_gliner"]
+    assert queued_job_types == ["chunk", "extract_candidates", "ner_gliner", "link_detect"]
 
 
 @pytest.mark.asyncio

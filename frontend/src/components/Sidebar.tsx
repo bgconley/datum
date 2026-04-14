@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
-import { Copy, Files, FolderPlus, LayoutGrid, MoveRight, Search, ShieldAlert } from 'lucide-react'
+import {
+  Copy,
+  Files,
+  FolderPlus,
+  LayoutGrid,
+  MoveRight,
+  Network,
+  Search,
+  ShieldAlert,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -211,6 +220,20 @@ export function Sidebar() {
                   {pendingCandidateCount}
                 </span>
               )}
+            </Link>
+
+            <Link
+              to="/projects/$slug/entities"
+              params={{ slug: selectedProject }}
+              className={`mt-2 flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
+                location.pathname === `/projects/${selectedProject}/entities` ||
+                location.pathname.startsWith(`/projects/${selectedProject}/entities/`)
+                  ? 'bg-accent text-foreground'
+                  : 'hover:bg-accent/70'
+              }`}
+            >
+              <Network className="size-4 text-muted-foreground" />
+              Entity graph
             </Link>
 
             <div className="mt-2 space-y-1">

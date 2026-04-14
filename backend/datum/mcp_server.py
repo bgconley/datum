@@ -14,12 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import settings
 from datum.db import async_session_factory
-from datum.models.core import Project
+from datum.models.core import Document, Project
 from datum.models.intelligence import Decision
 from datum.schemas.inbox import AcceptCandidateRequest
 from datum.services.answer import generate_answer
 from datum.services.audit import log_agent_audit
-from datum.services.boundaries import ContentKind, wrap_content
+from datum.services.boundaries import ContentKind, sanitize_agent_content, wrap_content
 from datum.services.citations import SourceRef
 from datum.services.citations import resolve_citation as resolve_citation_text
 from datum.services.context import ContextConfig, DetailLevel, build_project_context
@@ -52,12 +52,18 @@ from datum.services.intelligence import (
 )
 from datum.services.model_gateway import build_model_gateway
 from datum.services.search import search_execution
+from datum.services.session_links import auto_link_session_note
 from datum.services.sessions import (
     SessionMetadata,
     append_session_note,
     create_session_note,
     find_session_note,
     parse_session_frontmatter,
+)
+from datum.services.traceability import (
+    get_traceability_chains,
+    list_project_entity_relationships,
+    list_project_insights,
 )
 from datum.services.versioning import get_current_version
 
@@ -114,12 +120,27 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             byte_size=len(file_bytes),
             filesystem_path=version.version_file,
         )
+        if doc_type == "session":
+            document_result = await session.execute(
+                select(Document).where(
+                    Document.project_id == project_row.id,
+                    Document.canonical_path == relative_path,
+                )
+            )
+            document_row = document_result.scalar_one_or_none()
+            if document_row is not None and document_row.current_version_id is not None:
+                await auto_link_session_note(
+                    session,
+                    project_id=project_row.id,
+                    version_id=document_row.current_version_id,
+                    content=(project_dir / relative_path).read_text(),
+                )
         return version.content_hash, project_row.id
 
     def _json_text(payload: object) -> str:
         return json.dumps(payload, indent=2, default=str)
 
-    def _read_yaml_records(record_dir: Path) -> str:
+    def _read_yaml_records(record_dir: Path, *, project_slug: str) -> str:
         records: list[dict] = []
         if record_dir.exists():
             for path in sorted(record_dir.glob("*.yaml")):
@@ -130,7 +151,12 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 if payload:
                     records.append(payload)
         return _json_text(
-            wrap_content(_json_text(records), ContentKind.CURATED_RECORD) | {"data": records}
+            wrap_content(
+                _json_text(records),
+                ContentKind.CURATED_RECORD,
+                project_slug=project_slug,
+            )
+            | {"data": records}
         )
 
     @mcp.resource("datum://projects")
@@ -169,7 +195,8 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             ContextConfig(detail=DetailLevel.STANDARD, max_tokens=8000),
         )
         return _json_text(
-            wrap_content(_json_text(payload), ContentKind.DOCUMENT) | {"data": payload}
+            wrap_content(_json_text(payload), ContentKind.DOCUMENT, project_slug=slug)
+            | {"data": payload}
         )
 
     @mcp.resource("datum://projects/{slug}/tree")
@@ -194,21 +221,44 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         if not absolute.exists():
             return _json_text({"error": f"Document '{path}' not found"})
         content = absolute.read_text()
-        wrapped = wrap_content(content, ContentKind.DOCUMENT)
+        wrapped = wrap_content(content, ContentKind.DOCUMENT, project_slug=slug)
         wrapped["path"] = path
         return _json_text(wrapped)
 
     @mcp.resource("datum://projects/{slug}/decisions")
     def decisions_resource(slug: str) -> str:
-        return _read_yaml_records(_project_dir(slug) / ".piq" / "records" / "decisions")
+        return _read_yaml_records(
+            _project_dir(slug) / ".piq" / "records" / "decisions",
+            project_slug=slug,
+        )
 
     @mcp.resource("datum://projects/{slug}/requirements")
     def requirements_resource(slug: str) -> str:
-        return _read_yaml_records(_project_dir(slug) / ".piq" / "records" / "requirements")
+        return _read_yaml_records(
+            _project_dir(slug) / ".piq" / "records" / "requirements",
+            project_slug=slug,
+        )
 
     @mcp.resource("datum://projects/{slug}/open-questions")
     def open_questions_resource(slug: str) -> str:
-        return _read_yaml_records(_project_dir(slug) / ".piq" / "records" / "open-questions")
+        return _read_yaml_records(
+            _project_dir(slug) / ".piq" / "records" / "open-questions",
+            project_slug=slug,
+        )
+
+    @mcp.resource("datum://projects/{slug}/insights")
+    async def insights_resource(slug: str) -> str:
+        async with async_session_factory() as session:
+            items = await list_project_insights(session, slug, status="open", limit=50)
+        payload = [item.__dict__ for item in items]
+        return _json_text(
+            wrap_content(
+                _json_text(payload),
+                ContentKind.CURATED_RECORD,
+                project_slug=slug,
+            )
+            | {"data": payload}
+        )
 
     @mcp.tool()
     async def search_project_memory(
@@ -247,7 +297,11 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                     "line_start": item.line_start,
                     "line_end": item.line_end,
                     "match_signals": item.match_signals,
-                    "boundaries": wrap_content(item.snippet, ContentKind.SEARCH_RESULT),
+                    "boundaries": wrap_content(
+                        item.snippet,
+                        ContentKind.SEARCH_RESULT,
+                        project_slug=item.project_slug,
+                    ),
                 }
                 for item in execution.results
             ]
@@ -267,7 +321,10 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             if answer_mode:
                 answer = await generate_answer(gateway, query, execution.results)
                 payload["answer"] = {
-                    "answer": answer.answer,
+                    "answer": sanitize_agent_content(
+                        answer.answer,
+                        project_slug=project,
+                    ),
                     "error": answer.error,
                     "model": answer.model,
                     "citations": [
@@ -323,7 +380,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         )
         if content is None:
             return {"error": "Citation source not found"}
-        return wrap_content(content, ContentKind.DOCUMENT)
+        return wrap_content(content, ContentKind.DOCUMENT, project_slug=project_slug)
 
     @mcp.tool()
     def get_project_context(
@@ -345,7 +402,10 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 limit_per_section=limit_per_section,
             ),
         )
-        return wrap_content(_json_text(payload), ContentKind.DOCUMENT) | {"data": payload}
+        return (
+            wrap_content(_json_text(payload), ContentKind.DOCUMENT, project_slug=project)
+            | {"data": payload}
+        )
 
     @mcp.tool()
     async def append_session_notes(
@@ -736,5 +796,69 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 await store_idempotency(session, idempotency_key, scope, 200, payload)
             await session.commit()
             return payload
+
+    @mcp.tool()
+    async def get_insights(
+        project: str,
+        status: str = "open",
+        limit: int = 20,
+    ) -> dict:
+        async with async_session_factory() as session:
+            insights = await list_project_insights(session, project, status=status, limit=limit)
+        payload = [item.__dict__ for item in insights]
+        return (
+            wrap_content(
+                _json_text(payload),
+                ContentKind.CURATED_RECORD,
+                project_slug=project,
+            )
+            | {"data": payload, "project": project, "count": len(payload)}
+        )
+
+    @mcp.tool()
+    async def search_entity_relationships(
+        project: str,
+        entity_name: str | None = None,
+        relationship_type: str | None = None,
+        limit: int = 50,
+    ) -> dict:
+        async with async_session_factory() as session:
+            relationships = await list_project_entity_relationships(
+                session,
+                project,
+                entity_name=entity_name,
+                relationship_type=relationship_type,
+                limit=limit,
+            )
+        payload = [item.__dict__ for item in relationships]
+        return (
+            wrap_content(
+                _json_text(payload),
+                ContentKind.SEARCH_RESULT,
+                project_slug=project,
+            )
+            | {"data": payload, "project": project, "count": len(payload)}
+        )
+
+    @mcp.tool()
+    async def get_traceability(project: str) -> dict:
+        async with async_session_factory() as session:
+            chains = await get_traceability_chains(session, project)
+        payload = [
+            {
+                "requirement": chain.requirement.__dict__ if chain.requirement else None,
+                "decisions": [item.__dict__ for item in chain.decisions],
+                "schema_entities": [item.__dict__ for item in chain.schema_entities],
+            }
+            for chain in chains
+        ]
+        return (
+            wrap_content(
+                _json_text(payload),
+                ContentKind.CURATED_RECORD,
+                project_slug=project,
+            )
+            | {"data": payload, "project": project, "count": len(payload)}
+        )
 
     return mcp

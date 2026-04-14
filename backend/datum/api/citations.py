@@ -31,5 +31,5 @@ async def api_resolve_citation(
     if content is None:
         return CitationResolveResponse(error="Citation source not found")
 
-    wrapped = wrap_content(content, ContentKind.DOCUMENT)
+    wrapped = wrap_content(content, ContentKind.DOCUMENT, project_slug=ref.project_slug)
     return CitationResolveResponse(**wrapped)

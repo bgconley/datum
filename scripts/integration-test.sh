@@ -799,11 +799,76 @@ else
     exit 1
 fi
 
-echo "  Creating ADR document for candidate extraction..."
-ADR_CONTENT="# ADR-0001: Use ParadeDB\n\n## Status\nAccepted\n\n## Context\nNeed hybrid search.\n\n## Decision\nUse ParadeDB for BM25 plus pgvector.\n\n## Consequences\nSingle database for search."
+echo "  Creating schema, ADR, and requirement documents..."
+SCHEMA_PAYLOAD="$(python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "relative_path": "docs/schema/users.sql",
+    "title": "users.sql",
+    "doc_type": "spec",
+    "content": (
+        "CREATE TABLE users (\n"
+        "    id UUID PRIMARY KEY,\n"
+        "    email TEXT NOT NULL\n"
+        ");\n\n"
+        "CREATE TABLE sessions (\n"
+        "    id UUID PRIMARY KEY,\n"
+        "    user_id UUID REFERENCES users(id)\n"
+        ");\n"
+    ),
+}))
+PY
+)"
 curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/docs" \
   -H "Content-Type: application/json" \
-  -d "{\"relative_path\":\"docs/decisions/adr-0001.md\",\"title\":\"ADR-0001\",\"doc_type\":\"decision\",\"content\":\"$ADR_CONTENT\"}" >/dev/null
+  -d "$SCHEMA_PAYLOAD" >/dev/null
+
+ADR_PAYLOAD="$(python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "relative_path": "docs/decisions/adr-0001.md",
+    "title": "ADR-0001",
+    "doc_type": "decision",
+    "content": (
+        "# ADR-0001: Use ParadeDB\n\n"
+        "## Status\n"
+        "Accepted\n\n"
+        "## Context\n"
+        "Need hybrid search and linked operational schema.\n\n"
+        "## Decision\n"
+        "Use ParadeDB for BM25 plus pgvector and adopt the "
+        "[session schema](docs/schema/users.sql).\n\n"
+        "## Consequences\n"
+        "Single database for search with explicit schema traceability.\n"
+    ),
+}))
+PY
+)"
+curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/docs" \
+  -H "Content-Type: application/json" \
+  -d "$ADR_PAYLOAD" >/dev/null
+
+REQ_PAYLOAD="$(python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "relative_path": "docs/requirements/auth.md",
+    "title": "Auth requirements",
+    "doc_type": "spec",
+    "content": (
+        "# Auth requirements\n\n"
+        "REQ-001: The system must persist session ownership as defined in the "
+        "[ParadeDB decision](docs/decisions/adr-0001.md).\n\n"
+        "See also [missing reference](docs/specs/missing.md).\n"
+    ),
+}))
+PY
+)"
+curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/docs" \
+  -H "Content-Type: application/json" \
+  -d "$REQ_PAYLOAD" >/dev/null
 
 wait_for_search_pipeline "$API_TEST_SLUG" 45 "$REQUIRE_EMBEDDINGS"
 
@@ -811,9 +876,32 @@ echo "  Checking inbox..."
 INBOX=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/inbox")
 INBOX_COUNT=$(echo "$INBOX" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
 HAS_DECISION=$(echo "$INBOX" | python3 -c 'import sys,json;items=json.load(sys.stdin);print(any(item["candidate_type"]=="decision" for item in items))')
+HAS_REQUIREMENT=$(echo "$INBOX" | python3 -c 'import sys,json;items=json.load(sys.stdin);print(any(item["candidate_type"]=="requirement" for item in items))')
+DECISION_CANDIDATE_ID=$(echo "$INBOX" | python3 -c 'import sys,json;items=json.load(sys.stdin);print(next((item["id"] for item in items if item["candidate_type"]=="decision"), ""))')
+REQUIREMENT_CANDIDATE_ID=$(echo "$INBOX" | python3 -c 'import sys,json;items=json.load(sys.stdin);print(next((item["id"] for item in items if item["candidate_type"]=="requirement"), ""))')
 echo "    Inbox candidates: $INBOX_COUNT"
 [ "$INBOX_COUNT" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected inbox candidates"; exit 1; }
 [ "$HAS_DECISION" = "True" ] || { echo "    FAIL: expected decision candidate from ADR"; exit 1; }
+[ "$HAS_REQUIREMENT" = "True" ] || { echo "    FAIL: expected requirement candidate"; exit 1; }
+[ -n "$DECISION_CANDIDATE_ID" ] || { echo "    FAIL: missing decision candidate id"; exit 1; }
+[ -n "$REQUIREMENT_CANDIDATE_ID" ] || { echo "    FAIL: missing requirement candidate id"; exit 1; }
+
+echo "  Accepting extracted requirement and decision candidates..."
+curl --fail-with-body -sS -X POST \
+  "$API/projects/${API_TEST_SLUG}/inbox/decision/${DECISION_CANDIDATE_ID}/accept" \
+  -H "Content-Type: application/json" \
+  -d '{}' >/dev/null
+curl --fail-with-body -sS -X POST \
+  "$API/projects/${API_TEST_SLUG}/inbox/requirement/${REQUIREMENT_CANDIDATE_ID}/accept" \
+  -H "Content-Type: application/json" \
+  -d '{}' >/dev/null
+
+echo "  Checking detected document links..."
+LINKS=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/links")
+LINK_COUNT=$(echo "$LINKS" | python3 -c 'import sys,json;print(json.load(sys.stdin)["total"])')
+[ "$LINK_COUNT" -ge 2 ] 2>/dev/null || { echo "    FAIL: expected at least 2 document links"; exit 1; }
+echo "$LINKS" | python3 -c 'import sys,json; data=json.load(sys.stdin)["links"]; pairs={(item["source_document_path"], item["target_document_path"]) for item in data}; assert ("docs/requirements/auth.md", "docs/decisions/adr-0001.md") in pairs; assert ("docs/decisions/adr-0001.md", "docs/schema/users.sql") in pairs'
+echo "    Links: $LINK_COUNT"
 
 echo "  Checking extracted entities..."
 ENTITY_COUNT="$(
@@ -828,6 +916,45 @@ SQL
 )"
 echo "    Entity mentions: ${ENTITY_COUNT:-0}"
 [ "${ENTITY_COUNT:-0}" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected entity mentions from GLiNER"; exit 1; }
+
+echo "  Checking entity relationships and graph APIs..."
+RELATIONSHIPS=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/relationships")
+REL_COUNT=$(echo "$RELATIONSHIPS" | python3 -c 'import sys,json;print(json.load(sys.stdin)["total"])')
+[ "$REL_COUNT" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected schema/entity relationships"; exit 1; }
+echo "$RELATIONSHIPS" | python3 -c 'import sys,json; data=json.load(sys.stdin)["relationships"]; assert any(item["relationship_type"] == "foreign_key" for item in data)'
+ENTITIES=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/entities")
+ENTITY_TOTAL=$(echo "$ENTITIES" | python3 -c 'import sys,json;print(json.load(sys.stdin)["total"])')
+[ "$ENTITY_TOTAL" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected entity graph results"; exit 1; }
+ENTITY_ID=$(echo "$ENTITIES" | python3 -c 'import sys,json; data=json.load(sys.stdin); print(data["entities"][0]["id"] if data["entities"] else "")')
+[ -n "$ENTITY_ID" ] || { echo "    FAIL: expected entity id"; exit 1; }
+ENTITY_DETAIL=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/entities/${ENTITY_ID}")
+echo "$ENTITY_DETAIL" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["mention_count"] >= 1; assert isinstance(data["relationships"], list)'
+echo "    Relationships: $REL_COUNT, entities: $ENTITY_TOTAL"
+
+echo "  Running insight analysis via CLI..."
+INSIGHTS_ANALYZE_OUTPUT="$(cd "$BACKEND_DIR" && datum insights analyze "$API_TEST_SLUG")"
+INSIGHTS_CREATED=$(echo "$INSIGHTS_ANALYZE_OUTPUT" | awk '/Insights created:/ {print $3}')
+[ "${INSIGHTS_CREATED:-0}" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected CLI insight analysis to create insights"; echo "$INSIGHTS_ANALYZE_OUTPUT"; exit 1; }
+INSIGHTS_LIST_OUTPUT="$(cd "$BACKEND_DIR" && datum insights list "$API_TEST_SLUG")"
+echo "$INSIGHTS_LIST_OUTPUT" | grep -q "Broken link:" || { echo "    FAIL: expected broken-link insight in CLI output"; exit 1; }
+
+echo "  Checking insights and traceability endpoints..."
+INSIGHTS=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/insights")
+INSIGHT_TOTAL=$(echo "$INSIGHTS" | python3 -c 'import sys,json;print(json.load(sys.stdin)["total"])')
+[ "$INSIGHT_TOTAL" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected insights from analysis"; exit 1; }
+INSIGHT_ID=$(echo "$INSIGHTS" | python3 -c 'import sys,json; data=json.load(sys.stdin); print(data["insights"][0]["id"] if data["insights"] else "")')
+[ -n "$INSIGHT_ID" ] || { echo "    FAIL: missing insight id"; exit 1; }
+UPDATED_INSIGHT=$(curl --fail-with-body -sS -X POST \
+  "$API/projects/${API_TEST_SLUG}/insights/${INSIGHT_ID}/status" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"acknowledged"}')
+echo "$UPDATED_INSIGHT" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["status"] == "acknowledged"'
+
+TRACEABILITY=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/traceability")
+TRACE_COUNT=$(echo "$TRACEABILITY" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+[ "$TRACE_COUNT" -gt 0 ] 2>/dev/null || { echo "    FAIL: expected traceability chains"; exit 1; }
+echo "$TRACEABILITY" | python3 -c 'import sys,json; chains=json.load(sys.stdin); assert chains[0]["decisions"]; assert chains[0]["schema_entities"]'
+echo "    Insights: $INSIGHT_TOTAL, traceability chains: $TRACE_COUNT"
 echo ""
 
 # --- 6.7. Evaluation harness integration ---

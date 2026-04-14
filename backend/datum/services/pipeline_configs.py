@@ -39,6 +39,14 @@ NER_PIPELINE_NAME = "gliner-entity-extraction"
 NER_PIPELINE_VERSION = "phase5-gliner-v1"
 CANDIDATE_EXTRACTION_PIPELINE_NAME = "candidate-extraction"
 CANDIDATE_EXTRACTION_PIPELINE_VERSION = "phase5-deterministic-v1"
+LINK_DETECTION_PIPELINE_NAME = "document-link-detection"
+LINK_DETECTION_PIPELINE_VERSION = "phase7-markdown-v1"
+SCHEMA_PARSE_PIPELINE_NAME = "schema-intelligence"
+SCHEMA_PARSE_PIPELINE_VERSION = "phase7-parser-v1"
+LLM_RELATIONSHIP_PIPELINE_NAME = "llm-relationship-extraction"
+LLM_RELATIONSHIP_PIPELINE_VERSION = "phase7-gpt-oss-v1"
+LLM_CANDIDATE_PIPELINE_NAME = "llm-candidate-extraction"
+LLM_CANDIDATE_PIPELINE_VERSION = "phase7-gpt-oss-v1"
 
 
 def stable_config_hash(config: dict[str, Any]) -> str:
@@ -121,6 +129,46 @@ def candidate_extraction_pipeline_payload() -> dict[str, Any]:
             "regex_question_mark",
             "regex_todo_marker",
         ],
+    }
+
+
+def link_detection_pipeline_payload() -> dict[str, Any]:
+    return {
+        "version": LINK_DETECTION_PIPELINE_VERSION,
+        "strategy": "markdown_and_path_reference",
+        "link_types": ["references"],
+    }
+
+
+def schema_parse_pipeline_payload() -> dict[str, Any]:
+    return {
+        "version": SCHEMA_PARSE_PIPELINE_VERSION,
+        "strategy": "deterministic_parser",
+        "formats": ["sql", "prisma", "openapi"],
+    }
+
+
+def llm_relationship_pipeline_payload(gateway: ModelGateway) -> dict[str, Any] | None:
+    llm_config = getattr(gateway, "llm", None)
+    if llm_config is None:
+        return None
+    return {
+        "version": LLM_RELATIONSHIP_PIPELINE_VERSION,
+        "strategy": "llm_json_relationships",
+        "model_name": llm_config.name,
+        "endpoint": llm_config.endpoint,
+    }
+
+
+def llm_candidate_pipeline_payload(gateway: ModelGateway) -> dict[str, Any] | None:
+    llm_config = getattr(gateway, "llm", None)
+    if llm_config is None:
+        return None
+    return {
+        "version": LLM_CANDIDATE_PIPELINE_VERSION,
+        "strategy": "llm_json_candidates",
+        "model_name": llm_config.name,
+        "endpoint": llm_config.endpoint,
     }
 
 
@@ -252,6 +300,54 @@ async def get_candidate_extraction_pipeline_config(session: AsyncSession) -> Pip
     )
 
 
+async def get_link_detection_pipeline_config(session: AsyncSession) -> PipelineConfig:
+    return await get_or_create_pipeline_config(
+        session,
+        stage="link_detect",
+        name=LINK_DETECTION_PIPELINE_NAME,
+        config=link_detection_pipeline_payload(),
+    )
+
+
+async def get_schema_parse_pipeline_config(session: AsyncSession) -> PipelineConfig:
+    return await get_or_create_pipeline_config(
+        session,
+        stage="schema_parse",
+        name=SCHEMA_PARSE_PIPELINE_NAME,
+        config=schema_parse_pipeline_payload(),
+    )
+
+
+async def get_llm_relationship_pipeline_config(
+    session: AsyncSession,
+    gateway: ModelGateway,
+) -> PipelineConfig | None:
+    payload = llm_relationship_pipeline_payload(gateway)
+    if payload is None:
+        return None
+    return await get_or_create_pipeline_config(
+        session,
+        stage="relate_llm",
+        name=LLM_RELATIONSHIP_PIPELINE_NAME,
+        config=payload,
+    )
+
+
+async def get_llm_candidate_pipeline_config(
+    session: AsyncSession,
+    gateway: ModelGateway,
+) -> PipelineConfig | None:
+    payload = llm_candidate_pipeline_payload(gateway)
+    if payload is None:
+        return None
+    return await get_or_create_pipeline_config(
+        session,
+        stage="extract_candidates_llm",
+        name=LLM_CANDIDATE_PIPELINE_NAME,
+        config=payload,
+    )
+
+
 async def get_active_embedding_model_run(
     session: AsyncSession,
     gateway: ModelGateway,
@@ -355,6 +451,49 @@ async def get_active_ner_model_run(
         model_name=payload["model_name"],
         model_version=config_hash,
         task="ner",
+        config=payload,
+        started_at=datetime.now(UTC),
+    )
+    session.add(model_run)
+    await session.flush()
+    return model_run
+
+
+async def get_active_llm_model_run(
+    session: AsyncSession,
+    gateway: ModelGateway,
+    *,
+    create: bool,
+) -> ModelRun | None:
+    llm_config = getattr(gateway, "llm", None)
+    if llm_config is None:
+        return None
+
+    payload = {
+        "model_name": llm_config.name,
+        "endpoint": llm_config.endpoint,
+        "protocol": llm_config.protocol,
+        "timeout": llm_config.timeout,
+    }
+    config_hash = stable_config_hash(payload)
+    result = await session.execute(
+        select(ModelRun)
+        .where(
+            ModelRun.task == "llm",
+            ModelRun.model_name == payload["model_name"],
+            ModelRun.model_version == config_hash,
+        )
+        .order_by(ModelRun.started_at.desc().nullslast())
+        .limit(1)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None or not create:
+        return existing
+
+    model_run = ModelRun(
+        model_name=payload["model_name"],
+        model_version=config_hash,
+        task="llm",
         config=payload,
         started_at=datetime.now(UTC),
     )

@@ -36,6 +36,11 @@ const ReviewInbox = lazy(() =>
     default: module.ReviewInbox,
   })),
 )
+const EntityExplorer = lazy(() =>
+  import('@/components/EntityExplorer').then((module) => ({
+    default: module.EntityExplorer,
+  })),
+)
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,7 +66,7 @@ function HomeRouteComponent() {
     <div className="flex h-full items-center justify-center p-8">
       <div className="max-w-2xl rounded-[2rem] border border-border/80 bg-card/70 p-10 shadow-sm">
         <div className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
-          Phase 4
+          Current build
         </div>
         <h1 className="mt-3 text-4xl font-semibold tracking-tight">
           Cabinet-first workspace for living project memory.
@@ -164,6 +169,24 @@ function LegacyReviewRouteComponent() {
   return renderReviewInbox(slug)
 }
 
+function EntitiesRouteComponent() {
+  const { slug } = entitiesRoute.useParams()
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading entities…</div>}>
+      <EntityExplorer projectSlug={slug} />
+    </Suspense>
+  )
+}
+
+function EntityDetailRouteComponent() {
+  const { slug, entityId } = entityDetailRoute.useParams()
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading entity…</div>}>
+      <EntityExplorer projectSlug={slug} entityId={entityId} />
+    </Suspense>
+  )
+}
+
 const rootRoute = createRootRoute({
   component: RootComponent,
 })
@@ -260,6 +283,18 @@ const reviewAliasRoute = createRoute({
   component: LegacyReviewRouteComponent,
 })
 
+const entitiesRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'entities',
+  component: EntitiesRouteComponent,
+})
+
+const entityDetailRoute = createRoute({
+  getParentRoute: () => entitiesRoute,
+  path: '$entityId',
+  component: EntityDetailRouteComponent,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   searchRoute,
@@ -267,6 +302,7 @@ const routeTree = rootRoute.addChildren([
     projectIndexRoute,
     inboxRoute,
     reviewAliasRoute,
+    entitiesRoute.addChildren([entityDetailRoute]),
     projectDocsRoute.addChildren([
       documentRoute,
     ]),

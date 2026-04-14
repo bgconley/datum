@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { useContextPanel } from '@/lib/context-panel'
-import { api, type Candidate, type DocumentMeta, type Project } from '@/lib/api'
+import { api, type Candidate, type DocumentMeta, type InsightSummary, type Project } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
@@ -46,6 +46,25 @@ function buildAttentionAlerts(documents: DocumentMeta[], pendingCandidateCount: 
   }
 
   return alerts
+}
+
+function getInsightTone(severity: InsightSummary['severity']) {
+  if (severity === 'critical') {
+    return 'border-red-500/30 bg-red-500/8 text-red-100'
+  }
+  if (severity === 'warning') {
+    return 'border-amber-400/30 bg-amber-400/10 text-amber-50'
+  }
+  return 'border-sky-400/30 bg-sky-400/10 text-sky-50'
+}
+
+function insightEvidencePath(insight: InsightSummary): string | null {
+  const evidence = insight.evidence
+  if (!evidence || typeof evidence !== 'object') {
+    return null
+  }
+  const path = evidence['document_path']
+  return typeof path === 'string' ? path : null
 }
 
 function DashboardContextPanel({
@@ -171,10 +190,16 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
     queryFn: () => api.inbox.list(projectSlug),
     enabled: Boolean(projectSlug),
   })
+  const insightsQuery = useQuery({
+    queryKey: queryKeys.insights(projectSlug),
+    queryFn: () => api.insights.list(projectSlug, 'open'),
+    enabled: Boolean(projectSlug),
+  })
   const keyEntities =
     intelligenceQuery.data?.key_entities.map((entity) => entity.canonical_name) ?? EMPTY_ENTITIES
   const pendingCandidateCount = intelligenceQuery.data?.pending_candidate_count ?? 0
   const inboxCandidates = inboxQuery.data ?? EMPTY_CANDIDATES
+  const openInsights = insightsQuery.data?.insights ?? []
 
   useEffect(() => {
     if (project) {
@@ -231,6 +256,7 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
             <Badge variant="outline">{project.status}</Badge>
             <Badge variant="secondary">{documents.length} docs</Badge>
             {pendingCandidateCount > 0 && <Badge variant="outline">{pendingCandidateCount} inbox</Badge>}
+            {openInsights.length > 0 && <Badge variant="outline">{openInsights.length} insights</Badge>}
             {project.tags.map((tag) => (
               <Badge key={tag} variant="outline">
                 {tag}
@@ -361,8 +387,8 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
                 keyEntities.map((entity) => (
                   <Link
                     key={entity}
-                    to="/search"
-                    search={{ query: entity, project: projectSlug }}
+                    to="/projects/$slug/entities"
+                    params={{ slug: projectSlug }}
                     className="inline-flex items-center rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs transition-colors hover:bg-accent"
                   >
                     {entity}
@@ -403,17 +429,48 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {alerts.length === 0 ? (
+              {openInsights.length === 0 && alerts.length === 0 ? (
                 <div className="text-sm text-muted-foreground">No alerts. Cabinet state looks healthy.</div>
               ) : (
-                alerts.map((alert) => (
-                  <div
-                    key={alert}
-                    className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3 text-sm"
-                  >
-                    {alert}
-                  </div>
-                ))
+                <>
+                  {openInsights.map((insight) => {
+                    const evidencePath = insightEvidencePath(insight)
+                    return (
+                      <div
+                        key={insight.id}
+                        className={`rounded-2xl border px-4 py-3 text-sm ${getInsightTone(insight.severity)}`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary">{insight.insight_type}</Badge>
+                          <Badge variant="outline">{insight.severity}</Badge>
+                        </div>
+                        <div className="mt-3 font-medium">{insight.title}</div>
+                        {insight.explanation && (
+                          <div className="mt-2 text-sm text-current/80">{insight.explanation}</div>
+                        )}
+                        {evidencePath && (
+                          <div className="mt-3">
+                            <Link
+                              to="/projects/$slug/docs/$"
+                              params={{ slug: projectSlug, _splat: evidencePath }}
+                              className="text-xs underline-offset-4 hover:underline"
+                            >
+                              Open evidence
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {alerts.map((alert) => (
+                    <div
+                      key={alert}
+                      className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3 text-sm"
+                    >
+                      {alert}
+                    </div>
+                  ))}
+                </>
               )}
             </CardContent>
           </Card>

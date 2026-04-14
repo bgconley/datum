@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from datum.services.link_detection import LinkCandidate, detect_all_links
 from datum.services.versioning import create_version
 
 
@@ -182,3 +183,8 @@ def find_session_note(project_dir: Path, session_id: str) -> Path | None:
         except Exception:
             continue
     return None
+
+
+def detect_session_document_links(content: str, known_paths: set[str]) -> list[LinkCandidate]:
+    """Detect cabinet document references inside session note content."""
+    return detect_all_links(content, known_paths)

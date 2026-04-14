@@ -44,4 +44,8 @@ async def api_get_project_context(
             limit_per_section=limit_per_section,
         ),
     )
-    return wrap_content(json.dumps(payload, default=str), ContentKind.DOCUMENT) | {"data": payload}
+    return wrap_content(
+        json.dumps(payload, default=str),
+        ContentKind.DOCUMENT,
+        project_slug=slug,
+    ) | {"data": payload}

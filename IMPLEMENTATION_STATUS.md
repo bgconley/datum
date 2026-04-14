@@ -5,22 +5,26 @@ the code at current `HEAD` intentionally reflects a subset of that roadmap.
 
 ## Current Delivery State
 
-- Implemented and validated: **Phase 1 through Phase 6**
-- Planned and outstanding: **Phase 7 through Phase 9**
+- Implemented and validated locally: **Phase 1 through Phase 7**
+- Planned and outstanding: **Phase 8 through Phase 9**
 
 ## What This Means Operationally
 
-- The design and per-phase plans for Phases 7-9 are authoritative planning
+- The design and per-phase plans for Phases 8-9 remain authoritative planning
   documents, not a statement that those phases are already live at `HEAD`.
 - Audits and implementation reviews must evaluate shipped behavior against the
   implemented phase set unless explicitly running a future-phase review.
 
 ## Database Schema Marker
 
-- Current migration head in this repo is Phase 6 era (`007_agent_api_keys_idempotency.py`).
-- Future-phase tables such as `document_links`, `entity_relationships`,
-  `insights`, `agent_sessions`, and `session_deltas` are expected only after
-  Phases 7-9 are implemented.
+- Current migration head in this repo includes Phase 7
+  (`008_phase7_intelligence_graph.py`).
+- Intelligence-graph tables `document_links`, `entity_relationships`, and
+  `insights` now exist at `HEAD`.
+- Phase 7 operator workflow includes `datum insights analyze <project>` and
+  `datum insights list <project>`.
+- Future-phase operational tables such as `agent_sessions` and
+  `session_deltas` remain Phase 9 work.
 
 ## Canonical References
 

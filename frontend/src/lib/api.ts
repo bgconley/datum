@@ -147,6 +147,52 @@ export interface ProjectIntelligenceSummary {
   key_entities: IntelligenceEntitySummary[]
 }
 
+export interface InsightSummary {
+  id: string
+  insight_type: string
+  severity: 'info' | 'warning' | 'critical'
+  status: string
+  title: string
+  explanation: string | null
+  confidence: number | null
+  evidence: Record<string, unknown> | null
+  created_at: string | null
+  resolved_at: string | null
+}
+
+export interface EntitySummary {
+  id: string
+  entity_type: string
+  canonical_name: string
+  mention_count: number
+}
+
+export interface EntityMentionDetail {
+  document_path: string
+  document_title: string | null
+  chunk_content_snippet: string
+  start_char: number
+  end_char: number
+  confidence: number
+  version_number: number | null
+}
+
+export interface EntityRelationshipDetail {
+  related_entity: string
+  relationship_type: string
+  direction: 'incoming' | 'outgoing'
+  evidence_text: string | null
+}
+
+export interface EntityDetail {
+  id: string
+  entity_type: string
+  canonical_name: string
+  mentions: EntityMentionDetail[]
+  relationships: EntityRelationshipDetail[]
+  mention_count: number
+}
+
 export interface VersionInfo {
   version_number: number
   branch: string
@@ -375,5 +421,25 @@ export const api = {
   intelligence: {
     summary: (slug: string) =>
       fetchJSON<ProjectIntelligenceSummary>(`${API_BASE}/projects/${slug}/intelligence/summary`),
+  },
+  insights: {
+    list: (slug: string, status?: string) =>
+      fetchJSON<{ insights: InsightSummary[]; total: number }>(
+        `${API_BASE}/projects/${slug}/insights${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+      ),
+    updateStatus: (slug: string, insightId: string, status: string) =>
+      fetchJSON<InsightSummary>(`${API_BASE}/projects/${slug}/insights/${insightId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }),
+  },
+  entities: {
+    list: (slug: string, entityType?: string) =>
+      fetchJSON<{ entities: EntitySummary[]; total: number }>(
+        `${API_BASE}/projects/${slug}/entities${entityType ? `?entity_type=${encodeURIComponent(entityType)}` : ''}`,
+      ),
+    get: (slug: string, entityId: string) =>
+      fetchJSON<EntityDetail>(`${API_BASE}/projects/${slug}/entities/${entityId}`),
   },
 }

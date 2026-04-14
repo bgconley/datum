@@ -8,6 +8,7 @@ from pathlib import Path
 
 import frontmatter
 
+from datum.services.content_scanning import redact_content, scan_for_secrets
 from datum.services.filesystem import compute_content_hash
 
 TEXT_EXTENSIONS = {
@@ -58,6 +59,9 @@ async def extract_text_async(file_path: Path) -> ExtractionResult | None:
 
 
 def _build_result(content: str, text_kind: str, source_extension: str) -> ExtractionResult:
+    secret_matches = scan_for_secrets(content)
+    if secret_matches:
+        content = redact_content(content, secret_matches)
     return ExtractionResult(
         content=content,
         text_kind=text_kind,
