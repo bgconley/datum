@@ -41,6 +41,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/projects/{slug}/docs", tags=["documents"])
 
 
+def _log_db_sync_skip(
+    *,
+    operation: str,
+    project_slug: str,
+    canonical_path: str,
+    exc: Exception,
+) -> None:
+    logger.warning(
+        "DB sync skipped for %s (project=%s, path=%s): %s",
+        operation,
+        project_slug,
+        canonical_path,
+        exc,
+        exc_info=True,
+    )
+
+
 def _get_project_path(slug: str):
     try:
         info = get_project(settings.projects_root, slug)
@@ -174,9 +191,14 @@ async def api_create_document(
                     new_hash=doc_info.content_hash,
                 )
                 await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB sync skipped for document create", exc_info=True)
+        _log_db_sync_skip(
+            operation="create_document",
+            project_slug=slug,
+            canonical_path=doc_info.relative_path,
+            exc=exc,
+        )
 
     return DocumentResponse(**doc_info.__dict__)
 
@@ -260,9 +282,14 @@ async def api_move_document(
                 new_hash=doc_info.content_hash,
             )
             await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB sync skipped for document move", exc_info=True)
+        _log_db_sync_skip(
+            operation="move_document",
+            project_slug=slug,
+            canonical_path=doc_info.relative_path,
+            exc=exc,
+        )
 
     return DocumentResponse(**doc_info.__dict__)
 
@@ -367,9 +394,14 @@ async def api_save_document(
                     canonical_path, old_hash=old_hash, new_hash=doc_info.content_hash,
                 )
                 await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB sync skipped for document save", exc_info=True)
+        _log_db_sync_skip(
+            operation="save_document",
+            project_slug=slug,
+            canonical_path=doc_info.relative_path,
+            exc=exc,
+        )
 
     return DocumentResponse(**doc_info.__dict__)
 
@@ -401,8 +433,13 @@ async def api_delete_document(
                 metadata={"archived_path": archived_path},
             )
             await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB sync skipped for document delete", exc_info=True)
+        _log_db_sync_skip(
+            operation="delete_document",
+            project_slug=slug,
+            canonical_path=doc_path,
+            exc=exc,
+        )
 
     return {"status": "deleted", "archived_path": archived_path}

@@ -415,6 +415,26 @@ class _CollectionSession:
 
     async def execute(self, statement):
         rendered = str(statement)
+        if (
+            "FROM collections JOIN collection_members" in rendered
+            and "collection_members.document_id" in rendered
+        ):
+            rows = [
+                (
+                    collection.id,
+                    collection.name,
+                    collection.description,
+                    collection.created_at,
+                    sum(1 for member in self.members if member.collection_id == collection.id),
+                )
+                for collection in self.collections
+                if any(
+                    member.collection_id == collection.id
+                    and member.document_id == self.document.id
+                    for member in self.members
+                )
+            ]
+            return _RowResult(rows)
         if "collection_members" in rendered and "documents" in rendered:
             rows = [
                 (
@@ -427,6 +447,16 @@ class _CollectionSession:
             ]
             return _RowResult(rows)
         if "FROM documents" in rendered:
+            requested_uid = next(
+                (
+                    value
+                    for key, value in statement.compile().params.items()
+                    if "uid" in key
+                ),
+                None,
+            )
+            if requested_uid is not None and requested_uid != self.document.uid:
+                return _ScalarResult(item=None)
             return _ScalarResult(item=self.document)
         if "FROM collections" in rendered and "count(collection_members.document_id)" in rendered:
             rows = [
@@ -512,6 +542,18 @@ class _UploadSession:
     async def execute(self, statement):
         del statement
         return _ScalarResult(item=None)
+
+    async def commit(self):
+        return None
+
+    async def rollback(self):
+        return None
+
+
+class _FailingUploadSession:
+    async def execute(self, statement):
+        del statement
+        raise RuntimeError("db unavailable")
 
     async def commit(self):
         return None
@@ -644,6 +686,84 @@ async def test_collection_membership_endpoints_use_document_uid(client):
 
 
 @pytest.mark.asyncio
+async def test_document_collection_lookup_endpoint(client):
+    from datum.db import get_session
+    from datum.main import app
+    from datum.models.core import Document, Project
+
+    project = Project(
+        id=uuid4(),
+        uid="proj_coll_lookup",
+        slug="coll-lookup",
+        name="Collections",
+        filesystem_path="/tmp/coll-lookup",
+    )
+    document = Document(
+        id=uuid4(),
+        uid="doc_coll_lookup",
+        project_id=project.id,
+        slug="doc",
+        canonical_path="docs/doc.md",
+        title="Doc",
+        doc_type="plan",
+    )
+    session = _CollectionSession(project.id, document)
+
+    async def override_get_session():
+        yield session
+
+    async def fake_get_project(slug, async_session):
+        del async_session
+        assert slug == "coll-lookup"
+        return project
+
+    async def fake_get_collection(slug, collection_id, async_session):
+        del slug, async_session
+        collection = next(
+            (item for item in session.collections if str(item.id) == collection_id),
+            None,
+        )
+        assert collection is not None
+        return collection
+
+    app.dependency_overrides[get_session] = override_get_session
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("datum.api.collections._get_project", fake_get_project)
+    monkeypatch.setattr("datum.api.collections._get_collection", fake_get_collection)
+    try:
+        created = await client.post(
+            "/api/v1/projects/coll-lookup/collections",
+            json={"name": "Favorites", "description": "important docs"},
+        )
+        assert created.status_code == 201
+        collection_id = created.json()["id"]
+
+        added = await client.post(
+            f"/api/v1/projects/coll-lookup/collections/{collection_id}/members",
+            json={"document_uid": document.uid},
+        )
+        assert added.status_code == 201
+
+        listed = await client.get(
+            f"/api/v1/projects/coll-lookup/collections/by-document/{document.uid}",
+        )
+        assert listed.status_code == 200
+        payload = listed.json()
+        assert len(payload) == 1
+        assert payload[0]["id"] == collection_id
+        assert payload[0]["member_count"] == 1
+
+        missing = await client.get(
+            "/api/v1/projects/coll-lookup/collections/by-document/does-not-exist",
+        )
+        assert missing.status_code == 200
+        assert missing.json() == []
+    finally:
+        monkeypatch.undo()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_annotations_crud_endpoint(client):
     from datum.db import get_session
     from datum.main import app
@@ -704,6 +824,34 @@ async def test_upload_endpoint_writes_blob_and_attachment_metadata(client, tmp_b
         metadata_file = settings.projects_root / "uploads" / payload["attachment_path"]
         assert metadata_file.exists()
         assert "blob_ref" in metadata_file.read_text()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_upload_endpoint_logs_warning_when_db_sync_fails(client, caplog):
+    from datum.db import get_session
+    from datum.main import app
+
+    settings.blobs_root = settings.projects_root.parent / "blobs"
+    settings.blobs_root.mkdir(parents=True, exist_ok=True)
+    await client.post("/api/v1/projects", json={"name": "Uploads", "slug": "uploads-logs"})
+
+    async def override_get_session():
+        yield _FailingUploadSession()
+
+    app.dependency_overrides[get_session] = override_get_session
+    caplog.set_level("WARNING")
+    try:
+        response = await client.post(
+            "/api/v1/projects/uploads-logs/upload",
+            files={"file": ("notes.txt", b"phase-8 upload", "text/plain")},
+        )
+        assert response.status_code == 201
+        assert any(
+            "DB sync skipped for upload" in message
+            for message in caplog.messages
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -1156,6 +1304,39 @@ async def test_search_rejects_invalid_as_of_scope(client):
 
 
 @pytest.mark.asyncio
+async def test_search_applies_configured_result_limit_cap(client, monkeypatch):
+    captured: dict[str, int] = {}
+
+    class StubGateway:
+        embedding = None
+        reranker = None
+
+        async def close(self):
+            return None
+
+    async def fake_search(**kwargs):
+        captured["limit"] = kwargs["limit"]
+        return SearchExecution(
+            phase="hybrid",
+            query=kwargs["query"],
+            results=[],
+            fused_results=[],
+            latency_ms=1,
+            semantic_enabled=False,
+            rerank_applied=False,
+            entity_facets=[],
+        )
+
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.search.search_execution", fake_search)
+    monkeypatch.setattr("datum.api.search.settings.search_result_limit", 5)
+
+    resp = await client.post("/api/v1/search", json={"query": "test", "limit": 50})
+    assert resp.status_code == 200
+    assert captured["limit"] == 5
+
+
+@pytest.mark.asyncio
 async def test_search_serializes_nonempty_results(client, monkeypatch):
     class StubGateway:
         embedding = None
@@ -1303,6 +1484,48 @@ async def test_search_stream_emits_phases(client, monkeypatch):
     assert lines[1]["results"][0]["match_signals"] == ["keyword", "exact-term"]
     assert lines[1]["entity_facets"][0]["canonical_name"] == "database_url"
     assert lines[1]["rerank_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_search_stream_applies_configured_result_limit_cap(client, monkeypatch):
+    captured: dict[str, int] = {}
+
+    class StubGateway:
+        embedding = None
+        reranker = None
+
+        async def close(self):
+            return None
+
+    async def fake_stream_search(**kwargs):
+        captured["limit"] = kwargs["limit"]
+        yield type(
+            "Execution",
+            (),
+            {
+                "phase": "lexical",
+                "query": kwargs["query"],
+                "results": [],
+                "entity_facets": [],
+                "latency_ms": 1,
+                "semantic_enabled": False,
+                "rerank_applied": False,
+            },
+        )()
+
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.search.stream_search", fake_stream_search)
+    monkeypatch.setattr("datum.api.search.settings.search_result_limit", 3)
+
+    async with client.stream(
+        "POST",
+        "/api/v1/search/stream",
+        json={"query": "DATABASE_URL", "limit": 30},
+    ) as resp:
+        assert resp.status_code == 200
+        _ = [line async for line in resp.aiter_lines() if line]
+
+    assert captured["limit"] == 3
 
 
 @pytest.mark.asyncio

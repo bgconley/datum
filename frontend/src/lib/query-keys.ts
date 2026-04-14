@@ -13,6 +13,8 @@ export const queryKeys = {
     ['projects', slug, 'insights', status] as const,
   savedSearches: (slug: string) => ['projects', slug, 'saved-searches'] as const,
   collections: (slug: string) => ['projects', slug, 'collections'] as const,
+  documentCollections: (slug: string, documentUid: string) =>
+    ['projects', slug, 'document-collections', documentUid] as const,
   collectionMembers: (slug: string, collectionId: string) =>
     ['projects', slug, 'collections', collectionId, 'members'] as const,
   annotations: (versionId: string) => ['annotations', versionId] as const,

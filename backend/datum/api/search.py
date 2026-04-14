@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datum.config import settings
 from datum.db import get_session
 from datum.schemas.search import (
     AnswerModeResponse,
@@ -26,6 +27,7 @@ router = APIRouter(prefix="/api/v1", tags=["search"])
 @router.post("/search", response_model=SearchResponse)
 async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_session)):
     started = time.monotonic()
+    effective_limit = min(body.limit, settings.search_result_limit)
     gateway = build_model_gateway()
     answer = None
     try:
@@ -35,7 +37,7 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
             gateway=gateway if (gateway.embedding or gateway.reranker) else None,
             project_scope=body.project,
             version_scope=body.version_scope,
-            limit=body.limit,
+            limit=effective_limit,
         )
         if body.answer_mode:
             answer_response = await generate_answer(gateway, body.query, execution.results)
@@ -71,6 +73,7 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
 
 @router.post("/search/stream")
 async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends(get_session)):
+    effective_limit = min(body.limit, settings.search_result_limit)
     gateway = build_model_gateway()
 
     async def stream():
@@ -81,7 +84,7 @@ async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends
                 gateway=gateway if (gateway.embedding or gateway.reranker) else None,
                 project_scope=body.project,
                 version_scope=body.version_scope,
-                limit=body.limit,
+                limit=effective_limit,
             ):
                 payload = SearchStreamEventResponse(
                     event="phase",

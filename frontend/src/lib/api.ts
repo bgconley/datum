@@ -589,6 +589,10 @@ export const api = {
   collections: {
     list: (slug: string) =>
       fetchJSON<CollectionItem[]>(`${API_BASE}/projects/${slug}/collections`),
+    forDocument: (slug: string, documentUid: string) =>
+      fetchJSON<CollectionItem[]>(
+        `${API_BASE}/projects/${slug}/collections/by-document/${encodeURIComponent(documentUid)}`,
+      ),
     create: (slug: string, data: { name: string; description?: string | null }) =>
       fetchJSON<CollectionItem>(`${API_BASE}/projects/${slug}/collections`, {
         method: 'POST',

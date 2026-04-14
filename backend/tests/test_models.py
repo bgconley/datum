@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import BigInteger
 from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
 
@@ -62,6 +64,18 @@ def test_default_database_url_matches_runtime_stack(monkeypatch):
         Settings().database_url
         == "postgresql+asyncpg://datum:datum_dev@localhost:5432/datum"
     )
+
+
+def test_settings_reject_nonpositive_worker_poll_interval(monkeypatch):
+    monkeypatch.setenv("DATUM_WORKER_POLL_INTERVAL", "0")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_settings_reject_out_of_range_search_result_limit(monkeypatch):
+    monkeypatch.setenv("DATUM_SEARCH_RESULT_LIMIT", "0")
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_search_models_registered():

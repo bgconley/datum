@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -16,6 +17,7 @@ from datum.services.filesystem import atomic_write
 from datum.services.project_manager import get_project
 
 router = APIRouter(prefix="/api/v1/projects/{slug}/upload", tags=["upload"])
+logger = logging.getLogger(__name__)
 
 
 def _safe_attachment_stem(filename: str) -> str:
@@ -77,8 +79,15 @@ async def api_upload_file(
             )
             session.add(attachment)
             await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
+        logger.warning(
+            "DB sync skipped for upload (project=%s, attachment_path=%s): %s",
+            slug,
+            attachment_relative,
+            exc,
+            exc_info=True,
+        )
 
     return {
         "filename": filename,

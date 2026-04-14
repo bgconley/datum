@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from datum.db import get_session
 from datum.models.core import Document, Project
@@ -149,6 +150,57 @@ async def api_list_collection_members(
             document_title=row[1],
             canonical_path=row[2],
             added_at=row[3],
+        )
+        for row in result.fetchall()
+    ]
+
+
+@router.get("/by-document/{document_uid}", response_model=list[CollectionResponse])
+async def api_list_document_collections(
+    slug: str,
+    document_uid: str,
+    session: AsyncSession = Depends(get_session),
+):
+    project = await _get_project(slug, session)
+    document_result = await session.execute(
+        select(Document).where(
+            Document.project_id == project.id,
+            Document.uid == document_uid,
+        )
+    )
+    document = document_result.scalar_one_or_none()
+    if document is None:
+        return []
+
+    member_counter = aliased(CollectionMember)
+    member_count = (
+        select(func.count(member_counter.document_id))
+        .where(member_counter.collection_id == Collection.id)
+        .correlate(Collection)
+        .scalar_subquery()
+    )
+    result = await session.execute(
+        select(
+            Collection.id,
+            Collection.name,
+            Collection.description,
+            Collection.created_at,
+            member_count,
+        )
+        .join(CollectionMember, CollectionMember.collection_id == Collection.id)
+        .where(
+            Collection.project_id == project.id,
+            CollectionMember.document_id == document.id,
+        )
+        .order_by(Collection.created_at.desc())
+    )
+    return [
+        CollectionResponse(
+            id=str(row[0]),
+            name=row[1],
+            description=row[2],
+            created_at=row[3],
+            member_count=int(row[4] or 0),
         )
         for row in result.fetchall()
     ]

@@ -112,30 +112,13 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
     enabled: Boolean(projectSlug),
   })
   const membershipsQuery = useQuery({
-    queryKey: ['projects', projectSlug, 'document-collections', document?.metadata.document_uid ?? 'idle'],
-    queryFn: async () => {
-      const collections = await api.collections.list(projectSlug)
-      const memberships = await Promise.all(
-        collections.map(async (collection) => {
-          const members = await api.collections.members(projectSlug, collection.id)
-          return {
-            collection,
-            containsDocument: members.some(
-              (member) => member.document_uid === document!.metadata.document_uid,
-            ),
-          }
-        }),
-      )
-      return memberships
-    },
+    queryKey: queryKeys.documentCollections(projectSlug, document?.metadata.document_uid ?? 'idle'),
+    queryFn: () => api.collections.forDocument(projectSlug, document!.metadata.document_uid),
     enabled: Boolean(projectSlug && document?.metadata.document_uid),
   })
   const annotations = annotationsQuery.data ?? []
   const collections = collectionsQuery.data ?? []
-  const documentCollections =
-    membershipsQuery.data
-      ?.filter((entry) => entry.containsDocument)
-      .map((entry) => entry.collection) ?? []
+  const documentCollections = membershipsQuery.data ?? []
 
   useEffect(() => {
     if (documentQuery.data) {
@@ -295,7 +278,10 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.collections(projectSlug) }),
         queryClient.invalidateQueries({
-          queryKey: ['projects', projectSlug, 'document-collections', document?.metadata.document_uid ?? 'idle'],
+          queryKey: queryKeys.documentCollections(
+            projectSlug,
+            document?.metadata.document_uid ?? 'idle',
+          ),
         }),
       ])
     },
@@ -312,7 +298,10 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.collections(projectSlug) }),
         queryClient.invalidateQueries({
-          queryKey: ['projects', projectSlug, 'document-collections', document?.metadata.document_uid ?? 'idle'],
+          queryKey: queryKeys.documentCollections(
+            projectSlug,
+            document?.metadata.document_uid ?? 'idle',
+          ),
         }),
       ])
     },
@@ -338,7 +327,10 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.collections(projectSlug) }),
         queryClient.invalidateQueries({
-          queryKey: ['projects', projectSlug, 'document-collections', document?.metadata.document_uid ?? 'idle'],
+          queryKey: queryKeys.documentCollections(
+            projectSlug,
+            document?.metadata.document_uid ?? 'idle',
+          ),
         }),
       ])
     },

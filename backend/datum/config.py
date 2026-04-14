@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 EMBEDDING_SCHEMA_DIMENSIONS = 1024
@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 50 * 1024 * 1024
     api_rate_limit_requests: int = 120
     api_rate_limit_window_seconds: int = 60
-    search_result_limit: int = 100
-    worker_poll_interval: int = 2
+    search_result_limit: int = Field(default=100, ge=1, le=1000)
+    worker_poll_interval: float = Field(default=2.0, gt=0)
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}

@@ -89,9 +89,16 @@ gzip -dc "$LATEST_DUMP" \
 clone_latest_snapshot "tank/datum/projects" "$RESTORE_ROOT/projects"
 
 if [ -d "$RESTORE_ROOT/projects" ]; then
-    first_project="$(find "$RESTORE_ROOT/projects" -mindepth 1 -maxdepth 1 -type d | head -n 1 || true)"
-    if [ -n "$first_project" ]; then
-        reconcile_and_doctor "$first_project"
+    mapfile -t restored_projects < <(
+        find "$RESTORE_ROOT/projects" -mindepth 1 -maxdepth 1 -type d | sort
+    )
+    if [ "${#restored_projects[@]}" -eq 0 ]; then
+        echo "WARN: no restored projects found under $RESTORE_ROOT/projects"
+    else
+        for project_path in "${restored_projects[@]}"; do
+            echo "Validating restored project: $project_path"
+            reconcile_and_doctor "$project_path"
+        done
     fi
 fi
 

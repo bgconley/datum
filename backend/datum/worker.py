@@ -76,8 +76,6 @@ from datum.services.schema_intelligence import extract_schema_intelligence
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL_SECONDS = 2.0
-
 
 async def process_job(session: AsyncSession, job: IngestionJob, gateway: ModelGateway) -> None:
     job_id = job.id
@@ -1384,11 +1382,11 @@ async def worker_loop() -> None:
                 except SQLAlchemyError as exc:
                     await session.rollback()
                     logger.info("worker waiting for migrations or database readiness: %s", exc)
-                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                    await asyncio.sleep(settings.worker_poll_interval)
                     continue
 
                 if job is None:
-                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                    await asyncio.sleep(settings.worker_poll_interval)
                     continue
 
                 logger.info("processing job %s (%s)", job.id, job.job_type)

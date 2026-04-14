@@ -27,6 +27,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/projects/{slug}/fs", tags=["filesystem"])
 
 
+def _log_db_sync_skip(
+    *,
+    operation: str,
+    project_slug: str,
+    canonical_path: str,
+    exc: Exception,
+) -> None:
+    logger.warning(
+        "DB sync skipped for %s (project=%s, path=%s): %s",
+        operation,
+        project_slug,
+        canonical_path,
+        exc,
+        exc_info=True,
+    )
+
+
 class RenameRequest(BaseModel):
     old_path: str
     new_path: str
@@ -78,9 +95,14 @@ async def api_rename_document(
                 metadata={"old_path": body.old_path},
             )
             await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB sync skipped for fs rename", exc_info=True)
+        _log_db_sync_skip(
+            operation="rename_document",
+            project_slug=slug,
+            canonical_path=moved.relative_path,
+            exc=exc,
+        )
 
     return {"old_path": body.old_path, "new_path": moved.relative_path}
 
@@ -112,9 +134,14 @@ async def api_delete_document(
                 metadata={"archived_path": archived_path},
             )
             await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB sync skipped for fs delete", exc_info=True)
+        _log_db_sync_skip(
+            operation="delete_document",
+            project_slug=slug,
+            canonical_path=doc_path,
+            exc=exc,
+        )
 
     return {"status": "deleted", "archived_path": archived_path}
 
@@ -136,8 +163,13 @@ async def api_mkdir(
         if project_id:
             await log_audit_event(session, "web", "mkdir", project_id, relative_path)
             await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB audit skipped for mkdir", exc_info=True)
+        _log_db_sync_skip(
+            operation="mkdir",
+            project_slug=slug,
+            canonical_path=relative_path,
+            exc=exc,
+        )
 
     return {"path": relative_path}

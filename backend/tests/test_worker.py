@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -15,6 +16,7 @@ from datum.worker import (
     _handle_relationship_job,
     _handle_schema_parse_job,
     process_job,
+    worker_loop,
 )
 
 
@@ -183,6 +185,32 @@ class _FailureSession:
 
     async def rollback(self):
         self.rollback_calls += 1
+
+
+class _QueuedJobResult:
+    def scalar_one_or_none(self):
+        return None
+
+
+class _WorkerLoopSession:
+    async def execute(self, statement):
+        del statement
+        return _QueuedJobResult()
+
+    async def rollback(self):
+        return None
+
+
+class _WorkerLoopSessionContext:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        del exc_type, exc, tb
+        return False
 
 
 @pytest.mark.asyncio
@@ -689,3 +717,29 @@ async def test_process_job_rolls_back_before_persisting_failure(monkeypatch, tmp
     assert job.status == "failed"
     assert job.error_message == "boom"
     assert job.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_uses_configured_poll_interval(monkeypatch):
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float):
+        sleep_calls.append(seconds)
+        raise asyncio.CancelledError()
+
+    class _Gateway:
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("datum.worker.build_model_gateway", lambda: _Gateway())
+    monkeypatch.setattr(
+        "datum.worker.async_session_factory",
+        lambda: _WorkerLoopSessionContext(_WorkerLoopSession()),
+    )
+    monkeypatch.setattr("datum.worker.settings.worker_poll_interval", 7.5)
+    monkeypatch.setattr("datum.worker.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await worker_loop()
+
+    assert sleep_calls == [7.5]
