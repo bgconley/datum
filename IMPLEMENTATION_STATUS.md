@@ -1,7 +1,7 @@
 # Datum Implementation Status
 
-This repository tracks the full Datum roadmap (Phase 1 through Phase 9), but
-the code at current `HEAD` intentionally reflects a subset of that roadmap.
+This repository tracks the full Datum roadmap (Phase 1 through Phase 9), and
+the code at current `HEAD` implements the full Phase 1-9 delivery surface.
 
 ## Current Delivery State
 
@@ -29,6 +29,8 @@ the code at current `HEAD` intentionally reflects a subset of that roadmap.
 
 ## Canonical References
 
+- Current conformance matrix (authoritative at `HEAD`):
+  - `./SPEC_CONFORMANCE.md`
 - Design: `../docs/plans/2026-04-10-datum-design.md`
 - Phase plans:
   - `../docs/plans/2026-04-10-datum-phase1-implementation.md`
@@ -40,3 +42,12 @@ the code at current `HEAD` intentionally reflects a subset of that roadmap.
   - `../docs/plans/2026-04-11-datum-phase7-implementation.md`
   - `../docs/plans/2026-04-11-datum-phase8-implementation.md`
   - `../docs/plans/2026-04-11-datum-phase9-implementation.md`
+
+## Spec-Conformance Interpretation Rule
+
+- The per-phase implementation plans are point-in-time contracts for each
+  phase boundary.
+- "Deferred" items in earlier phase plans are expected and are superseded by
+  later phases when implemented.
+- For current `HEAD`, use `SPEC_CONFORMANCE.md` plus this file to determine
+  whether behavior is aligned with the design doc.

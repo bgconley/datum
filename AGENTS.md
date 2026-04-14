@@ -4,6 +4,7 @@ This file is the operating contract for agents working in this repo. It is deriv
 
 Source of truth:
 - [`./IMPLEMENTATION_STATUS.md`](./IMPLEMENTATION_STATUS.md)
+- [`./SPEC_CONFORMANCE.md`](./SPEC_CONFORMANCE.md)
 - [`../docs/plans/2026-04-10-datum-design.md`](../docs/plans/2026-04-10-datum-design.md)
 - [`../docs/plans/2026-04-10-datum-phase1-implementation.md`](../docs/plans/2026-04-10-datum-phase1-implementation.md)
 - [`../docs/plans/2026-04-10-datum-phase2-implementation.md`](../docs/plans/2026-04-10-datum-phase2-implementation.md)
@@ -16,6 +17,8 @@ Source of truth:
 - [`../docs/plans/2026-04-11-datum-phase9-implementation.md`](../docs/plans/2026-04-11-datum-phase9-implementation.md)
 
 If this file and the detailed plans diverge, preserve the design invariants first, then update the docs so they agree again.
+Interpretation rule: per-phase plan docs are phase-boundary snapshots; use
+`SPEC_CONFORMANCE.md` for current `HEAD` conformance status.
 
 ## Implementation Status At HEAD
 
