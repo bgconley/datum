@@ -70,8 +70,17 @@ source "$VENV_PATH/bin/activate"
 echo "Upgrading pip..."
 pip install --upgrade pip --quiet
 
-echo "Installing gliner-ner-service[pytorch,dev]..."
-pip install -e "$SERVICE_DIR[pytorch,dev]" --quiet
+# Install uv into the dedicated venv if it is unavailable so we can honor uv.lock.
+if ! command -v uv >/dev/null 2>&1; then
+    echo "Installing uv into GLiNER venv..."
+    pip install "uv>=0.5,<1.0" --quiet
+fi
+
+echo "Installing gliner-ner-service from uv.lock (frozen)..."
+(
+    cd "$SERVICE_DIR"
+    uv sync --frozen --active --extra pytorch --extra dev
+)
 
 echo ""
 echo "=== Bootstrap Complete ==="

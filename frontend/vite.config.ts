@@ -12,6 +12,9 @@ export default defineConfig({
     },
   },
   build: {
+    // Heavy editor/diagram vendor chunks are lazy-loaded by route/view mode.
+    // Keep warning focus on true initial-load regressions.
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
         manualChunks(id) {

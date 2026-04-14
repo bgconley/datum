@@ -188,3 +188,179 @@ jobs:
       - name: Shutdown stack
         if: always()
         run: docker compose down -v --remove-orphans
+
+  intelligence-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare bind-mount directories
+        run: mkdir -p dev/projects dev/blobs dev/cache dev/pgdata
+
+      - name: Start mock NER endpoint
+        run: |
+          python - <<'PY' &
+          import json
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          class Handler(BaseHTTPRequestHandler):
+              def _send(self, status: int, body):
+                  payload = json.dumps(body).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(payload)))
+                  self.end_headers()
+                  self.wfile.write(payload)
+
+              def do_GET(self):
+                  if self.path == "/health":
+                      self._send(
+                          200,
+                          {
+                              "status": "ok",
+                              "model_id": "mock-gliner",
+                              "loaded": True,
+                              "device": "cpu",
+                          },
+                      )
+                      return
+                  self._send(404, {"detail": "not found"})
+
+              def do_POST(self):
+                  if self.path != "/extract":
+                      self._send(404, {"detail": "not found"})
+                      return
+
+                  length = int(self.headers.get("Content-Length", "0"))
+                  raw = self.rfile.read(length)
+                  body = json.loads(raw.decode("utf-8") or "{}")
+                  text = str(body.get("text", ""))
+
+                  entities = []
+                  for needle in ("ParadeDB", "PostgreSQL", "Redis"):
+                      start = text.find(needle)
+                      if start >= 0:
+                          entities.append(
+                              {
+                                  "text": needle,
+                                  "label": "technology",
+                                  "start": start,
+                                  "end": start + len(needle),
+                                  "score": 0.99,
+                              }
+                          )
+
+                  self._send(200, entities)
+
+              def log_message(self, _format, *_args):
+                  return
+
+          HTTPServer(("0.0.0.0", 8012), Handler).serve_forever()
+          PY
+
+          echo $! > /tmp/datum_mock_ner.pid
+          sleep 1
+          curl -fsS http://127.0.0.1:8012/health
+
+      - name: Start stack
+        run: docker compose up -d --build paradedb datum-api datum-worker datum-frontend caddy
+
+      - name: Wait for services
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8001/api/v1/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8001/api/v1/health
+
+      - name: Run migrations in container
+        run: docker compose exec -T datum-api alembic upgrade head
+
+      - name: Exercise intelligence pipeline
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          import time
+          from urllib import error, request
+
+          BASE = "http://127.0.0.1:8001/api/v1"
+
+          def call(method: str, path: str, payload=None):
+              data = None
+              headers = {}
+              if payload is not None:
+                  data = json.dumps(payload).encode("utf-8")
+                  headers["Content-Type"] = "application/json"
+              req = request.Request(f"{BASE}{path}", data=data, method=method, headers=headers)
+              try:
+                  with request.urlopen(req, timeout=10) as resp:
+                      raw = resp.read().decode("utf-8")
+                      return json.loads(raw) if raw else None
+              except error.HTTPError as exc:
+                  body = exc.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(f"{method} {path} -> {exc.code}: {body}") from exc
+
+          slug = "ci-intelligence"
+          call("POST", "/projects", {"name": "CI Intelligence", "slug": slug})
+          adr_content = (
+              "# ADR-0001: Use ParadeDB\\n\\n"
+              "## Status\\nAccepted\\n\\n"
+              "## Context\\nNeed hybrid search with PostgreSQL and Redis.\\n\\n"
+              "## Decision\\nUse ParadeDB for BM25 plus pgvector.\\n\\n"
+              "## Consequences\\nSingle database for search."
+          )
+          call(
+              "POST",
+              f"/projects/{slug}/docs",
+              {
+                  "relative_path": "docs/decisions/adr-0001.md",
+                  "title": "ADR-0001",
+                  "doc_type": "decision",
+                  "content": adr_content,
+              },
+          )
+
+          deadline = time.time() + 90
+          while time.time() < deadline:
+              inbox = call("GET", f"/projects/{slug}/inbox")
+              if inbox and any(item.get("candidate_type") == "decision" for item in inbox):
+                  print(f"inbox_count={len(inbox)}")
+                  break
+              time.sleep(2)
+          else:
+              raise RuntimeError("inbox did not populate with decision candidate")
+          PY
+
+      - name: Verify entity mentions persisted
+        run: |
+          ENTITY_COUNT="$(
+            docker compose exec -T paradedb psql -tA -U datum -d datum <<'SQL'
+          SELECT count(*)
+          FROM entity_mentions em
+          JOIN document_versions dv ON em.version_id = dv.id
+          JOIN documents d ON dv.document_id = d.id
+          JOIN projects p ON d.project_id = p.id
+          WHERE p.slug = 'ci-intelligence';
+          SQL
+          )"
+          echo "entity_mentions=${ENTITY_COUNT}"
+          [ "${ENTITY_COUNT:-0}" -gt 0 ]
+
+      - name: Shutdown stack
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+      - name: Stop mock NER endpoint
+        if: always()
+        run: |
+          if [ -f /tmp/datum_mock_ner.pid ]; then
+            kill "$(cat /tmp/datum_mock_ner.pid)" || true
+            rm -f /tmp/datum_mock_ner.pid
+          fi

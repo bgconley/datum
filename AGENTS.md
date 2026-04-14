@@ -142,8 +142,8 @@ When adding a new write surface, wire all of these:
 - Frontend is source-first.
 - CodeMirror is the primary editor; markdown preview is secondary.
 - Version history and diffs are first-class.
-- TanStack Router remains the intended Phase 4 destination, but the current frontend at HEAD still uses hash navigation.
-- Do not deepen hash-navigation debt while Phase 4 routing work is still pending.
+- TanStack Router is now the active routing surface at HEAD.
+- Keep all new workspace routes and search state transitions on TanStack Router contracts.
 
 ### Phase 5
 
