@@ -4,12 +4,13 @@ import { Link } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { SearchEntityFacet, SearchResultItem } from '@/lib/api'
+import type { AnswerModeResponse, SearchEntityFacet, SearchResultItem } from '@/lib/api'
 import type { SearchMode } from '@/lib/search-route'
 
 interface SearchResultsProps {
   results: SearchResultItem[]
   latencyMs?: number | null
+  answer: AnswerModeResponse | null
   query: string
   scopeSummary: string
   projectScope: string | null
@@ -17,7 +18,7 @@ interface SearchResultsProps {
   onProjectSelect: (project: string) => void
   entityFacets: SearchEntityFacet[]
   loading: boolean
-  streamPhase: 'idle' | 'lexical' | 'reranked'
+  streamPhase: 'idle' | 'lexical' | 'reranked' | 'answer_ready'
   semanticEnabled: boolean | null
   rerankApplied: boolean | null
 }
@@ -35,10 +36,21 @@ function buildCountFacets(values: string[]): Array<{ value: string; count: numbe
 
 function describePhase(
   loading: boolean,
-  streamPhase: 'idle' | 'lexical' | 'reranked',
+  streamPhase: 'idle' | 'lexical' | 'reranked' | 'answer_ready',
   semanticEnabled: boolean | null,
   rerankApplied: boolean | null,
+  answer: AnswerModeResponse | null,
 ): string | null {
+  if (!loading && streamPhase === 'answer_ready') {
+    if (answer?.error) {
+      return 'Search results are ready, but grounded answer synthesis was unavailable for this query.'
+    }
+    if (answer?.citations.length) {
+      return 'Final results are ready and answer synthesis completed with citations.'
+    }
+    return 'Final results are ready and answer synthesis completed.'
+  }
+
   if (loading && streamPhase === 'lexical') {
     return semanticEnabled === false
       ? 'Lexical results are ready. Semantic search is unavailable, so the final pass will confirm exact-term and keyword ranking.'
@@ -67,6 +79,7 @@ function describePhase(
 export function SearchResults({
   results,
   latencyMs,
+  answer,
   query,
   scopeSummary,
   projectScope,
@@ -88,12 +101,7 @@ export function SearchResults({
     setEntityFacet(null)
   }, [query, projectScope, searchMode])
 
-  const modeFilteredResults = useMemo(() => {
-    if (searchMode === 'find_decisions') {
-      return results.filter((result) => result.document_type === 'decision')
-    }
-    return results
-  }, [results, searchMode])
+  const modeFilteredResults = useMemo(() => results, [results])
 
   const projectFacets = buildCountFacets(modeFilteredResults.map((result) => result.project_slug)).map(
     ({ value, count }) => ({
@@ -104,7 +112,13 @@ export function SearchResults({
   const signalFacets = buildCountFacets(modeFilteredResults.flatMap((result) => result.match_signals))
   const termFacets = buildCountFacets(modeFilteredResults.flatMap((result) => result.matched_terms)).slice(0, 10)
   const typeFacets = buildCountFacets(modeFilteredResults.map((result) => result.document_type))
-  const phaseDescription = describePhase(loading, streamPhase, semanticEnabled, rerankApplied)
+  const phaseDescription = describePhase(
+    loading,
+    streamPhase,
+    semanticEnabled,
+    rerankApplied,
+    answer,
+  )
 
   const filteredResults = modeFilteredResults.filter((result) => {
     if (signalFacet && !result.match_signals.includes(signalFacet)) {
@@ -133,6 +147,60 @@ export function SearchResults({
   return (
     <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
       <aside className="space-y-4">
+        {answer && (answer.answer || answer.error) && (
+          <Card className="bg-card/70">
+            <CardHeader>
+              <CardTitle className="text-base">
+                {answer.error ? 'Grounded answer unavailable' : 'Grounded answer'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {answer.error ? (
+                <div className="rounded-xl border border-border/70 bg-background/60 px-3 py-3 text-muted-foreground">
+                  {answer.error}
+                </div>
+              ) : (
+                <>
+                  <div className="whitespace-pre-wrap leading-7">{answer.answer}</div>
+                  {answer.citations.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                        Citations
+                      </div>
+                      <div className="space-y-2">
+                        {answer.citations.map((citation) => (
+                          <Link
+                            key={`${citation.index}:${citation.source_ref.chunk_id}`}
+                            to="/projects/$slug/docs/$"
+                            params={{
+                              slug: citation.source_ref.project_slug,
+                              _splat: citation.source_ref.canonical_path,
+                            }}
+                            search={{
+                              query: query,
+                              sourceQueryLabel: 'Answer',
+                              sourceSnippet: citation.human_readable,
+                              sourceVersion: citation.source_ref.version_number,
+                              sourceStart: citation.source_ref.line_start,
+                              sourceEnd: citation.source_ref.line_end,
+                              sourceChunkId: citation.source_ref.chunk_id,
+                            }}
+                            className="block rounded-xl border border-border/70 bg-background/60 px-3 py-2 transition-colors hover:bg-accent/40"
+                          >
+                            [{citation.index}] {citation.human_readable}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {answer.model && (
+                    <div className="text-xs text-muted-foreground">Model: {answer.model}</div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
         <Card className="bg-card/60">
           <CardHeader>
             <CardTitle className="text-base">Facets</CardTitle>

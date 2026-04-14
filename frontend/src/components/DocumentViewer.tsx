@@ -2,6 +2,10 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 're
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { ChevronRight, FolderPlus, History, PenSquare, Trash2 } from 'lucide-react'
+import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf'
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import 'react-pdf/dist/Page/AnnotationLayer.css'
+import 'react-pdf/dist/Page/TextLayer.css'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,6 +23,8 @@ import {
 } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { extractHeadings } from '@/lib/technical-terms'
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
 
 const CodeMirrorEditor = lazy(() =>
   import('@/components/CodeMirrorEditor').then((module) => ({
@@ -45,7 +51,11 @@ interface DocumentViewerProps {
 type ViewMode = 'rendered' | 'raw' | 'split' | 'edit'
 const EMPTY_VERSIONS: VersionInfo[] = []
 
-function detectLanguage(path: string): 'markdown' | 'json' | 'sql' | 'yaml' | 'text' {
+type DocumentMediaKind = 'text' | 'pdf' | 'image'
+
+function detectLanguage(
+  path: string,
+): 'markdown' | 'json' | 'sql' | 'yaml' | 'typescript' | 'javascript' | 'toml' | 'prisma' | 'text' {
   if (path.endsWith('.json')) {
     return 'json'
   }
@@ -55,8 +65,33 @@ function detectLanguage(path: string): 'markdown' | 'json' | 'sql' | 'yaml' | 't
   if (path.endsWith('.yaml') || path.endsWith('.yml')) {
     return 'yaml'
   }
+  if (path.endsWith('.ts') || path.endsWith('.tsx')) {
+    return 'typescript'
+  }
+  if (path.endsWith('.js') || path.endsWith('.jsx')) {
+    return 'javascript'
+  }
+  if (path.endsWith('.toml')) {
+    return 'toml'
+  }
+  if (path.endsWith('.prisma')) {
+    return 'prisma'
+  }
   if (path.endsWith('.md')) {
     return 'markdown'
+  }
+  return 'text'
+}
+
+function detectMediaKind(path: string, contentKind: DocumentContent['content_kind']): DocumentMediaKind {
+  if (contentKind === 'binary' && path.endsWith('.pdf')) {
+    return 'pdf'
+  }
+  if (
+    contentKind === 'binary' &&
+    ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].some((extension) => path.endsWith(extension))
+  ) {
+    return 'image'
   }
   return 'text'
 }
@@ -79,6 +114,7 @@ function buildBreadcrumbs(projectSlug: string, relativePath: string) {
 
 export function DocumentViewer({ projectSlug, docPath, sourceContext }: DocumentViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('rendered')
+  const [pdfPageCount, setPdfPageCount] = useState(0)
   const [editContent, setEditContent] = useState('')
   const [annotationType, setAnnotationType] = useState<'comment' | 'highlight' | 'pin'>('comment')
   const [annotationContent, setAnnotationContent] = useState('')
@@ -116,15 +152,34 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
     queryFn: () => api.collections.forDocument(projectSlug, document!.metadata.document_uid),
     enabled: Boolean(projectSlug && document?.metadata.document_uid),
   })
+  const documentEntitiesQuery = useQuery({
+    queryKey: queryKeys.documentEntities(projectSlug, docPath),
+    queryFn: () => api.documents.entities(projectSlug, docPath),
+    enabled: Boolean(projectSlug && docPath),
+  })
   const annotations = annotationsQuery.data ?? []
   const collections = collectionsQuery.data ?? []
   const documentCollections = membershipsQuery.data ?? []
+  const documentEntities = documentEntitiesQuery.data ?? []
 
   useEffect(() => {
     if (documentQuery.data) {
       setEditContent(documentQuery.data.content)
     }
   }, [documentQuery.data?.content, docPath, projectSlug])
+
+  useEffect(() => {
+    if (!documentQuery.data) {
+      return
+    }
+    const mediaKind = detectMediaKind(
+      documentQuery.data.metadata.relative_path,
+      documentQuery.data.content_kind,
+    )
+    if (mediaKind !== 'text' && (viewMode === 'split' || viewMode === 'edit')) {
+      setViewMode('rendered')
+    }
+  }, [documentQuery.data, viewMode])
 
   useEffect(() => {
     if (!selectedCollectionId && collections.length > 0) {
@@ -381,6 +436,12 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
 
   const { metadata } = document
   const language = detectLanguage(metadata.relative_path)
+  const mediaKind = detectMediaKind(metadata.relative_path, document.content_kind)
+  const assetUrl = document.asset_url ?? api.documents.assetUrl(projectSlug, metadata.relative_path)
+  const availableViewModes =
+    mediaKind === 'text'
+      ? (['rendered', 'raw', 'split', 'edit'] as const)
+      : (['rendered', 'raw'] as const)
   const breadcrumbs = buildBreadcrumbs(projectSlug, metadata.relative_path)
   const historySplat = `${metadata.relative_path}/history`
   const showSearchSource =
@@ -436,7 +497,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {(['rendered', 'raw', 'split', 'edit'] as const).map((mode) => (
+            {availableViewModes.map((mode) => (
               <Button
                 key={mode}
                 type="button"
@@ -455,14 +516,16 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
               <History className="mr-1 size-4" />
               History
             </Link>
-            <Button type="button" variant="outline" size="sm" onClick={() => setViewMode('edit')}>
-              <PenSquare className="mr-1 size-4" />
-              Edit
-              <kbd className="ml-1 rounded border px-1 py-0.5 text-[10px] text-muted-foreground">
-                E
-              </kbd>
-            </Button>
-            {(viewMode === 'edit' || viewMode === 'split') && (
+            {mediaKind === 'text' && (
+              <Button type="button" variant="outline" size="sm" onClick={() => setViewMode('edit')}>
+                <PenSquare className="mr-1 size-4" />
+                Edit
+                <kbd className="ml-1 rounded border px-1 py-0.5 text-[10px] text-muted-foreground">
+                  E
+                </kbd>
+              </Button>
+            )}
+            {mediaKind === 'text' && (viewMode === 'edit' || viewMode === 'split') && (
               <Button type="button" size="sm" onClick={handleSave} disabled={saveMutation.isPending}>
                 {saveMutation.isPending ? 'Saving…' : 'Save'}
               </Button>
@@ -471,7 +534,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
         </div>
       </div>
 
-      {viewMode === 'edit' && (
+      {mediaKind === 'text' && viewMode === 'edit' && (
         <CardShell>
           <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading editor…</div>}>
             <CodeMirrorEditor
@@ -484,7 +547,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
         </CardShell>
       )}
 
-      {viewMode === 'split' && (
+      {mediaKind === 'text' && viewMode === 'split' && (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
           <CardShell title="Source">
             <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading editor…</div>}>
@@ -498,7 +561,11 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           </CardShell>
           <CardShell title={language === 'markdown' ? 'Rendered preview' : 'Rendered source'}>
             {language === 'markdown' ? (
-              <MarkdownRenderer content={editContent} projectSlug={projectSlug} />
+              <MarkdownRenderer
+                content={editContent}
+                projectSlug={projectSlug}
+                entityMentions={documentEntities}
+              />
             ) : (
               <pre className="overflow-auto whitespace-pre-wrap font-mono text-sm">
                 {editContent}
@@ -511,8 +578,30 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
       {viewMode === 'rendered' && (
         <div className={showSearchSource ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]' : ''}>
           <CardShell>
-            {language === 'markdown' ? (
-              <MarkdownRenderer content={document.content} projectSlug={projectSlug} />
+            {mediaKind === 'pdf' ? (
+              <div className="space-y-4">
+                <PdfDocument
+                  file={assetUrl}
+                  onLoadSuccess={({ numPages }) => setPdfPageCount(numPages)}
+                  onLoadError={(error) => console.error('PDF render failed', error)}
+                >
+                  {Array.from({ length: pdfPageCount || 1 }, (_value, index) => (
+                    <div key={`page-${index + 1}`} className="overflow-auto rounded-2xl border border-border/70 bg-background/60 p-3">
+                      <PdfPage pageNumber={index + 1} width={900} renderTextLayer renderAnnotationLayer />
+                    </div>
+                  ))}
+                </PdfDocument>
+              </div>
+            ) : mediaKind === 'image' ? (
+              <div className="overflow-hidden rounded-2xl border border-border/70 bg-background/40 p-4">
+                <img src={assetUrl} alt={metadata.title} className="max-h-[70vh] w-full object-contain" />
+              </div>
+            ) : language === 'markdown' ? (
+              <MarkdownRenderer
+                content={document.content}
+                projectSlug={projectSlug}
+                entityMentions={documentEntities}
+              />
             ) : (
               <pre className="overflow-auto whitespace-pre-wrap font-mono text-sm">
                 {document.content}
@@ -538,9 +627,27 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
       {viewMode === 'raw' && (
         <div className={showSearchSource ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]' : ''}>
           <CardShell title="Raw document">
-            <pre className="overflow-auto whitespace-pre-wrap font-mono text-sm">
-              {document.content}
-            </pre>
+            {mediaKind === 'text' ? (
+              <pre className="overflow-auto whitespace-pre-wrap font-mono text-sm">
+                {document.content}
+              </pre>
+            ) : (
+              <div className="space-y-3 text-sm">
+                <div className="rounded-xl border border-border/70 bg-background/60 p-4">
+                  <div><span className="font-medium">Asset:</span> {metadata.relative_path}</div>
+                  <div><span className="font-medium">MIME type:</span> {document.mime_type ?? 'unknown'}</div>
+                  <div><span className="font-medium">Version:</span> v{metadata.version}</div>
+                </div>
+                <a
+                  href={assetUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-9 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+                >
+                  Open asset
+                </a>
+              </div>
+            )}
           </CardShell>
           {showSearchSource && sourceContext && (
             <SearchSourceCard

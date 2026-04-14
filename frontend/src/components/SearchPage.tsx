@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   api,
+  type AnswerModeResponse,
   type Project,
   type SavedSearchItem,
   type SearchEntityFacet,
@@ -32,7 +33,11 @@ function buildSearchRequest(draft: SearchDraft): SearchRequestParams | null {
   const request: SearchRequestParams = {
     query,
     limit: draft.limit,
+    mode: draft.mode,
     version_scope: draft.versionMode,
+  }
+  if (draft.mode === 'ask_question') {
+    request.answer_mode = true
   }
   if (draft.project) {
     request.project = draft.project
@@ -81,11 +86,12 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
   const [results, setResults] = useState<SearchResultItem[]>([])
   const [entityFacets, setEntityFacets] = useState<SearchEntityFacet[]>([])
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
+  const [answer, setAnswer] = useState<AnswerModeResponse | null>(null)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [streamPhase, setStreamPhase] = useState<'idle' | 'lexical' | 'reranked'>('idle')
+  const [streamPhase, setStreamPhase] = useState<'idle' | 'lexical' | 'reranked' | 'answer_ready'>('idle')
   const [semanticEnabled, setSemanticEnabled] = useState<boolean | null>(null)
   const [rerankApplied, setRerankApplied] = useState<boolean | null>(null)
   const queryClient = useQueryClient()
@@ -120,6 +126,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         setResults([])
         setEntityFacets([])
         setLatencyMs(null)
+        setAnswer(null)
         setSearched(Boolean(nextDraft.query.trim()))
         setStreamPhase('idle')
         setSemanticEnabled(null)
@@ -141,6 +148,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     setSemanticEnabled(null)
     setRerankApplied(null)
     setEntityFacets([])
+    setAnswer(null)
 
     try {
       await api.searchStream(request, async (event: SearchStreamEvent) => {
@@ -156,6 +164,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
           setStreamPhase(event.phase ?? 'reranked')
           setSemanticEnabled(event.semantic_enabled)
           setRerankApplied(event.rerank_applied)
+          setAnswer(event.answer ?? null)
         })
       })
     } catch (err) {
@@ -166,9 +175,10 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
           setEntityFacets(response.entity_facets)
           setLatencyMs(response.latency_ms)
           setQuery(response.query)
-          setStreamPhase('reranked')
+          setStreamPhase(response.answer ? 'answer_ready' : 'reranked')
           setSemanticEnabled(null)
           setRerankApplied(false)
+          setAnswer(response.answer ?? null)
         })
       } catch (fallbackErr) {
         const message = fallbackErr instanceof Error
@@ -180,6 +190,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
           setResults([])
           setEntityFacets([])
           setLatencyMs(null)
+          setAnswer(null)
           setStreamPhase('idle')
           setSemanticEnabled(null)
           setRerankApplied(null)
@@ -208,6 +219,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       setResults([])
       setEntityFacets([])
       setLatencyMs(null)
+      setAnswer(null)
       setSearched(false)
       setStreamPhase('idle')
       setSemanticEnabled(null)
@@ -234,6 +246,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         setResults([])
         setEntityFacets([])
         setLatencyMs(null)
+        setAnswer(null)
         setSearched(false)
         setStreamPhase('idle')
         setSemanticEnabled(null)
@@ -265,6 +278,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       name,
       query_text: request.query,
       filters: {
+        mode: draft.mode,
         version_scope: request.version_scope ?? 'current',
         limit: request.limit ?? 20,
       },
@@ -280,6 +294,10 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       ...draft,
       query: savedSearch.query_text,
       project: draft.project,
+      mode:
+        savedSearch.filters && typeof savedSearch.filters.mode === 'string'
+          ? (savedSearch.filters.mode as SearchDraft['mode'])
+          : draft.mode,
       limit: typeof filters.limit === 'number' ? filters.limit : draft.limit,
       versionMode:
         versionScope === 'all'
@@ -415,6 +433,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         <SearchResults
           results={results}
           latencyMs={latencyMs}
+          answer={answer}
           query={query}
           scopeSummary={scopeSummary}
           projectScope={draft.project || null}

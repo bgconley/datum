@@ -3,6 +3,8 @@ export const queryKeys = {
   project: (slug: string) => ['projects', slug] as const,
   workspace: (slug: string) => ['projects', slug, 'workspace'] as const,
   document: (slug: string, docPath: string) => ['projects', slug, 'docs', docPath] as const,
+  documentEntities: (slug: string, docPath: string) =>
+    ['projects', slug, 'docs', docPath, 'entities'] as const,
   versions: (slug: string, docPath: string) =>
     ['projects', slug, 'docs', docPath, 'versions'] as const,
   versionDiff: (slug: string, docPath: string, versionA: number, versionB: number) =>

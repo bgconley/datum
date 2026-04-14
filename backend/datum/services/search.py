@@ -118,6 +118,7 @@ class SearchOptions:
     reranker_model_run_id: UUID | None = None
     rerank_candidate_limit: int = 50
     max_results_per_document: int | None = 3
+    allowed_document_types: tuple[str, ...] | None = None
 
 
 @dataclass(slots=True)
@@ -437,6 +438,9 @@ async def _execute_search(
         max_results_per_document=(
             search_options.max_results_per_document if search_options is not None else 3
         ),
+        allowed_document_types=(
+            search_options.allowed_document_types if search_options is not None else None
+        ),
     )
     entity_facets = _build_entity_facets(results)
 
@@ -546,13 +550,17 @@ async def _build_limited_search_results(
     parsed: ParsedQuery,
     limit: int,
     max_results_per_document: int | None,
+    allowed_document_types: tuple[str, ...] | None,
 ) -> list[SearchResult]:
     results: list[SearchResult] = []
     per_document_counts: dict[str, int] = {}
+    allowed_types = set(allowed_document_types or ())
 
     for item in fused_results:
         built = await _build_search_result(session, item, parsed)
         if built is None:
+            continue
+        if allowed_types and built.document_type not in allowed_types:
             continue
         if max_results_per_document is not None:
             doc_count = per_document_counts.get(built.document_uid, 0)

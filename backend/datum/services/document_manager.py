@@ -30,6 +30,28 @@ from datum.services.versioning import (
 # Document paths must live under docs/ per design doc filesystem schema.
 # project.yaml, attachments/, and .piq/ have separate semantics.
 _ALLOWED_DOC_PREFIXES = ("docs/",)
+_TEXT_DOCUMENT_EXTENSIONS = {
+    ".md",
+    ".sql",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".toml",
+    ".prisma",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+}
+_BINARY_DOCUMENT_EXTENSIONS = {
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+}
 
 
 class ConflictError(Exception):
@@ -86,6 +108,51 @@ class DocumentInfo:
     document_uid: str
     created: str | None = None
     updated: str | None = None
+
+
+def is_text_document_path(relative_path: str) -> bool:
+    return Path(relative_path).suffix.lower() in _TEXT_DOCUMENT_EXTENSIONS
+
+
+def is_binary_document_path(relative_path: str) -> bool:
+    return Path(relative_path).suffix.lower() in _BINARY_DOCUMENT_EXTENSIONS
+
+
+def _default_doc_type(relative_path: str) -> str:
+    suffix = Path(relative_path).suffix.lower()
+    if suffix == ".pdf":
+        return "reference"
+    if suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
+        return "image"
+    if suffix in {
+        ".sql",
+        ".prisma",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+    }:
+        return "reference"
+    return "note"
+
+
+def _generic_doc_info(relative_path: str, ver: VersionInfo | None) -> DocumentInfo:
+    return DocumentInfo(
+        title=Path(relative_path).stem.replace("-", " ").replace("_", " ").title(),
+        doc_type=_default_doc_type(relative_path),
+        status="active",
+        tags=[],
+        relative_path=relative_path,
+        version=ver.version_number if ver else 0,
+        content_hash=ver.content_hash if ver else "",
+        document_uid=ver.document_uid if ver else "",
+        created=None,
+        updated=None,
+    )
 
 
 def create_document(
@@ -178,11 +245,16 @@ def save_document(
     if current_hash != base_hash:
         raise ConflictError(current_hash, base_hash)
 
-    # Parse the incoming content as a full frontmatter document.
-    # This preserves whatever the client sent (including frontmatter).
-    post = frontmatter.loads(content)
-    post["updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
-    new_bytes = frontmatter.dumps(post).encode()
+    is_frontmatter_document = current_bytes.startswith(b"---\n")
+    if is_frontmatter_document:
+        # Parse the incoming content as a full frontmatter document.
+        # This preserves whatever the client sent (including frontmatter).
+        post = frontmatter.loads(content)
+        post["updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
+        new_bytes = frontmatter.dumps(post).encode()
+    else:
+        post = None
+        new_bytes = content.encode()
 
     new_hash = compute_content_hash(new_bytes)
     if new_hash == current_hash:
@@ -203,7 +275,9 @@ def save_document(
     if version_info is None:
         raise RuntimeError(f"Updated version was not created for {normalized_path}")
 
-    return _build_doc_info(post, normalized_path, version_info)
+    if post is not None:
+        return _build_doc_info(post, normalized_path, version_info)
+    return _generic_doc_info(normalized_path, version_info)
 
 
 def get_document(project_path: Path, relative_path: str) -> DocumentInfo | None:
@@ -213,12 +287,20 @@ def get_document(project_path: Path, relative_path: str) -> DocumentInfo | None:
     if not canonical_full.exists():
         return None
 
+    ver = get_current_version(project_path, normalized_path)
+    if is_binary_document_path(normalized_path):
+        return _generic_doc_info(normalized_path, ver)
+
     try:
-        post = frontmatter.loads(canonical_full.read_text())
+        text = canonical_full.read_text()
+        post = frontmatter.loads(text)
     except Exception:
+        if is_text_document_path(normalized_path):
+            return _generic_doc_info(normalized_path, ver)
         return None
 
-    ver = get_current_version(project_path, normalized_path)
+    if not post.metadata and is_text_document_path(normalized_path):
+        return _generic_doc_info(normalized_path, ver)
     return _build_doc_info(post, normalized_path, ver)
 
 
@@ -350,14 +432,17 @@ def restore_document_version(
 
 
 def list_documents(project_path: Path) -> list[DocumentInfo]:
-    """List all documents in a project by scanning docs/ for files with frontmatter."""
+    """List all cabinet documents under docs/ that the viewer can open."""
     docs_dir = project_path / "docs"
     if not docs_dir.exists():
         return []
 
     results = []
     for file_path in sorted(docs_dir.rglob("*")):
-        if file_path.is_file() and file_path.suffix in (".md", ".sql", ".yaml", ".json", ".toml"):
+        if file_path.is_file() and (
+            file_path.suffix.lower() in _TEXT_DOCUMENT_EXTENSIONS
+            or file_path.suffix.lower() in _BINARY_DOCUMENT_EXTENSIONS
+        ):
             relative = str(file_path.relative_to(project_path))
             info = get_document(project_path, relative)
             if info:

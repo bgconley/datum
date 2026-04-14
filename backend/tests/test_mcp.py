@@ -61,6 +61,7 @@ async def test_mcp_server_registers_expected_tools_and_resources(tmp_path):
         "datum://projects/{slug}/context",
         "datum://projects/{slug}/tree",
         "datum://projects/{slug}/docs/{path}",
+        "datum://projects/{slug}/docs/{path}?version={version}",
         "datum://projects/{slug}/decisions",
         "datum://projects/{slug}/requirements",
         "datum://projects/{slug}/open-questions",
@@ -83,6 +84,48 @@ async def test_mcp_project_context_tool_returns_boundary_wrapped_payload(tmp_pat
 
     assert payload["content_kind"] == "retrieved_project_document"
     assert payload["data"]["project"]["name"] == "Alpha"
+
+
+@pytest.mark.asyncio
+async def test_mcp_versioned_document_resource_reads_specific_version(tmp_path):
+    project_dir = tmp_path / "alpha"
+    project_dir.mkdir()
+    (project_dir / "project.yaml").write_text("name: Alpha\nslug: alpha\n")
+    docs_dir = project_dir / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "overview.md").write_text("---\ntitle: Overview\ntype: plan\n---\n\nHello v2")
+
+    versions_dir = project_dir / ".piq" / "docs" / "overview.md" / "main" / "versions"
+    versions_dir.mkdir(parents=True)
+    (versions_dir / "v001.md").write_text("---\ntitle: Overview\ntype: plan\n---\n\nHello v1")
+    (versions_dir / "v002.md").write_text("---\ntitle: Overview\ntype: plan\n---\n\nHello v2")
+    manifest = project_dir / ".piq" / "docs" / "overview.md" / "manifest.yaml"
+    manifest.write_text(
+        """
+canonical_path: docs/overview.md
+document_uid: doc_1
+branches:
+  main:
+    head: 2
+    versions:
+      - version: 1
+        file: main/versions/v001.md
+        content_hash: sha256:v1
+        created: 2026-04-14T00:00:00+00:00
+      - version: 2
+        file: main/versions/v002.md
+        content_hash: sha256:v2
+        created: 2026-04-14T00:05:00+00:00
+"""
+    )
+
+    mcp = create_mcp_server(tmp_path)
+    resource = await mcp.read_resource("datum://projects/alpha/docs/docs/overview.md?version=1")
+    payload = json.loads(resource[0].content)
+
+    assert payload["path"] == "docs/overview.md"
+    assert payload["version"] == 1
+    assert "Hello v1" in payload["content"]
 
 
 @pytest.mark.asyncio

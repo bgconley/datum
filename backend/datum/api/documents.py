@@ -1,15 +1,21 @@
 import logging
+import mimetypes
+from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import settings
 from datum.db import get_session
 from datum.models.core import Project
+from datum.models.intelligence import Entity, EntityMention
 from datum.schemas.document import (
     DocumentContentResponse,
     DocumentCreate,
+    DocumentEntityMentionResponse,
     DocumentMoveRequest,
     DocumentResponse,
     DocumentSave,
@@ -24,10 +30,12 @@ from datum.services.db_sync import (
 )
 from datum.services.document_manager import (
     ConflictError,
+    _validate_document_path,
     create_document,
     create_document_folder,
     delete_document,
     get_document,
+    is_binary_document_path,
     list_documents,
     move_document,
     save_document,
@@ -66,6 +74,16 @@ def _get_project_path(slug: str):
     if not info:
         raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
     return settings.projects_root / slug
+
+
+def _guess_mime_type(relative_path: str) -> str | None:
+    mime_type, _encoding = mimetypes.guess_type(relative_path)
+    return mime_type
+
+
+def _asset_url(slug: str, relative_path: str) -> str:
+    encoded_path = "/".join(quote(segment, safe="") for segment in relative_path.split("/"))
+    return f"/api/v1/projects/{slug}/docs/{encoded_path}/asset"
 
 
 async def _get_project_db_id(slug: str, session: AsyncSession):
@@ -294,6 +312,84 @@ async def api_move_document(
     return DocumentResponse(**doc_info.__dict__)
 
 
+@router.get("/{doc_path:path}/asset")
+async def api_get_document_asset(
+    slug: str,
+    doc_path: str,
+):
+    project_path = _get_project_path(slug)
+    try:
+        canonical_path = _validate_document_path(doc_path)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    absolute_path = project_path / canonical_path
+    if not absolute_path.exists():
+        raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
+
+    return FileResponse(
+        absolute_path,
+        media_type=_guess_mime_type(canonical_path),
+        filename=absolute_path.name,
+    )
+
+
+@router.get(
+    "/{doc_path:path}/entities",
+    response_model=list[DocumentEntityMentionResponse],
+)
+async def api_get_document_entities(
+    slug: str,
+    doc_path: str,
+    session: AsyncSession = Depends(get_session),
+):
+    project_path = _get_project_path(slug)
+    try:
+        info = get_document(project_path, doc_path)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if not info:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
+
+    version_id = await _get_document_version_id(slug, info.relative_path, session)
+    if not version_id:
+        return []
+
+    result = await session.execute(
+        select(
+            Entity.id,
+            Entity.canonical_name,
+            Entity.entity_type,
+            EntityMention.raw_text,
+            EntityMention.text_start_char,
+            EntityMention.text_end_char,
+        )
+        .join(Entity, EntityMention.entity_id == Entity.id)
+        .where(EntityMention.version_id == UUID(version_id))
+        .order_by(EntityMention.text_start_char.asc(), Entity.canonical_name.asc())
+    )
+
+    seen: set[tuple[str, int, int, str]] = set()
+    mentions: list[DocumentEntityMentionResponse] = []
+    for row in result.fetchall():
+        raw_text = row[3] or row[1]
+        key = (str(row[0]), int(row[4]), int(row[5]), raw_text)
+        if key in seen:
+            continue
+        seen.add(key)
+        mentions.append(
+            DocumentEntityMentionResponse(
+                entity_id=str(row[0]),
+                canonical_name=row[1],
+                entity_type=row[2],
+                raw_text=raw_text,
+                start_char=int(row[4]),
+                end_char=int(row[5]),
+            )
+        )
+    return mentions
+
+
 @router.get("/{doc_path:path}", response_model=DocumentContentResponse)
 async def api_get_document(
     slug: str,
@@ -315,17 +411,35 @@ async def api_get_document(
         raise HTTPException(status_code=422, detail=str(e))
     if not info:
         raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
-    content = (project_path / info.relative_path).read_text()
+    absolute_path = project_path / info.relative_path
     metadata = DocumentResponse(
         **info.__dict__,
         version_id=await _get_document_version_id(slug, info.relative_path, session),
     )
-    return DocumentContentResponse(content=content, metadata=metadata)
+    mime_type = _guess_mime_type(info.relative_path)
+    if is_binary_document_path(info.relative_path):
+        return DocumentContentResponse(
+            content="",
+            metadata=metadata,
+            content_kind="binary",
+            mime_type=mime_type,
+            asset_url=_asset_url(slug, info.relative_path),
+        )
+
+    content = absolute_path.read_text(errors="replace")
+    return DocumentContentResponse(
+        content=content,
+        metadata=metadata,
+        content_kind="text",
+        mime_type=mime_type or "text/plain",
+    )
 
 
 @router.put("/{doc_path:path}", response_model=DocumentResponse)
 async def api_save_document(
-    slug: str, doc_path: str, body: DocumentSave,
+    slug: str,
+    doc_path: str,
+    body: DocumentSave,
     session: AsyncSession = Depends(get_session),
 ):
     project_path = _get_project_path(slug)
@@ -390,8 +504,13 @@ async def api_save_document(
                     filesystem_path=ver.version_file,
                 )
                 await log_audit_event(
-                    session, "web", "save_document", project_db_id,
-                    canonical_path, old_hash=old_hash, new_hash=doc_info.content_hash,
+                    session,
+                    "web",
+                    "save_document",
+                    project_db_id,
+                    canonical_path,
+                    old_hash=old_hash,
+                    new_hash=doc_info.content_hash,
                 )
                 await session.commit()
     except Exception as exc:

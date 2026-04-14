@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import yaml
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.resources.templates import ResourceTemplate
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,8 +71,42 @@ from datum.services.traceability import (
     list_project_entity_relationships,
     list_project_insights,
 )
-from datum.services.versioning import get_current_version
+from datum.services.versioning import get_current_version, read_version_content
 from datum.services.write_barrier import WriteBarrierConfig, evaluate_write_barrier
+
+
+class _DatumPathResourceTemplate:
+    def __init__(
+        self,
+        *,
+        uri_template: str,
+        match_pattern: str,
+        backing_template: ResourceTemplate,
+    ) -> None:
+        self.uri_template = uri_template
+        self.name = backing_template.name
+        self.title = backing_template.title
+        self.description = backing_template.description
+        self.mime_type = backing_template.mime_type
+        self.icons = backing_template.icons
+        self.annotations = backing_template.annotations
+        self.meta = backing_template.meta
+        self._match_pattern = re.compile(match_pattern)
+        self._backing_template = backing_template
+
+    def matches(self, uri: str) -> dict[str, Any] | None:
+        match = self._match_pattern.match(uri)
+        if match is None:
+            return None
+        return match.groupdict()
+
+    async def create_resource(
+        self,
+        uri: str,
+        params: dict[str, Any],
+        context: Any = None,
+    ):
+        return await self._backing_template.create_resource(uri, params, context=context)
 
 
 def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
@@ -266,7 +303,6 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             rows.append({"path": rel.as_posix(), "size_bytes": path.stat().st_size})
         return _json_text(rows)
 
-    @mcp.resource("datum://projects/{slug}/docs/{path}")
     def document_resource(slug: str, path: str) -> str:
         project_dir = _project_dir(slug)
         absolute = project_dir / path
@@ -276,6 +312,55 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         wrapped = wrap_content(content, ContentKind.DOCUMENT, project_slug=slug)
         wrapped["path"] = path
         return _json_text(wrapped)
+
+    def document_version_resource(slug: str, path: str, version: str) -> str:
+        project_dir = _project_dir(slug)
+        try:
+            version_number = int(version)
+        except ValueError:
+            return _json_text({"error": f"Invalid version '{version}'"})
+
+        content = read_version_content(project_dir, path, version_number)
+        if content is None:
+            return _json_text({"error": f"Version {version_number} for '{path}' not found"})
+        text_content = content.decode("utf-8", errors="replace")
+        wrapped = wrap_content(text_content, ContentKind.DOCUMENT, project_slug=slug)
+        wrapped["path"] = path
+        wrapped["version"] = version_number
+        return _json_text(wrapped)
+
+    path_resource_template = ResourceTemplate.from_function(
+        document_resource,
+        uri_template="datum://templates/{slug}/{path}",
+        name="document_resource",
+    )
+    mcp._resource_manager._templates["datum://projects/{slug}/docs/{path}"] = cast(
+        ResourceTemplate,
+        _DatumPathResourceTemplate(
+            uri_template="datum://projects/{slug}/docs/{path}",
+            match_pattern=r"^datum://projects/(?P<slug>[^/]+)/docs/(?P<path>[^?]+)$",
+            backing_template=path_resource_template,
+        ),
+    )
+
+    versioned_path_resource_template = ResourceTemplate.from_function(
+        document_version_resource,
+        uri_template="datum://templates/{slug}/{path}/{version}",
+        name="document_version_resource",
+    )
+    mcp._resource_manager._templates[
+        "datum://projects/{slug}/docs/{path}?version={version}"
+    ] = cast(
+        ResourceTemplate,
+        _DatumPathResourceTemplate(
+            uri_template="datum://projects/{slug}/docs/{path}?version={version}",
+            match_pattern=(
+                r"^datum://projects/(?P<slug>[^/]+)/docs/"
+                r"(?P<path>.+)\?version=(?P<version>[^/?#]+)$"
+            ),
+            backing_template=versioned_path_resource_template,
+        ),
+    )
 
     @mcp.resource("datum://projects/{slug}/decisions")
     def decisions_resource(slug: str) -> str:

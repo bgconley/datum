@@ -21,9 +21,25 @@ from datum.schemas.search import (
 from datum.services.answer import generate_answer
 from datum.services.model_gateway import build_model_gateway
 from datum.services.preflight import record_preflight
-from datum.services.search import search_execution, stream_search
+from datum.services.search import SearchOptions, search_execution, stream_search
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
+
+
+def _resolve_search_options(body: SearchRequest) -> tuple[SearchOptions, bool]:
+    answer_mode = body.answer_mode or body.mode == "ask_question"
+    options = SearchOptions()
+
+    if body.mode == "find_decisions":
+        options.allowed_document_types = ("decision",)
+        options.max_results_per_document = None
+    elif body.mode in {"search_history", "compare_over_time"}:
+        options.max_results_per_document = None
+        options.rerank_candidate_limit = 75
+    elif body.mode == "ask_question":
+        options.max_results_per_document = 5
+
+    return options, answer_mode
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -35,6 +51,7 @@ async def api_search(
     started = time.monotonic()
     effective_limit = min(body.limit, settings.search_result_limit)
     gateway = build_model_gateway()
+    search_options, answer_mode = _resolve_search_options(body)
     answer = None
     try:
         execution = await search_execution(
@@ -44,8 +61,9 @@ async def api_search(
             project_scope=body.project,
             version_scope=body.version_scope,
             limit=effective_limit,
+            search_options=search_options,
         )
-        if body.answer_mode:
+        if answer_mode:
             answer_response = await generate_answer(gateway, body.query, execution.results)
             answer = AnswerModeResponse(
                 answer=answer_response.answer,
@@ -89,8 +107,10 @@ async def api_search_stream(
 ):
     effective_limit = min(body.limit, settings.search_result_limit)
     gateway = build_model_gateway()
+    search_options, answer_mode = _resolve_search_options(body)
 
     async def stream():
+        last_execution = None
         try:
             async for execution in stream_search(
                 session=session,
@@ -99,7 +119,9 @@ async def api_search_stream(
                 project_scope=body.project,
                 version_scope=body.version_scope,
                 limit=effective_limit,
+                search_options=search_options,
             ):
+                last_execution = execution
                 payload = SearchStreamEventResponse(
                     event="phase",
                     phase=execution.phase,
@@ -116,6 +138,44 @@ async def api_search_stream(
                     latency_ms=execution.latency_ms,
                     semantic_enabled=execution.semantic_enabled,
                     rerank_applied=execution.rerank_applied,
+                )
+                yield payload.model_dump_json(exclude_none=True) + "\n"
+            if answer_mode and last_execution is not None:
+                answer_response = await generate_answer(
+                    gateway,
+                    body.query,
+                    last_execution.results,
+                )
+                payload = SearchStreamEventResponse(
+                    event="phase",
+                    phase="answer_ready",
+                    query=body.query,
+                    results=[
+                        SearchResultResponse(**asdict(result))
+                        for result in last_execution.results
+                    ],
+                    entity_facets=[
+                        SearchEntityFacetResponse(**asdict(facet))
+                        for facet in last_execution.entity_facets
+                    ],
+                    result_count=len(last_execution.results),
+                    latency_ms=last_execution.latency_ms,
+                    semantic_enabled=last_execution.semantic_enabled,
+                    rerank_applied=last_execution.rerank_applied,
+                    answer=AnswerModeResponse(
+                        answer=answer_response.answer,
+                        citations=[
+                            CitationResponse(
+                                index=item.index,
+                                human_readable=item.human_readable,
+                                source_ref=SourceRefResponse(**item.source_ref.__dict__),
+                            )
+                            for item in answer_response.citations
+                            if item.source_ref is not None
+                        ],
+                        error=answer_response.error,
+                        model=answer_response.model,
+                    ),
                 )
                 yield payload.model_dump_json(exclude_none=True) + "\n"
         except Exception as exc:

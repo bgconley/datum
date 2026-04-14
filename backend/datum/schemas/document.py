@@ -43,6 +43,18 @@ class DocumentResponse(BaseModel):
     updated: str | None = None
 
 
+class DocumentEntityMentionResponse(BaseModel):
+    entity_id: str
+    canonical_name: str
+    entity_type: str
+    raw_text: str
+    start_char: int
+    end_char: int
+
+
 class DocumentContentResponse(BaseModel):
     content: str
     metadata: DocumentResponse
+    content_kind: str = "text"
+    mime_type: str | None = None
+    asset_url: str | None = None

@@ -2,6 +2,7 @@
 
 from datum.services.schema_intelligence import (
     extract_schema_intelligence,
+    parse_drizzle,
     parse_openapi,
     parse_prisma,
     parse_sql,
@@ -50,6 +51,31 @@ def test_parse_prisma_extracts_models_and_relations():
     assert any(item.relationship_type == "relation" for item in relationships)
 
 
+def test_parse_drizzle_extracts_tables_columns_and_relations():
+    entities, relationships = parse_drizzle(
+        """
+        export const orgs = pgTable('orgs', {
+          id: uuid('id').primaryKey(),
+        })
+
+        export const users = pgTable('users', {
+          id: uuid('id').primaryKey(),
+          email: text('email').notNull(),
+          orgId: uuid('org_id').references(() => orgs.id),
+        })
+        """
+    )
+    assert any(item.entity_type == "table" and item.name == "users" for item in entities)
+    assert any(
+        item.entity_type == "column" and item.name == "users.orgId"
+        for item in entities
+    )
+    assert any(
+        item.relationship_type == "relation" and item.target == "orgs.id"
+        for item in relationships
+    )
+
+
 def test_parse_openapi_extracts_endpoints_and_refs():
     entities, relationships = parse_openapi(
         {
@@ -82,3 +108,9 @@ def test_parse_openapi_extracts_endpoints_and_refs():
 def test_extract_schema_intelligence_routes_by_extension():
     entities, _relationships = extract_schema_intelligence("CREATE TABLE t (id INT);", ".sql")
     assert any(item.entity_type == "table" for item in entities)
+
+    drizzle_entities, _ = extract_schema_intelligence(
+        "export const users = pgTable('users', { id: uuid('id').primaryKey() })",
+        ".ts",
+    )
+    assert any(item.entity_type == "table" and item.name == "users" for item in drizzle_entities)

@@ -130,6 +130,9 @@ async def api_list_versions(
     canonical_path = _normalize_document_path(doc_path)
     versions = list_versions(project_path, canonical_path, branch=branch)
     if not versions:
+        existing_document = get_document(project_path, canonical_path)
+        if existing_document is not None:
+            return []
         raise HTTPException(
             status_code=404,
             detail=f"No versions found for '{canonical_path}'",

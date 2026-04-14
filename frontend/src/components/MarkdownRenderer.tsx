@@ -14,31 +14,43 @@ import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
 
+import type { DocumentEntityMention } from '@/lib/api'
 import {
   extractHeadings,
-  extractTechnicalTerms,
   slugifyHeading,
   stripFrontmatter,
-  uniqueTechnicalTerms,
-  type TechnicalTerm,
 } from '@/lib/technical-terms'
 
 interface MarkdownRendererProps {
   content: string
   projectSlug: string
+  entityMentions?: DocumentEntityMention[]
 }
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function renderHighlightedText(text: string, terms: TechnicalTerm[]): ReactNode[] {
+interface HighlightTerm {
+  rawText: string
+  title: string
+  key: string
+  entityId: string
+  entityType: string
+  canonicalName: string
+}
+
+function renderHighlightedText(
+  text: string,
+  terms: HighlightTerm[],
+  projectSlug: string,
+): ReactNode[] {
   if (!text || terms.length === 0) {
     return [text]
   }
 
   const orderedTerms = terms
-    .filter((term) => term.rawText.length >= 3)
+    .filter((term) => term.rawText.length >= 2)
     .sort((left, right) => right.rawText.length - left.rawText.length)
 
   if (orderedTerms.length === 0) {
@@ -58,11 +70,11 @@ function renderHighlightedText(text: string, terms: TechnicalTerm[]): ReactNode[
 
     return (
       <Link
-        key={`${matchedTerm.termType}:${matchedTerm.rawText}:${index}`}
-        to="/search"
-        search={{ query: matchedTerm.rawText }}
+        key={`${matchedTerm.key}:${index}`}
+        to="/projects/$slug/entities/$entityId"
+        params={{ slug: projectSlug, entityId: matchedTerm.entityId }}
         className="datum-entity rounded-sm border-b border-dashed border-amber-400/60 bg-amber-400/10 px-0.5 text-inherit transition-colors hover:bg-amber-400/20"
-        title={`${matchedTerm.termType} · Search for ${matchedTerm.rawText}`}
+        title={matchedTerm.title}
       >
         {part}
       </Link>
@@ -70,9 +82,13 @@ function renderHighlightedText(text: string, terms: TechnicalTerm[]): ReactNode[
   })
 }
 
-function highlightNode(node: ReactNode, terms: TechnicalTerm[]): ReactNode {
+function highlightNode(
+  node: ReactNode,
+  terms: HighlightTerm[],
+  projectSlug: string,
+): ReactNode {
   if (typeof node === 'string') {
-    return renderHighlightedText(node, terms)
+    return renderHighlightedText(node, terms, projectSlug)
   }
 
   if (!isValidElement(node)) {
@@ -85,7 +101,7 @@ function highlightNode(node: ReactNode, terms: TechnicalTerm[]): ReactNode {
 
   const element = node as ReactElement<{ children?: ReactNode }>
   const children = Children.map(element.props.children, (child) =>
-    highlightNode(child, terms),
+    highlightNode(child, terms, projectSlug),
   )
   return cloneElement(element, undefined, children)
 }
@@ -162,17 +178,38 @@ function MermaidBlock({ chart }: { chart: string }) {
   )
 }
 
-export function MarkdownRenderer({ content, projectSlug }: MarkdownRendererProps) {
+export function MarkdownRenderer({
+  content,
+  projectSlug,
+  entityMentions = [],
+}: MarkdownRendererProps) {
   const markdown = useMemo(() => stripFrontmatter(content), [content])
   const headings = useMemo(() => extractHeadings(markdown), [markdown])
-  const technicalTerms = useMemo(
-    () => uniqueTechnicalTerms(extractTechnicalTerms(markdown)),
-    [markdown],
-  )
   const headingIds = useMemo(
     () => new Map(headings.map((heading) => [heading.text, heading.id])),
     [headings],
   )
+  const highlightTerms = useMemo<HighlightTerm[]>(() => {
+    const seen = new Set<string>()
+    return entityMentions
+      .filter((mention) => mention.raw_text.trim())
+      .filter((mention) => {
+        const key = `${mention.entity_id}:${mention.raw_text}`
+        if (seen.has(key)) {
+          return false
+        }
+        seen.add(key)
+        return true
+      })
+      .map((mention) => ({
+        rawText: mention.raw_text,
+        title: `${mention.entity_type} · ${mention.canonical_name}`,
+        key: `${mention.entity_id}:${mention.raw_text}`,
+        entityId: mention.entity_id,
+        entityType: mention.entity_type,
+        canonicalName: mention.canonical_name,
+      }))
+  }, [entityMentions])
 
   return (
     <div className="datum-prose">
@@ -183,27 +220,29 @@ export function MarkdownRenderer({ content, projectSlug }: MarkdownRendererProps
           h1: ({ children }) => {
             const text = extractText(children)
             const id = headingIds.get(text) ?? slugifyHeading(text)
-            return <h1 id={id}>{highlightNode(children, technicalTerms)}</h1>
+            return <h1 id={id}>{highlightNode(children, highlightTerms, projectSlug)}</h1>
           },
           h2: ({ children }) => {
             const text = extractText(children)
             const id = headingIds.get(text) ?? slugifyHeading(text)
-            return <h2 id={id}>{highlightNode(children, technicalTerms)}</h2>
+            return <h2 id={id}>{highlightNode(children, highlightTerms, projectSlug)}</h2>
           },
           h3: ({ children }) => {
             const text = extractText(children)
             const id = headingIds.get(text) ?? slugifyHeading(text)
-            return <h3 id={id}>{highlightNode(children, technicalTerms)}</h3>
+            return <h3 id={id}>{highlightNode(children, highlightTerms, projectSlug)}</h3>
           },
           h4: ({ children }) => {
             const text = extractText(children)
             const id = headingIds.get(text) ?? slugifyHeading(text)
-            return <h4 id={id}>{highlightNode(children, technicalTerms)}</h4>
+            return <h4 id={id}>{highlightNode(children, highlightTerms, projectSlug)}</h4>
           },
-          p: ({ children }) => <p>{highlightNode(children, technicalTerms)}</p>,
-          li: ({ children }) => <li>{highlightNode(children, technicalTerms)}</li>,
-          blockquote: ({ children }) => <blockquote>{highlightNode(children, technicalTerms)}</blockquote>,
-          td: ({ children }) => <td>{highlightNode(children, technicalTerms)}</td>,
+          p: ({ children }) => <p>{highlightNode(children, highlightTerms, projectSlug)}</p>,
+          li: ({ children }) => <li>{highlightNode(children, highlightTerms, projectSlug)}</li>,
+          blockquote: ({ children }) => (
+            <blockquote>{highlightNode(children, highlightTerms, projectSlug)}</blockquote>
+          ),
+          td: ({ children }) => <td>{highlightNode(children, highlightTerms, projectSlug)}</td>,
           code(props) {
             const { children, className } = props
             const match = /language-(\w+)/.exec(className || '')
@@ -247,22 +286,22 @@ export function MarkdownRenderer({ content, projectSlug }: MarkdownRendererProps
         {markdown}
       </ReactMarkdown>
 
-      {technicalTerms.length > 0 && (
+      {highlightTerms.length > 0 && (
         <div className="mt-8 rounded-[1.5rem] border border-border/80 bg-card/50 p-4">
           <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
             Linked entities
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {technicalTerms.map((term) => (
+            {highlightTerms.map((mention) => (
               <Link
-                key={`${term.termType}:${term.rawText}`}
-                to="/search"
-                search={{ query: term.rawText, project: projectSlug }}
+                key={mention.key}
+                to="/projects/$slug/entities/$entityId"
+                params={{ slug: projectSlug, entityId: mention.entityId }}
                 className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs text-foreground transition-colors hover:bg-accent"
-                title={`${term.termType} · Search for ${term.rawText}`}
+                title={mention.title}
               >
-                <span>{term.rawText}</span>
-                <span className="text-muted-foreground">{term.termType}</span>
+                <span>{mention.canonicalName}</span>
+                <span className="text-muted-foreground">{mention.entityType}</span>
               </Link>
             ))}
           </div>

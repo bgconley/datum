@@ -95,6 +95,58 @@ class TestListDocuments:
         titles = {d.title for d in docs}
         assert titles == {"A", "B"}
 
+    def test_lists_plain_code_documents_without_frontmatter(self, project):
+        raw_doc = project / "docs" / "schema.prisma"
+        raw_doc.parent.mkdir(parents=True, exist_ok=True)
+        raw_doc.write_text("model User {\n  id String @id\n}\n")
+
+        docs = list_documents(project)
+
+        assert any(doc.relative_path == "docs/schema.prisma" for doc in docs)
+
+
+class TestGenericDocumentHandling:
+    def test_get_supports_plain_text_documents_without_frontmatter(self, project):
+        raw_doc = project / "docs" / "config.ts"
+        raw_doc.parent.mkdir(parents=True, exist_ok=True)
+        raw_doc.write_text("export const answer = 42\n")
+
+        info = get_document(project, "docs/config.ts")
+
+        assert info is not None
+        assert info.relative_path == "docs/config.ts"
+        assert info.title == "Config"
+        assert info.doc_type == "reference"
+
+    def test_get_supports_binary_documents(self, project):
+        binary_doc = project / "docs" / "diagram.pdf"
+        binary_doc.parent.mkdir(parents=True, exist_ok=True)
+        binary_doc.write_bytes(b"%PDF-1.4\n%stub\n")
+
+        info = get_document(project, "docs/diagram.pdf")
+
+        assert info is not None
+        assert info.relative_path == "docs/diagram.pdf"
+        assert info.doc_type == "reference"
+
+    def test_save_plain_text_document_preserves_source_without_frontmatter(self, project):
+        raw_doc = project / "docs" / "app.ts"
+        raw_doc.parent.mkdir(parents=True, exist_ok=True)
+        raw_doc.write_text("export const version = 1\n")
+        base_hash = compute_content_hash(raw_doc.read_bytes())
+
+        saved = save_document(
+            project,
+            "docs/app.ts",
+            "export const version = 2\n",
+            base_hash,
+            "web",
+        )
+
+        assert saved.relative_path == "docs/app.ts"
+        assert raw_doc.read_text() == "export const version = 2\n"
+        assert not raw_doc.read_text().startswith("---\n")
+
 
 class TestDocumentPathEnforcement:
     """Finding 1: documents must live under docs/."""

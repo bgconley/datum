@@ -71,6 +71,46 @@ async def test_create_and_get_document(client):
 
 
 @pytest.mark.asyncio
+async def test_get_plain_text_document_without_frontmatter(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    raw_doc = settings.projects_root / "p" / "docs" / "config.ts"
+    raw_doc.parent.mkdir(parents=True, exist_ok=True)
+    raw_doc.write_text("export const answer = 42\n")
+
+    resp = await client.get("/api/v1/projects/p/docs/docs/config.ts")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["content_kind"] == "text"
+    assert payload["mime_type"] in {
+        "text/typescript",
+        "application/typescript",
+        "video/mp2t",
+        "text/plain",
+    }
+    assert "export const answer = 42" in payload["content"]
+
+
+@pytest.mark.asyncio
+async def test_get_binary_document_returns_asset_metadata_and_asset_endpoint(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    binary_doc = settings.projects_root / "p" / "docs" / "diagram.pdf"
+    binary_doc.parent.mkdir(parents=True, exist_ok=True)
+    binary_doc.write_bytes(b"%PDF-1.4\n%stub\n")
+
+    resp = await client.get("/api/v1/projects/p/docs/docs/diagram.pdf")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["content_kind"] == "binary"
+    assert payload["asset_url"].endswith("/api/v1/projects/p/docs/docs/diagram.pdf/asset")
+
+    asset_resp = await client.get("/api/v1/projects/p/docs/docs/diagram.pdf/asset")
+    assert asset_resp.status_code == 200
+    assert asset_resp.content.startswith(b"%PDF-1.4")
+
+
+@pytest.mark.asyncio
 async def test_save_document_with_conflict(client):
     await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
     await client.post("/api/v1/projects/p/docs", json={
@@ -148,6 +188,36 @@ async def test_version_history_endpoints(client):
     assert diff_payload["version_b"] == 2
     assert diff_payload["additions"] > 0 or diff_payload["deletions"] > 0
     assert "V2 updated" in diff_payload["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_versions_endpoint_returns_empty_list_for_existing_plain_text_doc(
+    client,
+):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    raw_doc = settings.projects_root / "p" / "docs" / "config.ts"
+    raw_doc.parent.mkdir(parents=True, exist_ok=True)
+    raw_doc.write_text("export const answer = 42\n")
+
+    versions = await client.get("/api/v1/projects/p/docs/docs/config.ts/versions")
+
+    assert versions.status_code == 200
+    assert versions.json() == []
+
+
+@pytest.mark.asyncio
+async def test_versions_endpoint_returns_empty_list_for_existing_binary_doc(
+    client,
+):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    binary_doc = settings.projects_root / "p" / "docs" / "diagram.pdf"
+    binary_doc.parent.mkdir(parents=True, exist_ok=True)
+    binary_doc.write_bytes(b"%PDF-1.4\n%stub\n")
+
+    versions = await client.get("/api/v1/projects/p/docs/docs/diagram.pdf/versions")
+
+    assert versions.status_code == 200
+    assert versions.json() == []
 
 
 @pytest.mark.asyncio
@@ -1532,6 +1602,130 @@ async def test_search_stream_applies_configured_result_limit_cap(client, monkeyp
         _ = [line async for line in resp.aiter_lines() if line]
 
     assert captured["limit"] == 3
+
+
+@pytest.mark.asyncio
+async def test_search_stream_emits_answer_ready_phase(client, monkeypatch):
+    class StubGateway:
+        embedding = None
+        reranker = None
+        llm = object()
+
+        async def close(self):
+            return None
+
+    async def fake_stream_search(**kwargs):
+        del kwargs
+        yield type(
+            "Execution",
+            (),
+            {
+                "phase": "lexical",
+                "query": "How does auth work?",
+                "results": [],
+                "entity_facets": [],
+                "latency_ms": 5,
+                "semantic_enabled": False,
+                "rerank_applied": False,
+            },
+        )()
+        yield type(
+            "Execution",
+            (),
+            {
+                "phase": "reranked",
+                "query": "How does auth work?",
+                "results": [
+                    SearchResult(
+                        document_title="Auth",
+                        document_path="docs/auth.md",
+                        document_type="decision",
+                        document_status="accepted",
+                        project_slug="alpha",
+                        heading_path="Overview",
+                        snippet="JWT auth is used.",
+                        version_number=2,
+                        content_hash="sha256:auth",
+                        fused_score=1.0,
+                        document_uid="doc_auth",
+                        chunk_id="chunk_auth",
+                        line_start=10,
+                        line_end=20,
+                    )
+                ],
+                "entity_facets": [],
+                "latency_ms": 18,
+                "semantic_enabled": True,
+                "rerank_applied": True,
+            },
+        )()
+
+    async def fake_generate_answer(gateway, query, results):
+        del gateway, query, results
+        return SimpleNamespace(
+            answer="Use JWT auth [1].",
+            citations=[
+                SimpleNamespace(
+                    index=1,
+                    human_readable='alpha/docs/auth.md v2, section "Overview"',
+                    source_ref=SimpleNamespace(
+                        project_slug="alpha",
+                        document_uid="doc_auth",
+                        version_number=2,
+                        content_hash="sha256:auth",
+                        chunk_id="chunk_auth",
+                        canonical_path="docs/auth.md",
+                        heading_path=["Overview"],
+                        line_start=10,
+                        line_end=20,
+                    ),
+                )
+            ],
+            error="",
+            model="gpt-oss-20b",
+        )
+
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.search.stream_search", fake_stream_search)
+    monkeypatch.setattr("datum.api.search.generate_answer", fake_generate_answer)
+
+    async with client.stream(
+        "POST",
+        "/api/v1/search/stream",
+        json={"query": "How does auth work?", "mode": "ask_question"},
+    ) as resp:
+        assert resp.status_code == 200
+        lines = [json.loads(line) async for line in resp.aiter_lines() if line]
+
+    assert [line["phase"] for line in lines] == ["lexical", "reranked", "answer_ready"]
+    assert lines[-1]["answer"]["answer"] == "Use JWT auth [1]."
+
+
+@pytest.mark.asyncio
+async def test_search_mode_sets_mode_specific_search_options(client, monkeypatch):
+    captured = {}
+
+    class StubGateway:
+        embedding = None
+        reranker = None
+
+        async def close(self):
+            return None
+
+    async def fake_search_execution(**kwargs):
+        captured["search_options"] = kwargs["search_options"]
+        return SimpleNamespace(results=[], entity_facets=[])
+
+    monkeypatch.setattr("datum.api.search.search_execution", fake_search_execution)
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+
+    resp = await client.post(
+        "/api/v1/search",
+        json={"query": "auth", "mode": "find_decisions"},
+    )
+    assert resp.status_code == 200
+    assert captured["search_options"].allowed_document_types == ("decision",)
+    assert captured["search_options"].max_results_per_document is None
 
 
 @pytest.mark.asyncio

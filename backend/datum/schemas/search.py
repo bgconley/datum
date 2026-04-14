@@ -9,6 +9,13 @@ class SearchRequest(BaseModel):
     project: str | None = None
     version_scope: str = "current"
     limit: int = Field(default=20, ge=1, le=100)
+    mode: Literal[
+        "find_docs",
+        "ask_question",
+        "find_decisions",
+        "search_history",
+        "compare_over_time",
+    ] = "find_docs"
     answer_mode: bool = False
 
     @field_validator("version_scope")
@@ -95,7 +102,7 @@ class SearchResponse(BaseModel):
 
 class SearchStreamEventResponse(BaseModel):
     event: Literal["phase", "error"]
-    phase: Literal["lexical", "reranked"] | None = None
+    phase: Literal["lexical", "reranked", "answer_ready"] | None = None
     query: str
     results: list[SearchResultResponse] = Field(default_factory=list)
     entity_facets: list[SearchEntityFacetResponse] = Field(default_factory=list)
@@ -103,4 +110,5 @@ class SearchStreamEventResponse(BaseModel):
     latency_ms: int | None = None
     semantic_enabled: bool = False
     rerank_applied: bool = False
+    answer: AnswerModeResponse | None = None
     message: str | None = None

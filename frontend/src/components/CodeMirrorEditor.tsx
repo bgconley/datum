@@ -2,16 +2,29 @@ import CodeMirror from '@uiw/react-codemirror'
 import { keymap } from '@codemirror/view'
 import { EditorView } from '@codemirror/view'
 import { markdown } from '@codemirror/lang-markdown'
+import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
 import { sql } from '@codemirror/lang-sql'
+import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
 import type { Extension } from '@codemirror/state'
+
+type EditorLanguage =
+  | 'markdown'
+  | 'json'
+  | 'sql'
+  | 'yaml'
+  | 'typescript'
+  | 'javascript'
+  | 'toml'
+  | 'prisma'
+  | 'text'
 
 interface CodeMirrorEditorProps {
   value: string
   onChange: (value: string) => void
   onSave?: () => void
-  language?: 'markdown' | 'json' | 'sql' | 'yaml' | 'text'
+  language?: EditorLanguage
   readOnly?: boolean
   className?: string
 }
@@ -22,9 +35,16 @@ function languageExtension(language: CodeMirrorEditorProps['language']): Extensi
       return json()
     case 'sql':
       return sql()
+    case 'typescript':
+      return javascript({ typescript: true })
+    case 'javascript':
+      return javascript()
     case 'markdown':
       return markdown()
     case 'yaml':
+      return yaml()
+    case 'toml':
+    case 'prisma':
     case 'text':
     default:
       return []

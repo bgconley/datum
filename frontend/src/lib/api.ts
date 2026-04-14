@@ -35,6 +35,9 @@ export interface DocumentMeta {
 export interface DocumentContent {
   content: string
   metadata: DocumentMeta
+  content_kind: 'text' | 'binary'
+  mime_type?: string | null
+  asset_url?: string | null
 }
 
 export interface SearchResultItem {
@@ -74,6 +77,7 @@ export interface SearchResponse {
   query: string
   result_count: number
   latency_ms: number | null
+  answer?: AnswerModeResponse | null
 }
 
 export interface SearchRequestParams {
@@ -81,6 +85,8 @@ export interface SearchRequestParams {
   project?: string
   version_scope?: string
   limit?: number
+  mode?: 'find_docs' | 'ask_question' | 'find_decisions' | 'search_history' | 'compare_over_time'
+  answer_mode?: boolean
 }
 
 export interface TemplateDefinition {
@@ -158,7 +164,7 @@ export interface WorkspaceSnapshot {
 
 export interface SearchStreamEvent {
   event: 'phase' | 'error'
-  phase?: 'lexical' | 'reranked'
+  phase?: 'lexical' | 'reranked' | 'answer_ready'
   query: string
   results: SearchResultItem[]
   entity_facets: SearchEntityFacet[]
@@ -166,7 +172,42 @@ export interface SearchStreamEvent {
   latency_ms: number | null
   semantic_enabled: boolean
   rerank_applied: boolean
+  answer?: AnswerModeResponse | null
   message?: string
+}
+
+export interface SourceRef {
+  project_slug: string
+  document_uid: string
+  version_number: number
+  content_hash: string
+  chunk_id: string
+  canonical_path: string
+  heading_path: string[]
+  line_start: number
+  line_end: number
+}
+
+export interface Citation {
+  index: number
+  human_readable: string
+  source_ref: SourceRef
+}
+
+export interface AnswerModeResponse {
+  answer: string
+  citations: Citation[]
+  error: string
+  model: string
+}
+
+export interface DocumentEntityMention {
+  entity_id: string
+  canonical_name: string
+  entity_type: string
+  raw_text: string
+  start_char: number
+  end_char: number
 }
 
 export interface Candidate {
@@ -336,6 +377,12 @@ export const api = {
       fetchJSON<DocumentContent>(
         `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}`,
       ),
+    assetUrl: (projectSlug: string, docPath: string) =>
+      `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/asset`,
+    entities: (projectSlug: string, docPath: string) =>
+      fetchJSON<DocumentEntityMention[]>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}/entities`,
+      ),
     create: (projectSlug: string, data: {
       relative_path: string; title: string; doc_type: string; content: string; tags?: string[]
     }) =>
@@ -488,7 +535,7 @@ export const api = {
       const fallback = await api.search(params)
       await onEvent({
         event: 'phase',
-        phase: 'reranked',
+        phase: fallback.answer ? 'answer_ready' : 'reranked',
         query: fallback.query,
         results: fallback.results,
         entity_facets: fallback.entity_facets,
@@ -496,6 +543,7 @@ export const api = {
         latency_ms: fallback.latency_ms,
         semantic_enabled: false,
         rerank_applied: false,
+        answer: fallback.answer ?? null,
       })
       return
     }
