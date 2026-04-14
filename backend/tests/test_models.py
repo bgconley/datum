@@ -3,6 +3,7 @@ from pathlib import Path
 from sqlalchemy import BigInteger
 from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
 
+from datum.config import Settings
 from datum.models import (
     DocumentVersion,
     SourceFile,
@@ -53,6 +54,14 @@ def test_alembic_env_reads_database_url(monkeypatch):
     env_path = Path(__file__).parent.parent / "alembic" / "env.py"
     source = env_path.read_text()
     assert "DATUM_DATABASE_URL" in source, "alembic/env.py must read DATUM_DATABASE_URL"
+
+
+def test_default_database_url_matches_runtime_stack(monkeypatch):
+    monkeypatch.delenv("DATUM_DATABASE_URL", raising=False)
+    assert (
+        Settings().database_url
+        == "postgresql+asyncpg://datum:datum_dev@localhost:5432/datum"
+    )
 
 
 def test_search_models_registered():

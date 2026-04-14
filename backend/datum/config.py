@@ -7,7 +7,7 @@ EMBEDDING_SCHEMA_DIMENSIONS = 1024
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://datum:datum@localhost:5432/datum"
+    database_url: str = "postgresql+asyncpg://datum:datum_dev@localhost:5432/datum"
     projects_root: Path = Path("/tank/datum/projects")
     blobs_root: Path = Path("/tank/datum/blobs")
     cache_root: Path = Path("/tank/datum/cache")
