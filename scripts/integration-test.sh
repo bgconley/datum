@@ -367,13 +367,23 @@ echo "Projects root: $DATUM_PROJECTS_ROOT"
 echo "PG data: $DATUM_PGDATA"
 echo ""
 
-# --- 0. Verify datum venv exists ---
+# --- 0. Refresh datum venv ---
 echo "--- 0. Datum venv ---"
 if [ ! -f "$VENV_PATH/bin/activate" ]; then
     echo "  FATAL: Datum venv not found at $VENV_PATH"
     echo "  Run: bash scripts/bootstrap-gpu-node.sh"
     exit 1
 fi
+
+echo "  Refreshing datum venv against current repo dependencies..."
+BOOTSTRAP_LOG="$(mktemp)"
+if ! bash "$SCRIPT_DIR/bootstrap-gpu-node.sh" >"$BOOTSTRAP_LOG" 2>&1; then
+    cat "$BOOTSTRAP_LOG"
+    rm -f "$BOOTSTRAP_LOG"
+    exit 1
+fi
+rm -f "$BOOTSTRAP_LOG"
+
 source "$VENV_PATH/bin/activate"
 echo "  Python: $(python --version)"
 echo "  datum installed: $(pip show datum 2>/dev/null | grep Version || echo 'NOT FOUND')"

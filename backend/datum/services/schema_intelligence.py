@@ -53,6 +53,28 @@ _ALTER_FK_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _DRIZZLE_TABLE_FUNCTIONS = {"pgTable", "mysqlTable", "sqliteTable"}
+_PRISMA_MODEL_BLOCK_RE = re.compile(
+    r"model\s+(?P<name>[A-Za-z_][\w]*)\s*\{(?P<body>.*?)\}",
+    re.DOTALL,
+)
+_PRISMA_FIELD_RE = re.compile(
+    r"^(?P<field>[A-Za-z_][\w]*)\s+(?P<type>[A-Za-z_][\w\[\]\?]*)",
+)
+_PRISMA_RELATION_FIELDS_RE = re.compile(r"fields:\s*\[\s*([A-Za-z_][\w]*)\s*\]")
+_PRISMA_RELATION_REFS_RE = re.compile(r"references:\s*\[\s*([A-Za-z_][\w]*)\s*\]")
+_DRIZZLE_TABLE_RE = re.compile(
+    r"(?:export\s+const\s+[A-Za-z_][\w]*\s*=\s*)?"
+    r"(?P<fn>pgTable|mysqlTable|sqliteTable)"
+    r"\(\s*['\"](?P<table>[^'\"]+)['\"]\s*,\s*\{(?P<body>.*?)\}\s*\)",
+    re.DOTALL,
+)
+_DRIZZLE_COLUMN_RE = re.compile(
+    r"^(?P<name>[A-Za-z_][\w]*)\s*:\s*(?P<expr>.+?)(?:,)?$",
+)
+_DRIZZLE_BASE_TYPE_RE = re.compile(r"([A-Za-z_][\w]*)\s*\(")
+_DRIZZLE_REFERENCE_RE = re.compile(
+    r"references\s*\(\s*\(\)\s*=>\s*([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)\s*\)",
+)
 
 
 def _iter_create_table_blocks(content: str) -> list[tuple[str, str]]:
@@ -189,7 +211,7 @@ def parse_prisma(content: str) -> tuple[list[SchemaEntity], list[SchemaRelations
 
     parser = _get_ast_parser("prisma")
     if parser is None:
-        return [], []
+        return _parse_prisma_fallback(content)
 
     source = content.encode("utf-8")
     tree = parser.parse(source)
@@ -247,6 +269,8 @@ def parse_prisma(content: str) -> tuple[list[SchemaEntity], list[SchemaRelations
                         )
                     )
 
+    if not entities:
+        return _parse_prisma_fallback(content)
     return entities, relationships
 
 
@@ -319,7 +343,7 @@ def parse_drizzle(content: str) -> tuple[list[SchemaEntity], list[SchemaRelation
 
     parser = _get_ast_parser("typescript")
     if parser is None:
-        return [], []
+        return _parse_drizzle_fallback(content)
 
     source = content.encode("utf-8")
     tree = parser.parse(source)
@@ -390,6 +414,104 @@ def parse_drizzle(content: str) -> tuple[list[SchemaEntity], list[SchemaRelation
                         target=target,
                         relationship_type="relation",
                         evidence_text=_node_text(source, pair).strip(),
+                    )
+                )
+
+    if not entities:
+        return _parse_drizzle_fallback(content)
+    return entities, relationships
+
+
+def _parse_prisma_fallback(content: str) -> tuple[list[SchemaEntity], list[SchemaRelationship]]:
+    entities: list[SchemaEntity] = []
+    relationships: list[SchemaRelationship] = []
+
+    for match in _PRISMA_MODEL_BLOCK_RE.finditer(content):
+        model_name = match.group("name")
+        body = match.group("body")
+        entities.append(SchemaEntity(name=model_name, entity_type="model"))
+
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("//") or line.startswith("@@"):
+                continue
+            field_match = _PRISMA_FIELD_RE.match(line)
+            if field_match is None:
+                continue
+
+            field_name = field_match.group("field")
+            field_type = _normalize_prisma_type(field_match.group("type"))
+            entities.append(
+                SchemaEntity(
+                    name=f"{model_name}.{field_name}",
+                    entity_type="field",
+                    properties={"model": model_name, "type": field_type},
+                )
+            )
+
+            source_field_match = _PRISMA_RELATION_FIELDS_RE.search(line)
+            target_field_match = _PRISMA_RELATION_REFS_RE.search(line)
+            if source_field_match and target_field_match:
+                relationships.append(
+                    SchemaRelationship(
+                        source=f"{model_name}.{source_field_match.group(1)}",
+                        target=f"{field_type}.{target_field_match.group(1)}",
+                        relationship_type="relation",
+                        evidence_text=line,
+                    )
+                )
+
+    return entities, relationships
+
+
+def _parse_drizzle_fallback(content: str) -> tuple[list[SchemaEntity], list[SchemaRelationship]]:
+    entities: list[SchemaEntity] = []
+    relationships: list[SchemaRelationship] = []
+
+    for match in _DRIZZLE_TABLE_RE.finditer(content):
+        table_name = match.group("table")
+        body = match.group("body")
+        entities.append(
+            SchemaEntity(
+                name=table_name,
+                entity_type="table",
+                properties={"dialect": "drizzle"},
+            )
+        )
+
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            column_match = _DRIZZLE_COLUMN_RE.match(line)
+            if column_match is None:
+                continue
+
+            column_name = column_match.group("name")
+            expr = column_match.group("expr")
+            base_type_match = _DRIZZLE_BASE_TYPE_RE.search(expr)
+            column_type = base_type_match.group(1) if base_type_match else "unknown"
+            entities.append(
+                SchemaEntity(
+                    name=f"{table_name}.{column_name}",
+                    entity_type="column",
+                    properties={
+                        "table": table_name,
+                        "column": column_name,
+                        "type": column_type,
+                        "dialect": "drizzle",
+                    },
+                )
+            )
+
+            ref_match = _DRIZZLE_REFERENCE_RE.search(expr)
+            if ref_match:
+                relationships.append(
+                    SchemaRelationship(
+                        source=f"{table_name}.{column_name}",
+                        target=f"{ref_match.group(1)}.{ref_match.group(2)}",
+                        relationship_type="relation",
+                        evidence_text=line,
                     )
                 )
 

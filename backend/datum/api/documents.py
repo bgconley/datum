@@ -1,5 +1,6 @@
 import logging
 import mimetypes
+from pathlib import Path
 from urllib.parse import quote
 from uuid import UUID
 
@@ -48,6 +49,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/projects/{slug}/docs", tags=["documents"])
 
+_MIME_TYPE_OVERRIDES = {
+    ".md": "text/markdown",
+    ".sql": "application/sql",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+    ".json": "application/json",
+    ".toml": "application/toml",
+    ".prisma": "text/plain",
+    ".ts": "text/typescript",
+    ".tsx": "text/tsx",
+    ".js": "text/javascript",
+    ".jsx": "text/jsx",
+    ".pdf": "application/pdf",
+    ".svg": "image/svg+xml",
+}
+
 
 def _log_db_sync_skip(
     *,
@@ -77,6 +94,9 @@ def _get_project_path(slug: str):
 
 
 def _guess_mime_type(relative_path: str) -> str | None:
+    suffix = Path(relative_path).suffix.lower()
+    if suffix in _MIME_TYPE_OVERRIDES:
+        return _MIME_TYPE_OVERRIDES[suffix]
     mime_type, _encoding = mimetypes.guess_type(relative_path)
     return mime_type
 

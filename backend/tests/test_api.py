@@ -82,12 +82,7 @@ async def test_get_plain_text_document_without_frontmatter(client):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["content_kind"] == "text"
-    assert payload["mime_type"] in {
-        "text/typescript",
-        "application/typescript",
-        "video/mp2t",
-        "text/plain",
-    }
+    assert payload["mime_type"] == "text/typescript"
     assert "export const answer = 42" in payload["content"]
 
 
