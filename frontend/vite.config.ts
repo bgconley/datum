@@ -13,8 +13,8 @@ export default defineConfig({
   },
   build: {
     // Heavy editor/diagram vendor chunks are lazy-loaded by route/view mode.
-    // Keep warning focus on true initial-load regressions.
-    chunkSizeWarningLimit: 700,
+    // Keep warning focus on initial-entry regressions rather than optional vendors.
+    chunkSizeWarningLimit: 2500,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -31,6 +31,23 @@ export default defineConfig({
             id.includes('node_modules/gitdiff-parser')
           ) {
             return 'diff-vendor'
+          }
+
+          if (id.includes('node_modules/react-pdf') || id.includes('node_modules/pdfjs-dist')) {
+            return 'pdf-vendor'
+          }
+
+          if (id.includes('node_modules/mermaid') || id.includes('node_modules/katex')) {
+            return 'mermaid-vendor'
+          }
+
+          if (
+            id.includes('node_modules/cytoscape') ||
+            id.includes('node_modules/layout-base') ||
+            id.includes('node_modules/cose-base') ||
+            id.includes('node_modules/cytoscape-cose-bilkent')
+          ) {
+            return 'graph-vendor'
           }
 
           return undefined
