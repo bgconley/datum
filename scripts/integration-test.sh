@@ -1040,9 +1040,12 @@ PHASE9_SESSION_ID="phase9-${INTEGRATION_RUN_ID}"
 PHASE9_SESSION_PATH="docs/sessions/phase9-${INTEGRATION_RUN_ID}.md"
 
 echo "  Starting lifecycle session..."
-curl --fail-with-body -sS -X POST "$API/agent/sessions/start" \
+PHASE9_START=$(curl --fail-with-body -sS -X POST "$API/agent/sessions/start" \
   -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"${PHASE9_SESSION_ID}\",\"project_slug\":\"${API_TEST_SLUG}\",\"client_type\":\"integration\"}" >/dev/null
+  -d "{\"session_id\":\"${PHASE9_SESSION_ID}\",\"project_slug\":\"${API_TEST_SLUG}\",\"client_type\":\"integration\"}")
+PHASE9_ENFORCEMENT_MODE=$(echo "$PHASE9_START" | python3 -c 'import sys,json; print(json.load(sys.stdin)["enforcement_mode"])')
+[ "$PHASE9_ENFORCEMENT_MODE" = "blocking" ] || { echo "    FAIL: expected blocking lifecycle mode, got $PHASE9_ENFORCEMENT_MODE"; exit 1; }
+echo "    Mode: $PHASE9_ENFORCEMENT_MODE"
 
 echo "  Write without preflight -> 428..."
 PHASE9_BLOCKED_STATUS=$(curl -s -o /tmp/datum-phase9-blocked.json -w "%{http_code}" \
