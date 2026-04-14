@@ -146,10 +146,18 @@ WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
    );
 DELETE FROM audit_events
 WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
-DELETE FROM idempotency_records
-WHERE idempotency_key LIKE '${PHASE6_IDEMPOTENCY_PREFIX}-%';
-DELETE FROM api_keys
-WHERE name LIKE '${PHASE6_KEY_NAME_PREFIX}-%';
+DO $$
+BEGIN
+    IF to_regclass('public.idempotency_records') IS NOT NULL THEN
+        DELETE FROM idempotency_records
+        WHERE idempotency_key LIKE '${PHASE6_IDEMPOTENCY_PREFIX}-%';
+    END IF;
+
+    IF to_regclass('public.api_keys') IS NOT NULL THEN
+        DELETE FROM api_keys
+        WHERE name LIKE '${PHASE6_KEY_NAME_PREFIX}-%';
+    END IF;
+END $$;
 DELETE FROM document_versions
 WHERE document_id IN (
     SELECT id FROM documents
