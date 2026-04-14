@@ -24,6 +24,7 @@ from datum.schemas.agent import (
 from datum.services.audit import log_agent_audit
 from datum.services.auth import extract_api_key
 from datum.services.db_sync import sync_document_version_to_db
+from datum.services.delta_aggregator import record_delta
 from datum.services.idempotency import check_idempotency, store_idempotency
 from datum.services.session_links import auto_link_session_note
 from datum.services.sessions import (
@@ -35,6 +36,7 @@ from datum.services.sessions import (
 )
 from datum.services.sessions import create_session_note as create_session_note_file
 from datum.services.versioning import get_current_version
+from datum.services.write_barrier import require_preflight
 
 router = APIRouter(prefix="/api/v1/projects/{slug}/sessions", tags=["sessions"])
 
@@ -113,8 +115,10 @@ async def api_create_session(
     session: AsyncSession = Depends(get_session),
     api_key: ApiKey | None = Depends(extract_api_key),
     idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
+    x_session_id: Annotated[str | None, Header(alias="X-Session-ID")] = None,
+    _barrier=Depends(require_preflight),
 ):
-    del api_key  # Optional in Phase 6 for backward compatibility.
+    del api_key, _barrier  # Optional in Phase 6 for backward compatibility.
 
     project_dir = _get_project_dir(slug)
     scope = "create_session_note"
@@ -169,6 +173,14 @@ async def api_create_session(
     ).model_dump()
     if idempotency_key:
         await store_idempotency(session, idempotency_key, scope, 201, response)
+    lifecycle_session_id = x_session_id or body.session_id
+    if lifecycle_session_id:
+        await record_delta(
+            lifecycle_session_id,
+            "doc_create",
+            {"path": relative_path, "kind": "session_note"},
+            session,
+        )
     await session.commit()
     return _stable_json_response(201, response)
 
@@ -181,8 +193,10 @@ async def api_append_session(
     session: AsyncSession = Depends(get_session),
     api_key: ApiKey | None = Depends(extract_api_key),
     idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
+    x_session_id: Annotated[str | None, Header(alias="X-Session-ID")] = None,
+    _barrier=Depends(require_preflight),
 ):
-    del api_key
+    del api_key, _barrier
 
     project_dir = _get_project_dir(slug)
     scope = "append_session_note"
@@ -234,6 +248,14 @@ async def api_append_session(
     }
     if idempotency_key:
         await store_idempotency(session, idempotency_key, scope, 200, response)
+    lifecycle_session_id = x_session_id or session_id
+    if lifecycle_session_id:
+        await record_delta(
+            lifecycle_session_id,
+            "doc_update",
+            {"path": relative_path, "kind": "session_note"},
+            session,
+        )
     await session.commit()
     return _stable_json_response(200, response)
 

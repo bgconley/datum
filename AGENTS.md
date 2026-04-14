@@ -19,13 +19,13 @@ If this file and the detailed plans diverge, preserve the design invariants firs
 
 ## Implementation Status At HEAD
 
-- Implemented and validated locally: Phase 1 through Phase 8
-- Planned and not yet implemented: Phase 9
-- Treat the Phase 9 plan doc as forward work, not an active runtime guarantee.
-- Do not assume these Phase 9 artifacts exist yet:
-  - DB tables such as `agent_sessions`, `session_deltas`
-  - Server-side lifecycle write barriers
-  - Hook/wrapper-enforced lifecycle stop barriers
+- Implemented and validated locally: Phase 1 through Phase 9
+- Phase 9 lifecycle enforcement is now part of the active runtime:
+  - DB tables: `agent_sessions`, `session_deltas`
+  - Server-side write barrier: `428 Precondition Required` in blocking mode
+  - Stop barrier: `409 Conflict` for dirty-session finalize in blocking mode
+  - Claude Code hook adapter: `hooks/claude/*`
+  - Codex lifecycle wrapper + template: `adapters/codex/*`
 
 ## Purpose
 
@@ -90,9 +90,6 @@ For work that uses Datum APIs or MCP tools:
 The lifecycle rule is:
 
 `read-before-write, append-after-write, finalize-before-stop`
-
-This is currently a policy contract in Phase 6. Strict server-side enforcement
-and lifecycle state services are Phase 9 work.
 
 ## Read vs Write Surfaces
 
@@ -210,11 +207,11 @@ When adding a new write surface, wire all of these:
 - Blob GC and doctor must scan attachment metadata, not invented schema columns.
 - Backup scripts, systemd units, and query benchmark tooling are part of the active operational surface.
 
-### Phase 9 (Planned, Not Implemented At HEAD)
+### Phase 9
 
 - Lifecycle enforcement is real enforcement, not guidance text.
-- Claude Code integration uses hooks.
-- Codex integration uses wrapper/orchestrator plus `AGENTS.md`.
+- Claude Code integration uses hooks under `hooks/claude/`.
+- Codex integration uses `adapters/codex/datum-codex-wrapper.sh` plus `AGENTS.md.template`.
 - Server-side write barrier is the minimum enforcement floor.
 - MCP read tools record preflight; MCP write tools enforce barrier and record deltas.
 

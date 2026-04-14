@@ -59,6 +59,12 @@ from datum.models.intelligence import (
 from datum.models.intelligence import (
     Requirement as Requirement,
 )
+from datum.models.lifecycle import (
+    AgentSession as AgentSession,
+)
+from datum.models.lifecycle import (
+    SessionDelta as SessionDelta,
+)
 from datum.models.operational import (
     Annotation as Annotation,
 )
@@ -118,6 +124,7 @@ __all__ = [
     "EntityRelationship",
     "IngestionJob",
     "Insight",
+    "AgentSession",
     "ModelRun",
     "OpenQuestion",
     "PipelineConfig",
@@ -126,6 +133,7 @@ __all__ = [
     "SavedSearch",
     "SearchRun",
     "SearchRunResult",
+    "SessionDelta",
     "SourceFile",
     "TechnicalTerm",
     "VersionHeadEvent",

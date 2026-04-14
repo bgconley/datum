@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from datum.services.citations import SourceRef
 from datum.services.citations import resolve_citation as resolve_citation_text
 from datum.services.context import ContextConfig, DetailLevel, build_project_context
 from datum.services.db_sync import sync_document_version_to_db
+from datum.services.delta_aggregator import record_delta
 from datum.services.document_manager import (
     ConflictError,
     save_document,
@@ -51,6 +53,7 @@ from datum.services.intelligence import (
     reject_candidate as reject_candidate_service,
 )
 from datum.services.model_gateway import build_model_gateway
+from datum.services.preflight import record_preflight
 from datum.services.search import search_execution
 from datum.services.session_links import auto_link_session_note
 from datum.services.sessions import (
@@ -66,6 +69,7 @@ from datum.services.traceability import (
     list_project_insights,
 )
 from datum.services.versioning import get_current_version
+from datum.services.write_barrier import WriteBarrierConfig, evaluate_write_barrier
 
 
 def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
@@ -158,6 +162,54 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             )
             | {"data": records}
         )
+
+    async def _lifecycle_preflight(session_id: str | None, action: str) -> None:
+        if not session_id:
+            return
+        async with async_session_factory() as session:
+            recorded = await record_preflight(session_id, action, session)
+            if recorded:
+                await session.commit()
+
+    async def _lifecycle_write_check(session_id: str | None) -> dict | None:
+        if not settings.lifecycle_enabled:
+            return None
+        async with async_session_factory() as session:
+            result = await evaluate_write_barrier(
+                session_id=session_id,
+                db=session,
+                config=WriteBarrierConfig(
+                    enforcement_mode=settings.lifecycle_enforcement_mode,
+                    preflight_ttl=settings.preflight_ttl_seconds,
+                ),
+            )
+        if result.blocked:
+            return result.detail
+        return None
+
+    async def _lifecycle_record_delta(
+        session_id: str | None,
+        delta_type: str,
+        detail: dict,
+    ) -> None:
+        if not session_id:
+            return
+        async with async_session_factory() as session:
+            try:
+                await record_delta(session_id, delta_type, detail, session)
+                await session.commit()
+            except ValueError:
+                await session.rollback()
+
+    def _record_sync_preflight(session_id: str | None, action: str) -> None:
+        if not session_id:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_lifecycle_preflight(session_id, action))
+        else:
+            loop.create_task(_lifecycle_preflight(session_id, action))
 
     @mcp.resource("datum://projects")
     def projects_resource() -> str:
@@ -267,6 +319,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         answer_mode: bool = False,
         limit: int = 20,
         version_scope: str = "current",
+        session_id: str | None = None,
     ) -> dict:
         gateway = build_model_gateway()
         try:
@@ -340,14 +393,16 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                         for citation in answer.citations
                     ],
                 }
+            await _lifecycle_preflight(session_id, "search_project_memory")
             return payload
         finally:
             await gateway.close()
 
     @mcp.tool()
-    async def list_candidates(project: str) -> dict:
+    async def list_candidates(project: str, session_id: str | None = None) -> dict:
         async with async_session_factory() as session:
             candidates = await list_candidate_records(session, project)
+            await _lifecycle_preflight(session_id, "list_candidates")
             return {
                 "project": project,
                 "count": len(candidates),
@@ -361,6 +416,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         version_number: int,
         line_start: int = 1,
         line_end: int = 200,
+        session_id: str | None = None,
     ) -> dict:
         project_dir = _project_dir(project_slug)
         manifest_dir = resolve_manifest_dir(project_dir, canonical_path, for_write=False)
@@ -380,6 +436,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         )
         if content is None:
             return {"error": "Citation source not found"}
+        _record_sync_preflight(session_id, "get_project_context")
         return wrap_content(content, ContentKind.DOCUMENT, project_slug=project_slug)
 
     @mcp.tool()
@@ -389,6 +446,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         max_tokens: int = 8000,
         recency_days: int | None = None,
         limit_per_section: int | None = None,
+        session_id: str | None = None,
     ) -> dict:
         project_dir = _project_dir(project)
         if not project_dir.exists():
@@ -402,6 +460,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 limit_per_section=limit_per_section,
             ),
         )
+        _record_sync_preflight(session_id, "get_project_context")
         return (
             wrap_content(_json_text(payload), ContentKind.DOCUMENT, project_slug=project)
             | {"data": payload}
@@ -422,6 +481,9 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         next_steps: list[str] | None = None,
         idempotency_key: str | None = None,
     ) -> dict:
+        barrier = await _lifecycle_write_check(session_id)
+        if barrier:
+            return barrier
         scope = "append_session_notes"
         async with async_session_factory() as session:
             if idempotency_key:
@@ -492,7 +554,12 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             if idempotency_key:
                 await store_idempotency(session, idempotency_key, scope, 200, result)
             await session.commit()
-            return result
+        await _lifecycle_record_delta(
+            session_id,
+            "doc_update",
+            {"path": relative_path, "kind": "session_note"},
+        )
+        return result
 
     @mcp.tool()
     async def record_decision(
@@ -505,6 +572,9 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         session_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict:
+        barrier = await _lifecycle_write_check(session_id)
+        if barrier:
+            return barrier
         scope = "record_decision"
         async with async_session_factory() as session:
             if idempotency_key:
@@ -568,7 +638,12 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             if idempotency_key:
                 await store_idempotency(session, idempotency_key, scope, 201, result)
             await session.commit()
-            return result
+        await _lifecycle_record_delta(
+            session_id,
+            "doc_create",
+            {"path": result["path"], "kind": "decision_record", "uid": result["uid"]},
+        )
+        return result
 
     @mcp.tool()
     async def create_document(
@@ -581,6 +656,9 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         session_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict:
+        barrier = await _lifecycle_write_check(session_id)
+        if barrier:
+            return barrier
         scope = "create_document"
         async with async_session_factory() as session:
             if idempotency_key:
@@ -621,7 +699,12 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             if idempotency_key:
                 await store_idempotency(session, idempotency_key, scope, 201, result)
             await session.commit()
-            return result
+        await _lifecycle_record_delta(
+            session_id,
+            "doc_create",
+            {"path": result["path"], "kind": "document"},
+        )
+        return result
 
     @mcp.tool()
     async def update_document(
@@ -633,6 +716,9 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         session_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict:
+        barrier = await _lifecycle_write_check(session_id)
+        if barrier:
+            return barrier
         scope = "update_document"
         async with async_session_factory() as session:
             if idempotency_key:
@@ -689,7 +775,12 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             if idempotency_key:
                 await store_idempotency(session, idempotency_key, scope, 200, result)
             await session.commit()
-            return result
+        await _lifecycle_record_delta(
+            session_id,
+            "doc_update",
+            {"path": result["path"], "kind": "document"},
+        )
+        return result
 
     @mcp.tool()
     async def accept_candidate(
@@ -707,6 +798,9 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         priority: str | None = None,
         resolution: str | None = None,
     ) -> dict:
+        barrier = await _lifecycle_write_check(session_id)
+        if barrier:
+            return barrier
         scope = "accept_candidate"
         async with async_session_factory() as session:
             if idempotency_key:
@@ -750,7 +844,12 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             if idempotency_key:
                 await store_idempotency(session, idempotency_key, scope, 200, payload)
             await session.commit()
-            return payload
+        await _lifecycle_record_delta(
+            session_id,
+            "candidate_action",
+            {"action": "accept", "type": candidate_type, "id": candidate_id},
+        )
+        return payload
 
     @mcp.tool()
     async def reject_candidate(
@@ -761,6 +860,9 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         session_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict:
+        barrier = await _lifecycle_write_check(session_id)
+        if barrier:
+            return barrier
         scope = "reject_candidate"
         async with async_session_factory() as session:
             if idempotency_key:
@@ -795,16 +897,23 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
             if idempotency_key:
                 await store_idempotency(session, idempotency_key, scope, 200, payload)
             await session.commit()
-            return payload
+        await _lifecycle_record_delta(
+            session_id,
+            "candidate_action",
+            {"action": "reject", "type": candidate_type, "id": candidate_id},
+        )
+        return payload
 
     @mcp.tool()
     async def get_insights(
         project: str,
         status: str = "open",
         limit: int = 20,
+        session_id: str | None = None,
     ) -> dict:
         async with async_session_factory() as session:
             insights = await list_project_insights(session, project, status=status, limit=limit)
+        await _lifecycle_preflight(session_id, "get_project_context")
         payload = [item.__dict__ for item in insights]
         return (
             wrap_content(
@@ -821,6 +930,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         entity_name: str | None = None,
         relationship_type: str | None = None,
         limit: int = 50,
+        session_id: str | None = None,
     ) -> dict:
         async with async_session_factory() as session:
             relationships = await list_project_entity_relationships(
@@ -830,6 +940,7 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
                 relationship_type=relationship_type,
                 limit=limit,
             )
+        await _lifecycle_preflight(session_id, "get_project_context")
         payload = [item.__dict__ for item in relationships]
         return (
             wrap_content(
@@ -841,9 +952,10 @@ def create_mcp_server(projects_root: str | Path | None = None) -> FastMCP:
         )
 
     @mcp.tool()
-    async def get_traceability(project: str) -> dict:
+    async def get_traceability(project: str, session_id: str | None = None) -> dict:
         async with async_session_factory() as session:
             chains = await get_traceability_chains(session, project)
+        await _lifecycle_preflight(session_id, "get_project_context")
         payload = [
             {
                 "requirement": chain.requirement.__dict__ if chain.requirement else None,

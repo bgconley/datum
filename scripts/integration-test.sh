@@ -38,6 +38,7 @@ export DATUM_PGDATA="${DATUM_PGDATA:-/tank/datum/pgdata}"
 export DATUM_EMBEDDING_ENDPOINT="${DATUM_EMBEDDING_ENDPOINT:-http://localhost:8010}"
 export DATUM_RERANKER_ENDPOINT="${DATUM_RERANKER_ENDPOINT:-http://localhost:8011}"
 export DATUM_NER_ENDPOINT="${DATUM_NER_ENDPOINT:-http://localhost:8012}"
+export DATUM_LIFECYCLE_ENFORCEMENT_MODE="${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-blocking}"
 export INTEGRATION_RUN_ID="${INTEGRATION_RUN_ID:-$(date +%s)-$$}"
 export PHASE6_KEY_NAME_PREFIX="${PHASE6_KEY_NAME_PREFIX:-integration-test-phase6}"
 export PHASE6_IDEMPOTENCY_PREFIX="${PHASE6_IDEMPOTENCY_PREFIX:-phase6-integration}"
@@ -228,6 +229,13 @@ BEGIN
         DELETE FROM api_keys
         WHERE name LIKE '${PHASE6_KEY_NAME_PREFIX}-%';
     END IF;
+
+    IF to_regclass('public.agent_sessions') IS NOT NULL THEN
+        DELETE FROM agent_sessions
+        WHERE session_id LIKE '%${INTEGRATION_RUN_ID}%'
+           OR project_id IS NULL
+              AND session_id LIKE 'phase9-%';
+    END IF;
 END \$\$;
 SQL
     )
@@ -354,6 +362,7 @@ echo "Host: $(hostname)"
 echo "Date: $(date)"
 echo "Venv: $VENV_PATH"
 echo "UID:GID: ${DATUM_UID}:${DATUM_GID}"
+echo "Lifecycle enforcement: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE}"
 echo "Projects root: $DATUM_PROJECTS_ROOT"
 echo "PG data: $DATUM_PGDATA"
 echo ""
@@ -685,7 +694,12 @@ curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/docs" \
 wait_for_search_pipeline "$API_TEST_SLUG" 45 "$REQUIRE_EMBEDDINGS"
 
 echo "  Checking inbox..."
-INBOX=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/inbox")
+PHASE5_LIFECYCLE_SESSION_ID="phase5-${INTEGRATION_RUN_ID}"
+curl --fail-with-body -sS -X POST "$API/agent/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d "{\"session_id\":\"${PHASE5_LIFECYCLE_SESSION_ID}\",\"project_slug\":\"${API_TEST_SLUG}\",\"client_type\":\"integration\"}" >/dev/null
+INBOX=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/inbox" \
+  -H "X-Session-ID: ${PHASE5_LIFECYCLE_SESSION_ID}")
 INBOX_COUNT=$(echo "$INBOX" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
 HAS_DECISION=$(echo "$INBOX" | python3 -c 'import sys,json;items=json.load(sys.stdin);print(any(item["candidate_type"]=="decision" for item in items))')
 HAS_REQUIREMENT=$(echo "$INBOX" | python3 -c 'import sys,json;items=json.load(sys.stdin);print(any(item["candidate_type"]=="requirement" for item in items))')
@@ -702,10 +716,12 @@ echo "  Accepting extracted requirement and decision candidates..."
 curl --fail-with-body -sS -X POST \
   "$API/projects/${API_TEST_SLUG}/inbox/decision/${DECISION_CANDIDATE_ID}/accept" \
   -H "Content-Type: application/json" \
+  -H "X-Session-ID: ${PHASE5_LIFECYCLE_SESSION_ID}" \
   -d '{}' >/dev/null
 curl --fail-with-body -sS -X POST \
   "$API/projects/${API_TEST_SLUG}/inbox/requirement/${REQUIREMENT_CANDIDATE_ID}/accept" \
   -H "Content-Type: application/json" \
+  -H "X-Session-ID: ${PHASE5_LIFECYCLE_SESSION_ID}" \
   -d '{}' >/dev/null
 
 echo "  Checking detected document links..."
@@ -934,10 +950,17 @@ echo "$KEY_LIST" | python3 -c 'import sys,json; data=json.load(sys.stdin); asser
 echo "    Admin list: OK"
 
 echo "  Creating and appending a session note..."
+curl --fail-with-body -sS -X POST "$API/agent/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d "{\"session_id\":\"${PHASE6_SESSION_ID}\",\"project_slug\":\"${API_TEST_SLUG}\",\"client_type\":\"integration\"}" >/dev/null
+curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/context?detail=brief&max_tokens=300" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Session-ID: ${PHASE6_SESSION_ID}" >/dev/null
 SESSION_CREATE=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $PHASE6_RW_KEY" \
   -H "X-Idempotency-Key: $PHASE6_CREATE_IDEM_KEY" \
+  -H "X-Session-ID: ${PHASE6_SESSION_ID}" \
   -d "{\"session_id\":\"${PHASE6_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Integration session ${INTEGRATION_RUN_ID}\",\"content\":\"## Session\\nCreated during Phase 6 integration verification.\",\"repo_path\":\"/tank/repos/datum\",\"git_branch\":\"main\",\"files_touched\":[\"docs/api-test.md\"],\"commands_run\":[\"pytest -q\"],\"next_steps\":[\"verify mcp\"]}")
 SESSION_PATH="$(echo "$SESSION_CREATE" | python3 -c 'import sys,json;print(json.load(sys.stdin)["path"])')"
 [ -n "$SESSION_PATH" ] || { echo "    FAIL: session creation returned no path"; exit 1; }
@@ -946,6 +969,7 @@ SESSION_APPEND=$(curl --fail-with-body -sS -X PUT "$API/projects/${API_TEST_SLUG
   -H "Content-Type: application/json" \
   -H "X-API-Key: $PHASE6_RW_KEY" \
   -H "X-Idempotency-Key: ${PHASE6_IDEMPOTENCY_PREFIX}-append-${INTEGRATION_RUN_ID}" \
+  -H "X-Session-ID: ${PHASE6_SESSION_ID}" \
   -d "{\"content\":\"## Follow-up\\nAppended content for audit verification.\",\"files_touched\":[\"docs/sessions/${PHASE6_SESSION_ID}.md\"],\"commands_run\":[\"curl /api/v1/projects/${API_TEST_SLUG}/sessions\"],\"next_steps\":[\"review audit\"],\"summary\":\"Integration session ${INTEGRATION_RUN_ID} updated\"}")
 echo "$SESSION_APPEND" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["status"] == "appended"'
 
@@ -985,21 +1009,99 @@ echo "$MCP_CADDY_EVENT" | grep -q "data: /mcp/" || { echo "    FAIL: Caddy MCP S
 echo "    MCP SSE: datum-api + Caddy emitted endpoint event"
 
 echo "  Verifying idempotent session creation..."
+curl --fail-with-body -sS -X POST "$API/agent/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d "{\"session_id\":\"${PHASE6_IDEM_SESSION_ID}\",\"project_slug\":\"${API_TEST_SLUG}\",\"client_type\":\"integration\"}" >/dev/null
+curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/context?detail=brief&max_tokens=300" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Session-ID: ${PHASE6_IDEM_SESSION_ID}" >/dev/null
 IDEM_RESP1=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $PHASE6_RW_KEY" \
   -H "X-Idempotency-Key: $PHASE6_IDEM_IDEM_KEY" \
+  -H "X-Session-ID: ${PHASE6_IDEM_SESSION_ID}" \
   -d "{\"session_id\":\"${PHASE6_IDEM_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Idempotency ${INTEGRATION_RUN_ID}\",\"content\":\"## Idempotent\\nFirst create.\"}")
 IDEM_RESP2=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $PHASE6_RW_KEY" \
   -H "X-Idempotency-Key: $PHASE6_IDEM_IDEM_KEY" \
+  -H "X-Session-ID: ${PHASE6_IDEM_SESSION_ID}" \
   -d "{\"session_id\":\"${PHASE6_IDEM_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Idempotency ${INTEGRATION_RUN_ID}\",\"content\":\"## Idempotent\\nFirst create.\"}")
 [ "$IDEM_RESP1" = "$IDEM_RESP2" ] || { echo "    FAIL: idempotent create responses differ"; exit 1; }
 IDEM_COUNT=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/sessions" \
   -H "X-API-Key: $PHASE6_RW_KEY" | python3 -c 'import sys,json; data=json.load(sys.stdin); print(sum(1 for item in data["sessions"] if item["session_id"] == sys.argv[1]))' "$PHASE6_IDEM_SESSION_ID")
 [ "$IDEM_COUNT" = "1" ] || { echo "    FAIL: expected 1 idempotent session note, got $IDEM_COUNT"; exit 1; }
 echo "    Idempotency: OK"
+echo ""
+
+# --- 6.10. Phase 9 lifecycle enforcement ---
+echo "--- 6.10. Phase 9 lifecycle enforcement ---"
+PHASE9_SESSION_ID="phase9-${INTEGRATION_RUN_ID}"
+PHASE9_SESSION_PATH="docs/sessions/phase9-${INTEGRATION_RUN_ID}.md"
+
+echo "  Starting lifecycle session..."
+curl --fail-with-body -sS -X POST "$API/agent/sessions/start" \
+  -H "Content-Type: application/json" \
+  -d "{\"session_id\":\"${PHASE9_SESSION_ID}\",\"project_slug\":\"${API_TEST_SLUG}\",\"client_type\":\"integration\"}" >/dev/null
+
+echo "  Write without preflight -> 428..."
+PHASE9_BLOCKED_STATUS=$(curl -s -o /tmp/datum-phase9-blocked.json -w "%{http_code}" \
+  -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Session-ID: ${PHASE9_SESSION_ID}" \
+  -d "{\"session_id\":\"${PHASE9_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Phase 9 block\",\"content\":\"Blocked until preflight.\"}")
+[ "$PHASE9_BLOCKED_STATUS" = "428" ] || { echo "    FAIL: expected 428, got $PHASE9_BLOCKED_STATUS"; cat /tmp/datum-phase9-blocked.json; exit 1; }
+python3 -c 'import json,sys; data=json.load(open("/tmp/datum-phase9-blocked.json")); assert data["detail"]["error"] == "preflight_required"'
+echo "    OK"
+
+echo "  Recording real preflight..."
+curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/context?detail=brief&max_tokens=300" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Session-ID: ${PHASE9_SESSION_ID}" >/dev/null
+
+echo "  Write after preflight -> 201..."
+PHASE9_CREATE=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Session-ID: ${PHASE9_SESSION_ID}" \
+  -d "{\"session_id\":\"${PHASE9_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Phase 9 lifecycle\",\"content\":\"Write after preflight.\"}")
+echo "$PHASE9_CREATE" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["path"].startswith("docs/sessions/")'
+echo "    OK"
+
+echo "  Status shows dirty session..."
+PHASE9_STATUS=$(curl --fail-with-body -sS "$API/agent/sessions/${PHASE9_SESSION_ID}/status")
+echo "$PHASE9_STATUS" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["is_dirty"] is True; assert data["unflushed_delta_count"] >= 1'
+echo "    OK"
+
+echo "  Finalize while dirty -> 409..."
+PHASE9_FINALIZE_STATUS=$(curl -s -o /tmp/datum-phase9-finalize.json -w "%{http_code}" \
+  -X POST "$API/agent/sessions/${PHASE9_SESSION_ID}/finalize")
+[ "$PHASE9_FINALIZE_STATUS" = "409" ] || { echo "    FAIL: expected 409, got $PHASE9_FINALIZE_STATUS"; cat /tmp/datum-phase9-finalize.json; exit 1; }
+python3 -c 'import json,sys; data=json.load(open("/tmp/datum-phase9-finalize.json")); assert data["detail"]["error"] == "dirty_session"'
+echo "    OK"
+
+echo "  Flush then finalize..."
+PHASE9_FLUSH=$(curl --fail-with-body -sS -X POST "$API/agent/sessions/${PHASE9_SESSION_ID}/flush")
+echo "$PHASE9_FLUSH" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["flushed_count"] >= 1'
+PHASE9_FINAL=$(curl --fail-with-body -sS -X POST "$API/agent/sessions/${PHASE9_SESSION_ID}/finalize")
+echo "$PHASE9_FINAL" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["status"] == "finalized"'
+echo "    OK"
+
+echo "  Hook and adapter assets..."
+for asset in \
+    "hooks/claude/session-start.sh" \
+    "hooks/claude/pre-tool-use.sh" \
+    "hooks/claude/post-tool-use.sh" \
+    "hooks/claude/pre-compact.sh" \
+    "hooks/claude/stop.sh" \
+    "hooks/claude/session-end.sh" \
+    "hooks/claude/install-hooks.sh" \
+    "adapters/codex/datum-codex-wrapper.sh"; do
+    [ -x "$REPO_DIR/$asset" ] || { echo "    FAIL: $asset missing or not executable"; exit 1; }
+done
+[ -f "$REPO_DIR/adapters/codex/AGENTS.md.template" ] || { echo "    FAIL: adapters/codex/AGENTS.md.template missing"; exit 1; }
+echo "    OK"
 echo ""
 
 # --- 7. Background workers health check ---

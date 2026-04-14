@@ -5,26 +5,27 @@ the code at current `HEAD` intentionally reflects a subset of that roadmap.
 
 ## Current Delivery State
 
-- Implemented and validated locally: **Phase 1 through Phase 8**
-- Planned and outstanding: **Phase 9**
+- Implemented and validated locally: **Phase 1 through Phase 9**
 
 ## What This Means Operationally
 
-- The design and per-phase plan for Phase 9 remains an authoritative planning
-  document, not a statement that Phase 9 is already live at `HEAD`.
-- Audits and implementation reviews should treat Phase 8 as shipped behavior
-  and Phase 9 as future work unless a forward-looking review is explicitly requested.
+- The design and per-phase plan for Phase 9 is now implemented at `HEAD`.
+- Audits and implementation reviews should treat Phase 9 as active behavior.
 
 ## Database Schema Marker
 
-- Current migration head in this repo includes Phase 8
-  (`009_phase8_operational_tables.py`).
+- Current migration head in this repo includes Phase 9
+  (`010_phase9_lifecycle_tables.py`).
 - Phase 8 operational tables `saved_searches`, `collections`,
   `collection_members`, `annotations`, and `attachments` now exist at `HEAD`.
 - Phase 8 operator workflow includes `datum doctor ...`, `datum gc ...`, and
   `scripts/backup.sh`, `scripts/restore-drill.sh`, `scripts/snapshot-policy.sh`.
-- Future-phase lifecycle tables such as `agent_sessions` and `session_deltas`
-  remain Phase 9 work.
+- Phase 9 lifecycle tables `agent_sessions` and `session_deltas` now exist at `HEAD`.
+- Phase 9 active runtime surfaces also include:
+  - `/api/v1/agent/sessions/*`
+  - lifecycle write barrier / stop barrier enforcement
+  - `hooks/claude/*`
+  - `adapters/codex/*`
 
 ## Canonical References
 

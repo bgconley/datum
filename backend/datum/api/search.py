@@ -1,7 +1,8 @@
 import time
 from dataclasses import asdict
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,13 +20,18 @@ from datum.schemas.search import (
 )
 from datum.services.answer import generate_answer
 from datum.services.model_gateway import build_model_gateway
+from datum.services.preflight import record_preflight
 from datum.services.search import search_execution, stream_search
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
 
 
 @router.post("/search", response_model=SearchResponse)
-async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_session)):
+async def api_search(
+    body: SearchRequest,
+    x_session_id: Annotated[str | None, Header(alias="X-Session-ID")] = None,
+    session: AsyncSession = Depends(get_session),
+):
     started = time.monotonic()
     effective_limit = min(body.limit, settings.search_result_limit)
     gateway = build_model_gateway()
@@ -58,6 +64,10 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
     finally:
         await gateway.close()
 
+    if x_session_id:
+        await record_preflight(x_session_id, "search_project_memory", session)
+        await session.commit()
+
     return SearchResponse(
         results=[SearchResultResponse(**asdict(result)) for result in execution.results],
         entity_facets=[
@@ -72,7 +82,11 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
 
 
 @router.post("/search/stream")
-async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends(get_session)):
+async def api_search_stream(
+    body: SearchRequest,
+    x_session_id: Annotated[str | None, Header(alias="X-Session-ID")] = None,
+    session: AsyncSession = Depends(get_session),
+):
     effective_limit = min(body.limit, settings.search_result_limit)
     gateway = build_model_gateway()
 
@@ -113,5 +127,8 @@ async def api_search_stream(body: SearchRequest, session: AsyncSession = Depends
             yield error_payload.model_dump_json(exclude_none=True) + "\n"
         finally:
             await gateway.close()
+            if x_session_id:
+                await record_preflight(x_session_id, "search_project_memory", session)
+                await session.commit()
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")

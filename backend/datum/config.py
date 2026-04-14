@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     api_rate_limit_window_seconds: int = 60
     search_result_limit: int = Field(default=100, ge=1, le=1000)
     worker_poll_interval: float = Field(default=2.0, gt=0)
+    lifecycle_enabled: bool = True
+    lifecycle_enforcement_mode: str = "advisory"
+    preflight_ttl_seconds: int = Field(default=300, ge=1, le=86400)
+    session_stale_hours: int = Field(default=24, ge=1, le=24 * 30)
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}
@@ -60,6 +64,13 @@ class Settings(BaseSettings):
                 "DATUM_EMBEDDING_DIMENSIONS must match the schema dimension "
                 f"({EMBEDDING_SCHEMA_DIMENSIONS})."
             )
+        return value
+
+    @field_validator("lifecycle_enforcement_mode")
+    @classmethod
+    def validate_lifecycle_enforcement_mode(cls, value: str) -> str:
+        if value not in {"advisory", "blocking"}:
+            raise ValueError("DATUM_LIFECYCLE_ENFORCEMENT_MODE must be advisory or blocking.")
         return value
 
 

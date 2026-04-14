@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import settings
+from datum.db import get_session
 from datum.models.agent import ApiKey
 from datum.services.auth import extract_api_key
 from datum.services.boundaries import ContentKind, wrap_content
 from datum.services.context import ContextConfig, DetailLevel, build_project_context
+from datum.services.preflight import record_preflight
 
 router = APIRouter(prefix="/api/v1/projects/{slug}/context", tags=["context"])
 
@@ -22,6 +26,8 @@ async def api_get_project_context(
     max_tokens: int = Query(8000, ge=100, le=100000),
     recency_days: int | None = Query(None, ge=0),
     limit_per_section: int | None = Query(None, ge=1),
+    x_session_id: Annotated[str | None, Header(alias="X-Session-ID")] = None,
+    session: AsyncSession = Depends(get_session),
     api_key: ApiKey | None = Depends(extract_api_key),
 ):
     del api_key  # Optional in Phase 6 for backward compatibility.
@@ -44,8 +50,12 @@ async def api_get_project_context(
             limit_per_section=limit_per_section,
         ),
     )
-    return wrap_content(
+    response = wrap_content(
         json.dumps(payload, default=str),
         ContentKind.DOCUMENT,
         project_slug=slug,
     ) | {"data": payload}
+    if x_session_id:
+        await record_preflight(x_session_id, "get_project_context", session)
+        await session.commit()
+    return response

@@ -1,0 +1,37 @@
+# Datum Integration Rules
+
+This project uses Datum as its project intelligence system.
+
+## Required Behavior
+
+1. Read Datum before the first durable write.
+   Call `get_project_context`, `search_project_memory`, or `list_candidates`.
+2. Preserve and pass the active lifecycle `session_id` on every Datum write tool call.
+3. Record meaningful work with `append_session_notes`.
+4. Use `resolve_citation` when quoting or grounding claims in project documents.
+
+## Read Tools
+
+- `get_project_context`
+- `search_project_memory`
+- `list_candidates`
+- `resolve_citation`
+
+## Write Tools
+
+- `append_session_notes`
+- `record_decision`
+- `create_document`
+- `update_document`
+- `accept_candidate`
+- `reject_candidate`
+
+## Project
+
+- `{{PROJECT_SLUG}}`
+
+## Session Contract
+
+- `read-before-write`
+- `append-after-write`
+- `finalize-before-stop`
