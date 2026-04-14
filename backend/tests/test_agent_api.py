@@ -16,6 +16,8 @@ def setup_projects_root(tmp_path):
 
 @pytest.mark.asyncio
 async def test_session_create_list_and_idempotency(client, monkeypatch, tmp_path):
+    from datum.main import app
+
     project_dir = tmp_path / "api-test"
     project_dir.mkdir()
     (project_dir / "project.yaml").write_text("name: API Test\nslug: api-test\n")
@@ -48,45 +50,51 @@ async def test_session_create_list_and_idempotency(client, monkeypatch, tmp_path
         del args, kwargs
         return None
 
+    async def allow_preflight():
+        return None
+
     monkeypatch.setattr("datum.api.sessions.check_idempotency", fake_check)
     monkeypatch.setattr("datum.api.sessions.store_idempotency", fake_store)
     monkeypatch.setattr("datum.api.sessions._sync_session_note", fake_sync)
     monkeypatch.setattr("datum.api.sessions._get_project_row", fake_get_project_row)
     monkeypatch.setattr("datum.api.sessions.log_agent_audit", fake_log)
     monkeypatch.setattr("datum.api.sessions.record_delta", fake_record_delta)
+    app.dependency_overrides[require_preflight] = allow_preflight
+    try:
+        resp = await client.post(
+            "/api/v1/projects/api-test/sessions",
+            headers={"X-Idempotency-Key": "idem-1"},
+            json={
+                "session_id": "sess-1",
+                "agent_name": "codex",
+                "summary": "Test session",
+                "content": "## Work\nCreated the note.",
+            },
+        )
+        assert resp.status_code == 201
+        payload = resp.json()
+        assert payload["session_id"] == "sess-1"
+        assert payload["path"].startswith("docs/sessions/")
 
-    resp = await client.post(
-        "/api/v1/projects/api-test/sessions",
-        headers={"X-Idempotency-Key": "idem-1"},
-        json={
-            "session_id": "sess-1",
-            "agent_name": "codex",
-            "summary": "Test session",
-            "content": "## Work\nCreated the note.",
-        },
-    )
-    assert resp.status_code == 201
-    payload = resp.json()
-    assert payload["session_id"] == "sess-1"
-    assert payload["path"].startswith("docs/sessions/")
+        second = await client.post(
+            "/api/v1/projects/api-test/sessions",
+            headers={"X-Idempotency-Key": "idem-1"},
+            json={
+                "session_id": "sess-1",
+                "agent_name": "codex",
+                "summary": "Test session",
+                "content": "## Work\nCreated the note.",
+            },
+        )
+        assert second.status_code == 201
+        assert second.text == resp.text
+        assert second.json()["path"] == payload["path"]
 
-    second = await client.post(
-        "/api/v1/projects/api-test/sessions",
-        headers={"X-Idempotency-Key": "idem-1"},
-        json={
-            "session_id": "sess-1",
-            "agent_name": "codex",
-            "summary": "Test session",
-            "content": "## Work\nCreated the note.",
-        },
-    )
-    assert second.status_code == 201
-    assert second.text == resp.text
-    assert second.json()["path"] == payload["path"]
-
-    listed = await client.get("/api/v1/projects/api-test/sessions")
-    assert listed.status_code == 200
-    assert listed.json()["sessions"][0]["session_id"] == "sess-1"
+        listed = await client.get("/api/v1/projects/api-test/sessions")
+        assert listed.status_code == 200
+        assert listed.json()["sessions"][0]["session_id"] == "sess-1"
+    finally:
+        app.dependency_overrides.pop(require_preflight, None)
 
 
 @pytest.mark.asyncio

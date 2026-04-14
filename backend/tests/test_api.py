@@ -1061,6 +1061,9 @@ async def test_intelligence_inbox_and_summary_endpoints(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_inbox_accept_and_reject_actions_persist_curated_records(client, monkeypatch):
+    from datum.main import app
+    from datum.services.write_barrier import require_preflight
+
     async def fake_accept_candidate(session, *, slug, candidate_type, candidate_id, body):
         del session, body
         assert slug == "inbox"
@@ -1085,25 +1088,28 @@ async def test_inbox_accept_and_reject_actions_persist_curated_records(client, m
 
     monkeypatch.setattr("datum.api.inbox.accept_candidate", fake_accept_candidate)
     monkeypatch.setattr("datum.api.inbox.reject_candidate", fake_reject_candidate)
+    app.dependency_overrides[require_preflight] = lambda: None
+    try:
+        accepted = await client.post(
+            "/api/v1/projects/inbox/inbox/decision/dec-1/accept",
+            json={
+                "title": "Use a preflight write barrier",
+                "decision": "Require get_project_context before mutating state.",
+                "consequences": "Agent writes become explicitly gated.",
+            },
+        )
+        assert accepted.status_code == 200
+        accepted_payload = accepted.json()
+        assert accepted_payload["curation_status"] == "edited"
+        assert accepted_payload["canonical_record_path"] == ".piq/records/decisions/dec_test.yaml"
 
-    accepted = await client.post(
-        "/api/v1/projects/inbox/inbox/decision/dec-1/accept",
-        json={
-            "title": "Use a preflight write barrier",
-            "decision": "Require get_project_context before mutating state.",
-            "consequences": "Agent writes become explicitly gated.",
-        },
-    )
-    assert accepted.status_code == 200
-    accepted_payload = accepted.json()
-    assert accepted_payload["curation_status"] == "edited"
-    assert accepted_payload["canonical_record_path"] == ".piq/records/decisions/dec_test.yaml"
-
-    rejected = await client.post(
-        "/api/v1/projects/inbox/inbox/open_question/oq-1/reject"
-    )
-    assert rejected.status_code == 200
-    assert rejected.json()["curation_status"] == "rejected"
+        rejected = await client.post(
+            "/api/v1/projects/inbox/inbox/open_question/oq-1/reject"
+        )
+        assert rejected.status_code == 200
+        assert rejected.json()["curation_status"] == "rejected"
+    finally:
+        app.dependency_overrides.pop(require_preflight, None)
 
 
 @pytest.mark.asyncio
