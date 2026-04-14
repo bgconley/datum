@@ -1,0 +1,23 @@
+[Unit]
+Description=Datum Qwen3 embedder service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bgconley
+WorkingDirectory=/tank/repos/datum/qwen3-embedder-service
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=QWEN_EMBED_BACKEND=auto
+Environment=QWEN_EMBED_PROFILE=qwen3_4b_cuda
+Environment=QWEN_EMBED_HOST=127.0.0.1
+Environment=QWEN_EMBED_PORT=8010
+Environment=QWEN_EMBED_LOG_FORMAT=json
+Environment=QWEN_EMBED_LOG_LEVEL=INFO
+ExecStart=/bin/bash -lc 'source /tank/venvs/datum-model-services/bin/activate && exec python -m qwen3_embedder.main'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

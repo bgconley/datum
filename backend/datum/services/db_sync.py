@@ -233,6 +233,35 @@ async def move_document_path_in_db(
         source_file.canonical_path = new_canonical_path
         source_file.last_seen_at = datetime.now(UTC)
 
+
+async def soft_delete_document_in_db(
+    session: AsyncSession,
+    project_id: UUID,
+    canonical_path: str,
+) -> None:
+    """Mark a derived document/source file pair as deleted."""
+    document_result = await session.execute(
+        select(Document).where(
+            Document.project_id == project_id,
+            Document.canonical_path == canonical_path,
+        )
+    )
+    document = document_result.scalar_one_or_none()
+    if document is not None:
+        document.status = "deleted"
+        document.updated_at = datetime.now(UTC)
+
+    source_file_result = await session.execute(
+        select(SourceFile).where(
+            SourceFile.project_id == project_id,
+            SourceFile.canonical_path == canonical_path,
+        )
+    )
+    source_file = source_file_result.scalar_one_or_none()
+    if source_file is not None:
+        source_file.deleted_at = datetime.now(UTC)
+        source_file.last_seen_at = datetime.now(UTC)
+
 async def log_audit_event(
     session: AsyncSession,
     actor_type: str,

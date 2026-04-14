@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-oss-20b"
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.1
+    blobs_quarantine_root: Path = Path("/tank/datum/blobs-quarantine")
+    max_upload_bytes: int = 50 * 1024 * 1024
+    api_rate_limit_requests: int = 120
+    api_rate_limit_window_seconds: int = 60
+    search_result_limit: int = 100
+    worker_poll_interval: int = 2
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}

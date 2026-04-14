@@ -19,13 +19,13 @@ If this file and the detailed plans diverge, preserve the design invariants firs
 
 ## Implementation Status At HEAD
 
-- Implemented and validated locally: Phase 1 through Phase 7
-- Planned and not yet implemented: Phase 8 through Phase 9
-- Treat Phase 8-9 plan docs as forward work items, not active runtime guarantees.
-- Do not assume these Phase 8-9 artifacts exist yet:
+- Implemented and validated locally: Phase 1 through Phase 8
+- Planned and not yet implemented: Phase 9
+- Treat the Phase 9 plan doc as forward work, not an active runtime guarantee.
+- Do not assume these Phase 9 artifacts exist yet:
   - DB tables such as `agent_sessions`, `session_deltas`
   - Server-side lifecycle write barriers
-  - Phase 8 saved-search/annotation/collection hardening
+  - Hook/wrapper-enforced lifecycle stop barriers
 
 ## Purpose
 
@@ -201,14 +201,14 @@ When adding a new write surface, wire all of these:
   - PII redaction is opt-in via project-level `pii_redact_in_api: true` in `project.yaml`
   - extraction redacts detected secrets before indexed text is persisted
 
-### Phase 8 (Planned, Not Implemented At HEAD)
+### Phase 8 (Implemented At HEAD)
 
 - Saved searches, collections, and annotations are operational-backed-up features.
 - Rename/delete/mkdir must respect filesystem and manifest contracts.
 - Delete is soft-delete, not destructive removal of history.
 - Uploads create canonical attachment metadata plus blob refs.
 - Blob GC and doctor must scan attachment metadata, not invented schema columns.
-- Hardening work must be wired, not just defined.
+- Backup scripts, systemd units, and query benchmark tooling are part of the active operational surface.
 
 ### Phase 9 (Planned, Not Implemented At HEAD)
 

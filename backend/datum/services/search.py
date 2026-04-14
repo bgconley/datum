@@ -572,6 +572,7 @@ def _build_scope_sql(version_scope: str, project_scope: str | None) -> tuple[str
 
     if version_scope == "current":
         clauses.append("dv.id = d.current_version_id")
+        clauses.append("d.status != 'deleted'")
     elif version_scope.startswith("as_of:"):
         as_of_ts = _parse_as_of_scope(version_scope)
         params["as_of_ts"] = as_of_ts
@@ -601,6 +602,7 @@ def _build_term_scope_filters(
 
     if version_scope == "current":
         filters.append(DocumentVersion.id == Document.current_version_id)
+        filters.append(Document.status != "deleted")
     elif version_scope.startswith("as_of:"):
         as_of_ts = _parse_as_of_scope(version_scope)
         filters.append(

@@ -1,13 +1,17 @@
 import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   api,
   type Project,
+  type SavedSearchItem,
   type SearchEntityFacet,
   type SearchRequestParams,
   type SearchResultItem,
   type SearchStreamEvent,
 } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { queryKeys } from '@/lib/query-keys'
 import {
   DEFAULT_SEARCH_DRAFT,
   draftFromRouteSearch,
@@ -84,9 +88,16 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
   const [streamPhase, setStreamPhase] = useState<'idle' | 'lexical' | 'reranked'>('idle')
   const [semanticEnabled, setSemanticEnabled] = useState<boolean | null>(null)
   const [rerankApplied, setRerankApplied] = useState<boolean | null>(null)
+  const queryClient = useQueryClient()
 
   const projectsQuery = useProjectsQuery()
   const projects = projectsQuery.data ?? []
+  const savedSearchesQuery = useQuery({
+    queryKey: draft.project ? queryKeys.savedSearches(draft.project) : ['saved-searches', 'idle'],
+    queryFn: () => api.savedSearches.list(draft.project!),
+    enabled: Boolean(draft.project),
+  })
+  const savedSearches = savedSearchesQuery.data ?? []
   const lastExecutedRouteKeyRef = useRef('')
   const routeDraft = useMemo(
     () => draftFromRouteSearch(routeSearch),
@@ -234,6 +245,62 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     navigateToSearch(DEFAULT_SEARCH_DRAFT)
   }
 
+  const handleSaveSearch = async () => {
+    if (!draft.project) {
+      alert('Choose a project before saving a search.')
+      return
+    }
+    const request = buildSearchRequest(draft)
+    if (!request) {
+      alert('Enter a valid query before saving.')
+      return
+    }
+
+    const name = window.prompt('Saved search name')
+    if (!name) {
+      return
+    }
+
+    await api.savedSearches.create(draft.project, {
+      name,
+      query_text: request.query,
+      filters: {
+        version_scope: request.version_scope ?? 'current',
+        limit: request.limit ?? 20,
+      },
+    })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.savedSearches(draft.project) })
+  }
+
+  const handleLoadSavedSearch = (savedSearch: SavedSearchItem) => {
+    const filters = savedSearch.filters ?? {}
+    const versionScope =
+      typeof filters.version_scope === 'string' ? filters.version_scope : 'current'
+    const nextDraft: SearchDraft = {
+      ...draft,
+      query: savedSearch.query_text,
+      project: draft.project,
+      limit: typeof filters.limit === 'number' ? filters.limit : draft.limit,
+      versionMode:
+        versionScope === 'all'
+          ? 'all'
+          : versionScope.startsWith('as_of:')
+            ? 'as_of'
+            : 'current',
+      asOf: versionScope.startsWith('as_of:') ? versionScope.slice(6) : '',
+    }
+    setDraft(nextDraft)
+    navigateToSearch(nextDraft)
+  }
+
+  const handleDeleteSavedSearch = async (savedSearch: SavedSearchItem) => {
+    if (!draft.project) {
+      return
+    }
+    await api.savedSearches.delete(draft.project, savedSearch.id)
+    await queryClient.invalidateQueries({ queryKey: queryKeys.savedSearches(draft.project) })
+  }
+
   const handleProjectFacet = (project: string) => {
     const nextDraft = { ...draft, project }
     setDraft(nextDraft)
@@ -283,6 +350,51 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         onSearch={handleSearch}
         onReset={handleReset}
       />
+
+      {draft.project && (
+        <div className="rounded-[1.5rem] border border-border/80 bg-card/70 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+                Saved searches
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Persist project-scoped search presets with query text and retrieval scope.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => void handleSaveSearch()}>
+              Save current search
+            </Button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {savedSearches.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No saved searches yet.</div>
+            ) : (
+              savedSearches.map((savedSearch) => (
+                <div
+                  key={savedSearch.id}
+                  className="flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-2 text-sm"
+                >
+                  <button
+                    type="button"
+                    className="truncate text-left hover:text-foreground"
+                    onClick={() => handleLoadSavedSearch(savedSearch)}
+                  >
+                    {savedSearch.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => void handleDeleteSavedSearch(savedSearch)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {!searched && (
         <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-10 text-sm text-muted-foreground">

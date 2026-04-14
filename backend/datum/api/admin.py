@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -86,6 +86,40 @@ async def api_revoke_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     await session.commit()
     return {"status": "revoked", "key_id": key_id}
+
+
+@router.post("/api-keys/{key_id}/rotate", response_model=ApiKeyCreateResponse, status_code=201)
+async def api_rotate_api_key(
+    key_id: str,
+    session: AsyncSession = Depends(get_session),
+    admin_key=Depends(require_scope("admin")),
+):
+    keys = await list_api_keys(session)
+    existing = next((key for key in keys if str(key.id) == key_id), None)
+    if existing is None or not existing.is_active:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    expires_days = None
+    if existing.expires_at is not None:
+        remaining = existing.expires_at - datetime.now(UTC)
+        expires_days = max(0, int(remaining.total_seconds() // 86400))
+
+    await revoke_api_key(session, key_id)
+    created = await generate_api_key(
+        session,
+        name=existing.name,
+        scope=existing.scope,
+        expires_days=expires_days,
+        created_by=admin_key.name,
+    )
+    await session.commit()
+    return ApiKeyCreateResponse(
+        key=created.key_plaintext,
+        key_id=created.key_id,
+        name=created.name,
+        scope=created.scope,
+        prefix=created.prefix,
+    )
 
 
 @router.get("/audit", response_model=AuditListResponse)

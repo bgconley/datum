@@ -19,12 +19,14 @@ from datum.schemas.document import (
 from datum.services.db_sync import (
     log_audit_event,
     move_document_path_in_db,
+    soft_delete_document_in_db,
     sync_document_version_to_db,
 )
 from datum.services.document_manager import (
     ConflictError,
     create_document,
     create_document_folder,
+    delete_document,
     get_document,
     list_documents,
     move_document,
@@ -55,6 +57,30 @@ async def _get_project_db_id(slug: str, session: AsyncSession):
         result = await session.execute(select(Project).where(Project.slug == slug))
         project = result.scalar_one_or_none()
         return project.id if project else None
+    except Exception:
+        return None
+
+
+async def _get_document_version_id(
+    slug: str,
+    canonical_path: str,
+    session: AsyncSession,
+) -> str | None:
+    try:
+        project_result = await session.execute(select(Project).where(Project.slug == slug))
+        project = project_result.scalar_one_or_none()
+        if project is None:
+            return None
+        from datum.models.core import Document
+
+        result = await session.execute(
+            select(Document.current_version_id).where(
+                Document.project_id == project.id,
+                Document.canonical_path == canonical_path,
+            )
+        )
+        current_version_id = result.scalar_one_or_none()
+        return str(current_version_id) if current_version_id else None
     except Exception:
         return None
 
@@ -242,7 +268,11 @@ async def api_move_document(
 
 
 @router.get("/{doc_path:path}", response_model=DocumentContentResponse)
-async def api_get_document(slug: str, doc_path: str):
+async def api_get_document(
+    slug: str,
+    doc_path: str,
+    session: AsyncSession = Depends(get_session),
+):
     project_path = _get_project_path(slug)
     try:
         info = get_document(project_path, doc_path)
@@ -259,7 +289,11 @@ async def api_get_document(slug: str, doc_path: str):
     if not info:
         raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
     content = (project_path / info.relative_path).read_text()
-    return DocumentContentResponse(content=content, metadata=DocumentResponse(**info.__dict__))
+    metadata = DocumentResponse(
+        **info.__dict__,
+        version_id=await _get_document_version_id(slug, info.relative_path, session),
+    )
+    return DocumentContentResponse(content=content, metadata=metadata)
 
 
 @router.put("/{doc_path:path}", response_model=DocumentResponse)
@@ -338,3 +372,37 @@ async def api_save_document(
         logger.debug("DB sync skipped for document save", exc_info=True)
 
     return DocumentResponse(**doc_info.__dict__)
+
+
+@router.delete("/{doc_path:path}")
+async def api_delete_document(
+    slug: str,
+    doc_path: str,
+    session: AsyncSession = Depends(get_session),
+):
+    project_path = _get_project_path(slug)
+    try:
+        archived_path = delete_document(project_path, doc_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        project_db_id = await _get_project_db_id(slug, session)
+        if project_db_id:
+            await soft_delete_document_in_db(session, project_db_id, doc_path)
+            await log_audit_event(
+                session,
+                "web",
+                "delete_document",
+                project_db_id,
+                doc_path,
+                metadata={"archived_path": archived_path},
+            )
+            await session.commit()
+    except Exception:
+        await session.rollback()
+        logger.debug("DB sync skipped for document delete", exc_info=True)
+
+    return {"status": "deleted", "archived_path": archived_path}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
@@ -10,6 +10,8 @@ import {
   Network,
   Search,
   ShieldAlert,
+  Trash2,
+  Upload,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -30,6 +32,8 @@ export function Sidebar() {
   const [movePath, setMovePath] = useState('')
   const [moving, setMoving] = useState(false)
   const [creatingFolder, setCreatingFolder] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const location = useLocation()
@@ -96,7 +100,7 @@ export function Sidebar() {
     }
     setCreatingFolder(true)
     try {
-      await api.documents.createFolder(selectedProject, { relative_path: folderPath.trim() })
+      await api.filesystem.mkdir(selectedProject, { path: folderPath.trim() })
       await refreshProjectState()
     } catch (error) {
       alert(String(error))
@@ -111,18 +115,55 @@ export function Sidebar() {
     }
     setMoving(true)
     try {
-      const moved = await api.documents.move(selectedProject, selectedDocument, {
-        new_relative_path: movePath.trim(),
+      const moved = await api.filesystem.rename(selectedProject, {
+        old_path: selectedDocument,
+        new_path: movePath.trim(),
       })
       await refreshProjectState()
       navigate({
         to: '/projects/$slug/docs/$',
-        params: { slug: selectedProject, _splat: moved.relative_path },
+        params: { slug: selectedProject, _splat: moved.new_path },
       })
     } catch (error) {
       alert(String(error))
     } finally {
       setMoving(false)
+    }
+  }
+
+  const handleDeleteDocument = async () => {
+    if (!selectedProject || !selectedDocument) {
+      return
+    }
+    if (!window.confirm(`Delete ${selectedDocument}?`)) {
+      return
+    }
+    setDeleting(true)
+    try {
+      await api.filesystem.delete(selectedProject, selectedDocument)
+      await refreshProjectState()
+      navigate({ to: '/projects/$slug', params: { slug: selectedProject } })
+    } catch (error) {
+      alert(String(error))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleUploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !selectedProject) {
+      return
+    }
+    setUploading(true)
+    try {
+      await api.upload.file(selectedProject, file)
+      await refreshProjectState()
+    } catch (error) {
+      alert(String(error))
+    } finally {
+      setUploading(false)
+      event.target.value = ''
     }
   }
 
@@ -280,6 +321,17 @@ export function Sidebar() {
               </div>
             </div>
 
+            <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                <Upload className="size-3.5" />
+                Upload attachment
+              </div>
+              <label className="mt-3 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border/70 bg-background/60 px-3 py-4 text-xs text-muted-foreground transition-colors hover:bg-accent/40">
+                <input type="file" className="hidden" onChange={handleUploadFile} disabled={uploading} />
+                {uploading ? 'Uploading…' : 'Choose file'}
+              </label>
+            </div>
+
             {selectedDocMeta && (
               <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">
                 <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
@@ -333,6 +385,16 @@ export function Sidebar() {
                       </Button>
                     </div>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-red-500/30 text-red-100 hover:bg-red-500/10"
+                    onClick={handleDeleteDocument}
+                    disabled={deleting}
+                  >
+                    <Trash2 className="size-3.5" />
+                    {deleting ? 'Deleting…' : 'Delete'}
+                  </Button>
                 </div>
               </div>
             )}

@@ -1,6 +1,7 @@
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -263,6 +264,448 @@ async def test_create_document_rejects_docs_prefix_traversal(client):
         "content": "# Bad",
     })
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_templates_endpoints(client):
+    templates = await client.get("/api/v1/templates")
+    assert templates.status_code == 200
+    payload = templates.json()
+    assert len(payload) >= 4
+    assert any(item["name"] == "adr" for item in payload)
+
+    template = await client.get("/api/v1/templates/adr")
+    assert template.status_code == 200
+    assert template.json()["doc_type"] == "decision"
+
+    rendered = await client.get("/api/v1/templates/adr/render?title=ADR-9000")
+    assert rendered.status_code == 200
+    assert "ADR-9000" in rendered.json()["content"]
+
+
+@pytest.mark.asyncio
+async def test_delete_document_endpoint_soft_deletes_and_archives(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    created = await client.post("/api/v1/projects/p/docs", json={
+        "relative_path": "docs/delete-me.md",
+        "title": "Delete Me",
+        "doc_type": "plan",
+        "content": "# delete me",
+    })
+    assert created.status_code == 201
+
+    deleted = await client.delete("/api/v1/projects/p/docs/docs/delete-me.md")
+    assert deleted.status_code == 200
+    archived_path = deleted.json()["archived_path"]
+    assert archived_path.startswith(".piq/deleted/docs/delete-me.md.")
+
+    get_deleted = await client.get("/api/v1/projects/p/docs/docs/delete-me.md")
+    assert get_deleted.status_code == 404
+
+    archived_file = settings.projects_root / "p" / archived_path
+    assert archived_file.exists()
+    assert "# delete me" in archived_file.read_text()
+
+
+class _ScalarListResult:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return list(self._items)
+
+
+class _ScalarResult:
+    def __init__(self, item=None, items=None):
+        self._item = item
+        self._items = items or []
+
+    def scalar_one_or_none(self):
+        return self._item
+
+    def scalars(self):
+        return _ScalarListResult(self._items)
+
+
+class _RowResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _SavedSearchSession:
+    def __init__(self):
+        from datum.models.operational import SavedSearch
+
+        self._model = SavedSearch
+        self.records = []
+
+    def add(self, record):
+        if record.id is None:
+            record.id = uuid4()
+        if record.created_at is None:
+            record.created_at = datetime.now(UTC)
+        self.records.append(record)
+
+    async def flush(self):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def delete(self, record):
+        self.records = [item for item in self.records if item.id != record.id]
+
+    async def execute(self, statement):
+        rendered = str(statement)
+        if "FROM saved_searches" in rendered:
+            return _ScalarResult(items=self.records)
+        return _ScalarResult()
+
+    async def get(self, model, key):
+        if model is not self._model:
+            return None
+        key_str = str(key)
+        return next((item for item in self.records if str(item.id) == key_str), None)
+
+
+class _CollectionSession:
+    def __init__(self, project_id, document):
+        from datum.models.operational import Collection, CollectionMember
+
+        self._collection_model = Collection
+        self._member_model = CollectionMember
+        self.project_id = project_id
+        self.document = document
+        self.collections = []
+        self.members = []
+
+    def add(self, record):
+        if hasattr(record, "id") and getattr(record, "id", None) is None:
+            record.id = uuid4()
+        if getattr(record, "created_at", None) is None and hasattr(record, "created_at"):
+            record.created_at = datetime.now(UTC)
+        if getattr(record, "added_at", None) is None and hasattr(record, "added_at"):
+            record.added_at = datetime.now(UTC)
+        if record.__class__ is self._collection_model:
+            self.collections.append(record)
+        elif record.__class__ is self._member_model:
+            self.members.append(record)
+
+    async def flush(self):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def delete(self, record):
+        if record.__class__ is self._collection_model:
+            self.collections = [item for item in self.collections if item.id != record.id]
+        elif record.__class__ is self._member_model:
+            self.members = [
+                item
+                for item in self.members
+                if not (
+                    item.collection_id == record.collection_id
+                    and item.document_id == record.document_id
+                )
+            ]
+
+    async def execute(self, statement):
+        rendered = str(statement)
+        if "collection_members" in rendered and "documents" in rendered:
+            rows = [
+                (
+                    self.document.uid,
+                    self.document.title,
+                    self.document.canonical_path,
+                    member.added_at,
+                )
+                for member in self.members
+            ]
+            return _RowResult(rows)
+        if "FROM documents" in rendered:
+            return _ScalarResult(item=self.document)
+        if "FROM collections" in rendered and "count(collection_members.document_id)" in rendered:
+            rows = [
+                (
+                    collection.id,
+                    collection.name,
+                    collection.description,
+                    collection.created_at,
+                    sum(1 for member in self.members if member.collection_id == collection.id),
+                )
+                for collection in self.collections
+            ]
+            return _RowResult(rows)
+        return _ScalarResult()
+
+    async def get(self, model, key):
+        if model is self._collection_model:
+            key_str = str(key)
+            return next((item for item in self.collections if str(item.id) == key_str), None)
+        if model is self._member_model:
+            collection_id = key["collection_id"]
+            document_id = key["document_id"]
+            return next(
+                (
+                    item
+                    for item in self.members
+                    if item.collection_id == collection_id and item.document_id == document_id
+                ),
+                None,
+            )
+        return None
+
+
+class _AnnotationSession:
+    def __init__(self, version_id):
+        from datum.models.core import DocumentVersion
+        from datum.models.operational import Annotation
+
+        self._version_model = DocumentVersion
+        self._annotation_model = Annotation
+        self.version = DocumentVersion(
+            id=version_id,
+            document_id=uuid4(),
+            version_number=1,
+            branch="main",
+            content_hash="sha256:test",
+            filesystem_path=".piq/test",
+        )
+        self.annotations = []
+
+    def add(self, record):
+        if getattr(record, "id", None) is None:
+            record.id = uuid4()
+        if getattr(record, "created_at", None) is None:
+            record.created_at = datetime.now(UTC)
+        self.annotations.append(record)
+
+    async def flush(self):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def delete(self, record):
+        self.annotations = [item for item in self.annotations if item.id != record.id]
+
+    async def execute(self, statement):
+        rendered = str(statement)
+        if "FROM annotations" in rendered:
+            return _ScalarResult(items=self.annotations)
+        return _ScalarResult()
+
+    async def get(self, model, key):
+        if model is self._version_model:
+            return self.version if UUID(str(key)) == self.version.id else None
+        if model is self._annotation_model:
+            key_uuid = UUID(str(key))
+            return next((item for item in self.annotations if item.id == key_uuid), None)
+        return None
+
+
+class _UploadSession:
+    async def execute(self, statement):
+        del statement
+        return _ScalarResult(item=None)
+
+    async def commit(self):
+        return None
+
+    async def rollback(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_saved_searches_crud_endpoint(client):
+    from datum.db import get_session
+    from datum.main import app
+    from datum.models.core import Project
+
+    project = Project(
+        id=uuid4(),
+        uid="proj_saved",
+        slug="saved",
+        name="Saved",
+        filesystem_path="/tmp/saved",
+    )
+    session = _SavedSearchSession()
+
+    async def override_get_session():
+        yield session
+
+    async def fake_get_project(slug, async_session):
+        del async_session
+        assert slug == "saved"
+        return project
+
+    app.dependency_overrides[get_session] = override_get_session
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("datum.api.saved_searches._get_project", fake_get_project)
+    try:
+        created = await client.post(
+            "/api/v1/projects/saved/saved-searches",
+            json={
+                "name": "Updated docs",
+                "query_text": "Updated via API",
+                "filters": {"scope": "current"},
+            },
+        )
+        assert created.status_code == 201
+
+        listed = await client.get("/api/v1/projects/saved/saved-searches")
+        assert listed.status_code == 200
+        assert listed.json()[0]["name"] == "Updated docs"
+
+        deleted = await client.delete(
+            f"/api/v1/projects/saved/saved-searches/{created.json()['id']}",
+        )
+        assert deleted.status_code == 200
+    finally:
+        monkeypatch.undo()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_collection_membership_endpoints_use_document_uid(client):
+    from datum.db import get_session
+    from datum.main import app
+    from datum.models.core import Document, Project
+
+    project = Project(
+        id=uuid4(),
+        uid="proj_coll",
+        slug="coll",
+        name="Collections",
+        filesystem_path="/tmp/coll",
+    )
+    document = Document(
+        id=uuid4(),
+        uid="doc_coll",
+        project_id=project.id,
+        slug="doc",
+        canonical_path="docs/doc.md",
+        title="Doc",
+        doc_type="plan",
+    )
+    session = _CollectionSession(project.id, document)
+
+    async def override_get_session():
+        yield session
+
+    async def fake_get_project(slug, async_session):
+        del async_session
+        assert slug == "coll"
+        return project
+
+    async def fake_get_collection(slug, collection_id, async_session):
+        del slug, async_session
+        collection = next(
+            (item for item in session.collections if str(item.id) == collection_id),
+            None,
+        )
+        assert collection is not None
+        return collection
+
+    app.dependency_overrides[get_session] = override_get_session
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("datum.api.collections._get_project", fake_get_project)
+    monkeypatch.setattr("datum.api.collections._get_collection", fake_get_collection)
+    try:
+        created = await client.post(
+            "/api/v1/projects/coll/collections",
+            json={"name": "Auth collection", "description": "docs"},
+        )
+        assert created.status_code == 201
+        collection_id = created.json()["id"]
+
+        added = await client.post(
+            f"/api/v1/projects/coll/collections/{collection_id}/members",
+            json={"document_uid": document.uid},
+        )
+        assert added.status_code == 201
+
+        listed = await client.get(f"/api/v1/projects/coll/collections/{collection_id}/members")
+        assert listed.status_code == 200
+        assert listed.json()[0]["document_uid"] == document.uid
+
+        removed = await client.delete(
+            f"/api/v1/projects/coll/collections/{collection_id}/members/{document.uid}",
+        )
+        assert removed.status_code == 200
+        assert removed.json()["status"] == "removed"
+    finally:
+        monkeypatch.undo()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_annotations_crud_endpoint(client):
+    from datum.db import get_session
+    from datum.main import app
+
+    version_id = uuid4()
+    session = _AnnotationSession(version_id)
+
+    async def override_get_session():
+        yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        created = await client.post(
+            "/api/v1/annotations",
+            json={
+                "version_id": str(version_id),
+                "annotation_type": "comment",
+                "content": "Check this evidence",
+                "start_char": 0,
+                "end_char": 12,
+            },
+        )
+        assert created.status_code == 201
+
+        listed = await client.get(f"/api/v1/annotations?version_id={version_id}")
+        assert listed.status_code == 200
+        assert listed.json()[0]["annotation_type"] == "comment"
+
+        deleted = await client.delete(f"/api/v1/annotations/{created.json()['id']}")
+        assert deleted.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_upload_endpoint_writes_blob_and_attachment_metadata(client, tmp_blobs):
+    from datum.db import get_session
+    from datum.main import app
+
+    del tmp_blobs
+    settings.blobs_root = settings.projects_root.parent / "blobs"
+    settings.blobs_root.mkdir(parents=True, exist_ok=True)
+    await client.post("/api/v1/projects", json={"name": "Uploads", "slug": "uploads"})
+
+    async def override_get_session():
+        yield _UploadSession()
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        response = await client.post(
+            "/api/v1/projects/uploads/upload",
+            files={"file": ("notes.txt", b"phase-8 upload", "text/plain")},
+        )
+        assert response.status_code == 201
+        payload = response.json()
+        assert payload["attachment_path"].startswith("attachments/notes-")
+        assert payload["content_hash"].startswith("sha256:")
+        metadata_file = settings.projects_root / "uploads" / payload["attachment_path"]
+        assert metadata_file.exists()
+        assert "blob_ref" in metadata_file.read_text()
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio

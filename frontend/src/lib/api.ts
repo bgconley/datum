@@ -27,6 +27,7 @@ export interface DocumentMeta {
   version: number
   content_hash: string
   document_uid: string
+  version_id?: string | null
   created: string | null
   updated: string | null
 }
@@ -80,6 +81,63 @@ export interface SearchRequestParams {
   project?: string
   version_scope?: string
   limit?: number
+}
+
+export interface TemplateDefinition {
+  name: string
+  title: string
+  description: string
+  doc_type: string
+  default_folder: string
+  filename_prefix: string
+}
+
+export interface RenderedTemplate {
+  content: string
+  doc_type: string
+  default_folder: string
+}
+
+export interface SavedSearchItem {
+  id: string
+  name: string
+  query_text: string
+  filters: Record<string, unknown> | null
+  project_id: string | null
+  created_at: string | null
+}
+
+export interface CollectionItem {
+  id: string
+  name: string
+  description: string | null
+  member_count: number
+  created_at: string | null
+}
+
+export interface CollectionMemberItem {
+  document_uid: string
+  document_title: string
+  canonical_path: string
+  added_at: string | null
+}
+
+export interface AnnotationItem {
+  id: string
+  version_id: string
+  annotation_type: string
+  content: string | null
+  start_char: number | null
+  end_char: number | null
+  created_at: string | null
+}
+
+export interface UploadResponse {
+  filename: string
+  attachment_path: string
+  content_hash: string
+  blob_path: string
+  size_bytes: number
 }
 
 export interface DocumentMoveRequest {
@@ -251,6 +309,14 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  templates: {
+    list: () => fetchJSON<TemplateDefinition[]>(`${API_BASE}/templates`),
+    get: (name: string) => fetchJSON<TemplateDefinition>(`${API_BASE}/templates/${encodeURIComponent(name)}`),
+    render: (name: string, title: string) =>
+      fetchJSON<RenderedTemplate>(
+        `${API_BASE}/templates/${encodeURIComponent(name)}/render?title=${encodeURIComponent(title)}`,
+      ),
+  },
   projects: {
     list: () => fetchJSON<Project[]>(`${API_BASE}/projects`),
     get: (slug: string) => fetchJSON<Project>(`${API_BASE}/projects/${slug}`),
@@ -302,8 +368,49 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       }),
+    delete: (projectSlug: string, docPath: string) =>
+      fetchJSON<{ status: string; archived_path: string }>(
+        `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}`,
+        {
+          method: 'DELETE',
+        },
+      ),
     listGenerated: (projectSlug: string) =>
       fetchJSON<GeneratedFile[]>(`${API_BASE}/projects/${projectSlug}/docs/generated`),
+  },
+  filesystem: {
+    rename: (projectSlug: string, data: { old_path: string; new_path: string }) =>
+      fetchJSON<{ old_path: string; new_path: string }>(`${API_BASE}/projects/${projectSlug}/fs/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    mkdir: (projectSlug: string, data: { path: string }) =>
+      fetchJSON<{ path: string }>(`${API_BASE}/projects/${projectSlug}/fs/mkdir`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    delete: (projectSlug: string, docPath: string) =>
+      fetchJSON<{ status: string; archived_path: string }>(
+        `${API_BASE}/projects/${projectSlug}/fs/${encodeDocumentPath(docPath)}`,
+        { method: 'DELETE' },
+      ),
+  },
+  upload: {
+    file: async (projectSlug: string, file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await fetch(`${API_BASE}/projects/${projectSlug}/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!response.ok) {
+        const body = await response.text()
+        throw new Error(`${response.status}: ${body}`)
+      }
+      return response.json() as Promise<UploadResponse>
+    },
   },
   versions: {
     list: (projectSlug: string, docPath: string) =>
@@ -461,5 +568,69 @@ export const api = {
       ),
     get: (slug: string, entityId: string) =>
       fetchJSON<EntityDetail>(`${API_BASE}/projects/${slug}/entities/${entityId}`),
+  },
+  savedSearches: {
+    list: (slug: string) =>
+      fetchJSON<SavedSearchItem[]>(`${API_BASE}/projects/${slug}/saved-searches`),
+    create: (
+      slug: string,
+      data: { name: string; query_text: string; filters?: Record<string, unknown> | null },
+    ) =>
+      fetchJSON<SavedSearchItem>(`${API_BASE}/projects/${slug}/saved-searches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    delete: (slug: string, id: string) =>
+      fetchJSON<{ status: string }>(`${API_BASE}/projects/${slug}/saved-searches/${id}`, {
+        method: 'DELETE',
+      }),
+  },
+  collections: {
+    list: (slug: string) =>
+      fetchJSON<CollectionItem[]>(`${API_BASE}/projects/${slug}/collections`),
+    create: (slug: string, data: { name: string; description?: string | null }) =>
+      fetchJSON<CollectionItem>(`${API_BASE}/projects/${slug}/collections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    remove: (slug: string, id: string) =>
+      fetchJSON<{ status: string }>(`${API_BASE}/projects/${slug}/collections/${id}`, {
+        method: 'DELETE',
+      }),
+    members: (slug: string, id: string) =>
+      fetchJSON<CollectionMemberItem[]>(`${API_BASE}/projects/${slug}/collections/${id}/members`),
+    addMember: (slug: string, id: string, data: { document_uid: string }) =>
+      fetchJSON<{ status: string }>(`${API_BASE}/projects/${slug}/collections/${id}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    removeMember: (slug: string, id: string, documentUid: string) =>
+      fetchJSON<{ status: string }>(
+        `${API_BASE}/projects/${slug}/collections/${id}/members/${encodeURIComponent(documentUid)}`,
+        { method: 'DELETE' },
+      ),
+  },
+  annotations: {
+    list: (versionId: string) =>
+      fetchJSON<AnnotationItem[]>(`${API_BASE}/annotations?version_id=${encodeURIComponent(versionId)}`),
+    create: (data: {
+      version_id: string
+      annotation_type: string
+      content?: string | null
+      start_char?: number | null
+      end_char?: number | null
+    }) =>
+      fetchJSON<AnnotationItem>(`${API_BASE}/annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    delete: (annotationId: string) =>
+      fetchJSON<{ status: string }>(`${API_BASE}/annotations/${annotationId}`, {
+        method: 'DELETE',
+      }),
   },
 }

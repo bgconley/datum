@@ -59,6 +59,21 @@ from datum.models.intelligence import (
 from datum.models.intelligence import (
     Requirement as Requirement,
 )
+from datum.models.operational import (
+    Annotation as Annotation,
+)
+from datum.models.operational import (
+    Attachment as Attachment,
+)
+from datum.models.operational import (
+    Collection as Collection,
+)
+from datum.models.operational import (
+    CollectionMember as CollectionMember,
+)
+from datum.models.operational import (
+    SavedSearch as SavedSearch,
+)
 from datum.models.search import (
     ChunkEmbedding as ChunkEmbedding,
 )
@@ -84,8 +99,12 @@ from datum.models.search import (
 __all__ = [
     "AuditEvent",
     "ApiKey",
+    "Annotation",
+    "Attachment",
     "Base",
     "ChunkEmbedding",
+    "Collection",
+    "CollectionMember",
     "Document",
     "DocumentChunk",
     "DocumentVersion",
@@ -104,6 +123,7 @@ __all__ = [
     "PipelineConfig",
     "Project",
     "Requirement",
+    "SavedSearch",
     "SearchRun",
     "SearchRunResult",
     "SourceFile",

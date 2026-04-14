@@ -40,6 +40,7 @@ dev = [
 datum = "datum.cli.main:main"
 datum-eval = "datum.cli.eval:main"
 datum-insights = "datum.cli.insights:main"
+datum-gc = "datum.cli.gc:main"
 
 [tool.setuptools.packages.find]
 include = ["datum*"]

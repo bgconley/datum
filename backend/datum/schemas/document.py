@@ -38,6 +38,7 @@ class DocumentResponse(BaseModel):
     version: int
     content_hash: str
     document_uid: str
+    version_id: str | None = None
     created: str | None = None
     updated: str | None = None
 

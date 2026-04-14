@@ -1,0 +1,21 @@
+[Unit]
+Description=Datum GLiNER NER service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bgconley
+WorkingDirectory=/tank/repos/datum/gliner-ner-service
+Environment=CUDA_VISIBLE_DEVICES=1
+Environment=DATUM_GLINER_DEVICE=cuda:0
+Environment=DATUM_GLINER_HOST=127.0.0.1
+Environment=DATUM_GLINER_PORT=8012
+Environment=DATUM_GLINER_LOG_LEVEL=info
+ExecStart=/bin/bash -lc 'source /tank/venvs/datum-gliner/bin/activate && exec python -m gliner_ner_service.app'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

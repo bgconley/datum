@@ -510,9 +510,11 @@ echo "    Version: $VERSION"
 # Get document
 echo "  Getting document via API..."
 CONTENT=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/docs/docs/api-test.md")
-TITLE=$(echo $CONTENT | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"]["title"])')
-HASH=$(echo $CONTENT | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"]["content_hash"])')
-FULL_CONTENT=$(echo $CONTENT | python3 -c 'import sys,json;print(json.load(sys.stdin)["content"])')
+TITLE=$(echo "$CONTENT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"]["title"])')
+HASH=$(echo "$CONTENT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"]["content_hash"])')
+DOC_UID=$(echo "$CONTENT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"]["document_uid"])')
+VERSION_ID=$(echo "$CONTENT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["metadata"].get("version_id") or "")')
+FULL_CONTENT=$(echo "$CONTENT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["content"])')
 echo "    Title: $TITLE"
 
 # Save document (full content round-trip)
@@ -811,8 +813,80 @@ fi
 echo "  Evaluation harness: OK"
 echo ""
 
-# --- 6.8. Agent API & MCP ---
-echo "--- 6.8. Agent API & MCP ---"
+# --- 6.8. Phase 8 operational surfaces ---
+echo "--- 6.8. Phase 8 operational surfaces ---"
+echo "  Checking templates..."
+TEMPLATES=$(curl --fail-with-body -sS "$API/templates")
+TEMPLATE_COUNT=$(echo "$TEMPLATES" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+[ "$TEMPLATE_COUNT" -ge 4 ] 2>/dev/null || { echo "    FAIL: expected at least 4 templates"; exit 1; }
+ADR_TEMPLATE=$(curl --fail-with-body -sS "$API/templates/adr/render?title=ADR-9000")
+echo "$ADR_TEMPLATE" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["doc_type"] == "decision"; assert "ADR-9000" in data["content"]'
+echo "    Templates: $TEMPLATE_COUNT available"
+
+echo "  Checking saved searches..."
+SAVED_SEARCH=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/saved-searches" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Updated API docs","query_text":"Updated via API","filters":{"scope":"current"}}')
+SAVED_SEARCH_ID=$(echo "$SAVED_SEARCH" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+[ -n "$SAVED_SEARCH_ID" ] || { echo "    FAIL: saved search creation returned no id"; exit 1; }
+SAVED_SEARCHES=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/saved-searches")
+SAVED_SEARCH_COUNT=$(echo "$SAVED_SEARCHES" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+[ "$SAVED_SEARCH_COUNT" -ge 1 ] 2>/dev/null || { echo "    FAIL: expected saved search listing"; exit 1; }
+echo "    Saved searches: $SAVED_SEARCH_COUNT"
+
+echo "  Checking collections..."
+COLLECTION=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/collections" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"API docs","description":"Integration-managed collection"}')
+COLLECTION_ID=$(echo "$COLLECTION" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+[ -n "$COLLECTION_ID" ] || { echo "    FAIL: collection creation returned no id"; exit 1; }
+curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/collections/${COLLECTION_ID}/members" \
+  -H "Content-Type: application/json" \
+  -d "{\"document_uid\":\"${DOC_UID}\"}" >/dev/null
+COLLECTION_MEMBERS=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/collections/${COLLECTION_ID}/members")
+echo "$COLLECTION_MEMBERS" | python3 -c 'import sys,json; members=json.load(sys.stdin); assert any(item["document_uid"] == sys.argv[1] for item in members)' "$DOC_UID"
+echo "    Collection: OK"
+
+echo "  Checking annotations..."
+[ -n "$VERSION_ID" ] || { echo "    FAIL: missing version_id for annotation test"; exit 1; }
+ANNOTATION=$(curl --fail-with-body -sS -X POST "$API/annotations" \
+  -H "Content-Type: application/json" \
+  -d "{\"version_id\":\"${VERSION_ID}\",\"annotation_type\":\"comment\",\"content\":\"Integration note\",\"start_char\":0,\"end_char\":12}")
+ANNOTATION_ID=$(echo "$ANNOTATION" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+[ -n "$ANNOTATION_ID" ] || { echo "    FAIL: annotation creation returned no id"; exit 1; }
+ANNOTATIONS=$(curl --fail-with-body -sS "$API/annotations?version_id=${VERSION_ID}")
+ANNOTATION_COUNT=$(echo "$ANNOTATIONS" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+[ "$ANNOTATION_COUNT" -ge 1 ] 2>/dev/null || { echo "    FAIL: expected annotation listing"; exit 1; }
+echo "    Annotations: $ANNOTATION_COUNT"
+
+echo "  Checking upload and mkdir..."
+PHASE8_UPLOAD_FILE="/tmp/datum-phase8-upload-${INTEGRATION_RUN_ID}.txt"
+echo "phase 8 upload" > "$PHASE8_UPLOAD_FILE"
+UPLOAD=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/upload" \
+  -F "file=@${PHASE8_UPLOAD_FILE}")
+rm -f "$PHASE8_UPLOAD_FILE"
+UPLOAD_HASH=$(echo "$UPLOAD" | python3 -c 'import sys,json;print(json.load(sys.stdin)["content_hash"])')
+UPLOAD_ATTACHMENT=$(echo "$UPLOAD" | python3 -c 'import sys,json;print(json.load(sys.stdin)["attachment_path"])')
+[[ "$UPLOAD_HASH" == sha256:* ]] || { echo "    FAIL: upload hash missing"; exit 1; }
+[ -n "$UPLOAD_ATTACHMENT" ] || { echo "    FAIL: upload attachment path missing"; exit 1; }
+curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/fs/mkdir" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"docs/ops"}' >/dev/null
+[ -d "${DATUM_PROJECTS_ROOT}/${API_TEST_SLUG}/docs/ops" ] || { echo "    FAIL: mkdir did not create docs/ops"; exit 1; }
+echo "    Upload + mkdir: OK"
+
+echo "  Checking operational scripts..."
+for script in backup.sh restore-drill.sh snapshot-policy.sh benchmark-queries.py; do
+    [ -x "$REPO_DIR/scripts/$script" ] || { echo "    FAIL: scripts/$script missing or not executable"; exit 1; }
+done
+for unit in datum-embedder.service datum-reranker.service gliner-ner.service; do
+    [ -f "$REPO_DIR/systemd/$unit" ] || { echo "    FAIL: systemd/$unit missing"; exit 1; }
+done
+echo "    Scripts + systemd files: OK"
+echo ""
+
+# --- 6.9. Agent API & MCP ---
+echo "--- 6.9. Agent API & MCP ---"
 PHASE6_ADMIN_NAME="${PHASE6_KEY_NAME_PREFIX}-admin-${INTEGRATION_RUN_ID}"
 PHASE6_RW_NAME="${PHASE6_KEY_NAME_PREFIX}-rw-${INTEGRATION_RUN_ID}"
 PHASE6_RO_NAME="${PHASE6_KEY_NAME_PREFIX}-ro-${INTEGRATION_RUN_ID}"

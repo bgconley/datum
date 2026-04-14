@@ -11,6 +11,12 @@ export const queryKeys = {
   intelligenceSummary: (slug: string) => ['projects', slug, 'intelligence', 'summary'] as const,
   insights: (slug: string, status: string = 'open') =>
     ['projects', slug, 'insights', status] as const,
+  savedSearches: (slug: string) => ['projects', slug, 'saved-searches'] as const,
+  collections: (slug: string) => ['projects', slug, 'collections'] as const,
+  collectionMembers: (slug: string, collectionId: string) =>
+    ['projects', slug, 'collections', collectionId, 'members'] as const,
+  annotations: (versionId: string) => ['annotations', versionId] as const,
+  templates: ['templates'] as const,
   entities: (slug: string, entityType?: string) =>
     ['projects', slug, 'entities', entityType ?? 'all'] as const,
   entityDetail: (slug: string, entityId: string) =>

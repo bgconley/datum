@@ -7,6 +7,7 @@ Verifies:
 - No orphan version files
 - No stale pending_commits
 """
+
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,6 +58,109 @@ def check_project(project_path: Path) -> DoctorReport:
     _check_legacy_layouts(project_path, piq_root, report)
 
     return report
+
+
+def check_blob_refs(refs: list[dict], blobs_root: str | Path) -> list[str]:
+    """Verify blob references point to existing files."""
+    root = Path(blobs_root)
+    errors: list[str] = []
+    for ref in refs:
+        blob_path = ref.get("blob_path")
+        if not blob_path:
+            continue
+        if not (root / blob_path).exists():
+            errors.append(
+                f"Missing blob: {blob_path} (referenced by {ref.get('document', '?')})"
+            )
+    return errors
+
+
+def check_curated_records(records: list[dict], project_root: str | Path) -> list[str]:
+    """Verify curated record files referenced by DB-like rows exist on disk."""
+    root = Path(project_root)
+    errors: list[str] = []
+    for record in records:
+        record_path = record.get("canonical_record_path")
+        if not record_path:
+            continue
+        if not (root / record_path).exists():
+            errors.append(
+                f"Missing curated record: {record_path} (title: {record.get('title', '?')})"
+            )
+    return errors
+
+
+async def full_check(
+    session,
+    *,
+    project_id,
+    project_root: str | Path,
+    blobs_root: str | Path,
+) -> dict[str, object]:
+    """Run the full doctor suite against filesystem, blobs, and DB-derived records."""
+    from sqlalchemy import text
+
+    from datum.services.blob_gc import scan_attachment_metadata
+
+    project_path = Path(project_root)
+    report = check_project(project_path)
+    errors = list(report.errors)
+    warnings = list(report.warnings)
+
+    errors.extend(check_blob_refs(scan_attachment_metadata(project_path), blobs_root))
+
+    curated_result = await session.execute(
+        text(
+            """
+            SELECT canonical_record_path, title
+            FROM decisions
+            WHERE project_id = :project_id
+              AND curation_status = 'accepted'
+              AND canonical_record_path IS NOT NULL
+            UNION ALL
+            SELECT canonical_record_path, title
+            FROM requirements
+            WHERE project_id = :project_id
+              AND curation_status = 'accepted'
+              AND canonical_record_path IS NOT NULL
+            """
+        ),
+        {"project_id": project_id},
+    )
+    curated_records = [
+        {"canonical_record_path": row[0], "title": row[1]}
+        for row in curated_result.fetchall()
+    ]
+    errors.extend(check_curated_records(curated_records, project_path))
+
+    stale_chunk_result = await session.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM document_chunks dc
+            JOIN document_versions dv ON dv.id = dc.version_id
+            JOIN documents d ON d.id = dv.document_id
+            WHERE d.project_id = :project_id
+              AND dv.id != d.current_version_id
+            """
+        ),
+        {"project_id": project_id},
+    )
+    stale_chunk_count = int(stale_chunk_result.scalar() or 0)
+    if stale_chunk_count > 0:
+        warnings.append(
+            f"{stale_chunk_count} chunks reference non-current document versions"
+        )
+
+    return {
+        "errors": errors,
+        "warnings": warnings,
+        "is_healthy": len(errors) == 0,
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "files_checked": report.files_checked,
+        "versions_checked": report.versions_checked,
+    }
 
 
 def _check_document_manifest(

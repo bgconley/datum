@@ -7,9 +7,16 @@ from typing import Annotated
 from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datum.config import settings
 from datum.db import get_session
 from datum.models.agent import ApiKey
 from datum.services.api_keys import has_scope, validate_api_key
+from datum.services.rate_limiter import RateLimiter
+
+_rate_limiter = RateLimiter(
+    max_requests=settings.api_rate_limit_requests,
+    window_seconds=settings.api_rate_limit_window_seconds,
+)
 
 
 async def extract_api_key(
@@ -36,5 +43,22 @@ def require_scope(scope: str):
                 detail=f"Insufficient scope: requires '{scope}', key has '{api_key.scope}'",
             )
         return api_key
+
+    return checker
+
+
+def require_rate_limit():
+    """Optionally enforce per-key rate limiting for agent/admin surfaces."""
+
+    async def checker(api_key: ApiKey | None = Depends(extract_api_key)) -> None:
+        if api_key is None:
+            return
+        if _rate_limiter.check(str(api_key.id)):
+            return
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Try again later.",
+            headers={"Retry-After": str(settings.api_rate_limit_window_seconds)},
+        )
 
     return checker

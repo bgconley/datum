@@ -1,7 +1,7 @@
 
 import pytest
 
-from datum.services.doctor import check_project
+from datum.services.doctor import check_blob_refs, check_curated_records, check_project
 from datum.services.document_manager import create_document
 from datum.services.project_manager import create_project
 
@@ -80,3 +80,17 @@ class TestDoctor:
         report = check_project(project)
         assert not report.is_healthy
         assert any("head pointer mismatch" in e.lower() for e in report.errors)
+
+
+def test_blob_ref_check(tmp_path):
+    refs = [{"blob_path": "ab/cd/missing.pdf", "document": "attachments/file/metadata.yaml"}]
+    errors = check_blob_refs(refs, tmp_path)
+    assert len(errors) == 1
+    assert "missing.pdf" in errors[0]
+
+
+def test_curated_record_check(tmp_path):
+    records = [{"canonical_record_path": ".piq/records/decisions/dec-001.yaml", "title": "Use PG"}]
+    errors = check_curated_records(records, tmp_path)
+    assert len(errors) == 1
+    assert "dec-001" in errors[0]

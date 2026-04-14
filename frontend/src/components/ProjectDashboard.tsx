@@ -10,6 +10,7 @@ import { useContextPanel } from '@/lib/context-panel'
 import {
   api,
   type Candidate,
+  type CollectionItem,
   type DocumentMeta,
   type InsightSummary,
   type OpenQuestionSummary,
@@ -198,6 +199,7 @@ const EMPTY_DOCUMENTS: DocumentMeta[] = []
 const EMPTY_ENTITIES: string[] = []
 const EMPTY_CANDIDATES: Candidate[] = []
 const EMPTY_OPEN_QUESTIONS: OpenQuestionSummary[] = []
+const EMPTY_COLLECTIONS: CollectionItem[] = []
 
 export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
   const { setContent } = useContextPanel()
@@ -219,12 +221,18 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
     queryFn: () => api.insights.list(projectSlug, 'open'),
     enabled: Boolean(projectSlug),
   })
+  const collectionsQuery = useQuery({
+    queryKey: queryKeys.collections(projectSlug),
+    queryFn: () => api.collections.list(projectSlug),
+    enabled: Boolean(projectSlug),
+  })
   const keyEntities =
     intelligenceQuery.data?.key_entities.map((entity) => entity.canonical_name) ?? EMPTY_ENTITIES
   const pendingCandidateCount = intelligenceQuery.data?.pending_candidate_count ?? 0
   const inboxCandidates = inboxQuery.data ?? EMPTY_CANDIDATES
   const openInsights = insightsQuery.data?.insights ?? []
   const openQuestions = intelligenceQuery.data?.open_questions ?? EMPTY_OPEN_QUESTIONS
+  const collections = collectionsQuery.data ?? EMPTY_COLLECTIONS
 
   useEffect(() => {
     if (project) {
@@ -365,6 +373,39 @@ export function ProjectDashboard({ projectSlug }: ProjectDashboardProps) {
                         </Link>
                       ))}
                   </>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/80">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FolderKanban className="size-4" />
+                  Collections
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {collections.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No collections created yet.</div>
+                ) : (
+                  collections.map((collection) => (
+                    <div
+                      key={collection.id}
+                      className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="font-medium">{collection.name}</div>
+                          {collection.description && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {collection.description}
+                            </div>
+                          )}
+                        </div>
+                        <Badge variant="outline">{collection.member_count} docs</Badge>
+                      </div>
+                    </div>
+                  ))
                 )}
               </CardContent>
             </Card>

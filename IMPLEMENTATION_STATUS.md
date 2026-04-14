@@ -5,26 +5,26 @@ the code at current `HEAD` intentionally reflects a subset of that roadmap.
 
 ## Current Delivery State
 
-- Implemented and validated locally: **Phase 1 through Phase 7**
-- Planned and outstanding: **Phase 8 through Phase 9**
+- Implemented and validated locally: **Phase 1 through Phase 8**
+- Planned and outstanding: **Phase 9**
 
 ## What This Means Operationally
 
-- The design and per-phase plans for Phases 8-9 remain authoritative planning
-  documents, not a statement that those phases are already live at `HEAD`.
-- Audits and implementation reviews must evaluate shipped behavior against the
-  implemented phase set unless explicitly running a future-phase review.
+- The design and per-phase plan for Phase 9 remains an authoritative planning
+  document, not a statement that Phase 9 is already live at `HEAD`.
+- Audits and implementation reviews should treat Phase 8 as shipped behavior
+  and Phase 9 as future work unless a forward-looking review is explicitly requested.
 
 ## Database Schema Marker
 
-- Current migration head in this repo includes Phase 7
-  (`008_phase7_intelligence_graph.py`).
-- Intelligence-graph tables `document_links`, `entity_relationships`, and
-  `insights` now exist at `HEAD`.
-- Phase 7 operator workflow includes `datum insights analyze <project>` and
-  `datum insights list <project>`.
-- Future-phase operational tables such as `agent_sessions` and
-  `session_deltas` remain Phase 9 work.
+- Current migration head in this repo includes Phase 8
+  (`009_phase8_operational_tables.py`).
+- Phase 8 operational tables `saved_searches`, `collections`,
+  `collection_members`, `annotations`, and `attachments` now exist at `HEAD`.
+- Phase 8 operator workflow includes `datum doctor ...`, `datum gc ...`, and
+  `scripts/backup.sh`, `scripts/restore-drill.sh`, `scripts/snapshot-policy.sh`.
+- Future-phase lifecycle tables such as `agent_sessions` and `session_deltas`
+  remain Phase 9 work.
 
 ## Canonical References
 

@@ -13,6 +13,7 @@ from datum.services.api_keys import (
     revoke_api_key,
     validate_api_key,
 )
+from datum.services.rate_limiter import RateLimiter
 
 
 def test_scope_hierarchy_orders_scopes():
@@ -87,3 +88,10 @@ async def test_revoke_and_list_api_keys():
     )
     keys = await list_api_keys(session)
     assert keys == [key]
+
+
+def test_rate_limiter_keys_are_independent():
+    limiter = RateLimiter(max_requests=1, window_seconds=60)
+    assert limiter.check("key-1") is True
+    assert limiter.check("key-2") is True
+    assert limiter.check("key-1") is False

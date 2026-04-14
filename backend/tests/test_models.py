@@ -111,6 +111,18 @@ def test_agent_models_registered():
     assert expected.issubset(table_names)
 
 
+def test_phase8_models_registered():
+    table_names = set(Base.metadata.tables.keys())
+    expected = {
+        "saved_searches",
+        "collections",
+        "collection_members",
+        "annotations",
+        "attachments",
+    }
+    assert expected.issubset(table_names)
+
+
 def test_asyncpg_halfvec_preserves_native_bind_values():
     dialect = PGDialect_asyncpg()
     typ = AsyncpgHalfVec(4)

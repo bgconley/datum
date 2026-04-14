@@ -1,0 +1,22 @@
+[Unit]
+Description=Datum Qwen3 reranker service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bgconley
+WorkingDirectory=/tank/repos/datum/qwen3-reranker-service
+Environment=CUDA_VISIBLE_DEVICES=1
+Environment=QWEN_RERANK_PROFILE=qwen3_06b_cuda
+Environment=QWEN_RERANK_HOST=127.0.0.1
+Environment=QWEN_RERANK_PORT=8011
+Environment=QWEN_RERANK_LOG_LEVEL=INFO
+Environment=QWEN_RERANK_LOG_FORMAT=json
+ExecStart=/bin/bash -lc 'source /tank/venvs/datum-model-services/bin/activate && exec qwen3-reranker'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

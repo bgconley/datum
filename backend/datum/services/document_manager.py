@@ -5,6 +5,7 @@ Frontmatter stores human metadata. Hashes and versions live in .piq/ manifests.
 """
 
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 import frontmatter
 
 from datum.services.filesystem import (
+    atomic_write,
     compute_content_hash,
     read_manifest,
     resolve_manifest_dir,
@@ -63,6 +65,13 @@ def _validate_document_folder_path(relative_path: str) -> str:
     if len(resolved.parts) < 1 or resolved.parts[0] != "docs":
         raise ValueError(f"Folder path must be under docs/, got: {relative_path}")
     return normalized_path
+
+
+def _deleted_archive_path(project_path: Path, relative_path: str) -> Path:
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    archived = project_path / ".piq" / "deleted" / f"{relative_path}.{timestamp}"
+    archived.parent.mkdir(parents=True, exist_ok=True)
+    return archived
 
 
 @dataclass
@@ -259,6 +268,8 @@ def move_document(
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     destination_manifest_dir.parent.mkdir(parents=True, exist_ok=True)
 
+    source_bytes = source_path.read_bytes()
+
     os.rename(source_path, destination_path)
     os.rename(source_manifest_dir, destination_manifest_dir)
 
@@ -267,10 +278,33 @@ def move_document(
     manifest["canonical_path"] = normalized_new_path
     write_manifest(manifest_path, manifest)
 
+    archived_path = _deleted_archive_path(project_path, normalized_path)
+    atomic_write(archived_path, source_bytes)
+
     info = get_document(project_path, normalized_new_path)
     if info is None:
         raise RuntimeError(f"Moved document could not be loaded: {normalized_new_path}")
     return info
+
+
+def delete_document(project_path: Path, relative_path: str) -> str:
+    """Soft-delete a document into .piq/deleted and preserve manifest history."""
+    normalized_path = _validate_document_path(relative_path)
+    canonical_full = project_path / normalized_path
+    if not canonical_full.exists():
+        raise FileNotFoundError(f"Document not found: {normalized_path}")
+
+    archived_path = _deleted_archive_path(project_path, normalized_path)
+    shutil.move(str(canonical_full), str(archived_path))
+
+    manifest_dir = resolve_manifest_dir(project_path, normalized_path, for_write=False)
+    manifest_path = manifest_dir / "manifest.yaml"
+    manifest = read_manifest(manifest_path)
+    if manifest:
+        manifest["deleted_at"] = datetime.now(UTC).isoformat()
+        write_manifest(manifest_path, manifest)
+
+    return archived_path.relative_to(project_path).as_posix()
 
 
 def restore_document_version(

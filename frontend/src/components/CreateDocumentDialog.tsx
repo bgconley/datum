@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
-import { DOCUMENT_TEMPLATES, getTemplate } from '@/lib/document-templates'
+import { queryKeys } from '@/lib/query-keys'
 
 interface Props {
   projectSlug: string
@@ -20,31 +21,43 @@ export function openTemplateDialog(templateId: string) {
 export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
-  const [templateId, setTemplateId] = useState('note')
-  const [folder, setFolder] = useState('docs/notes')
+  const [templateId, setTemplateId] = useState('adr')
+  const [folder, setFolder] = useState('docs/decisions')
   const [saving, setSaving] = useState(false)
   const navigate = useNavigate()
+  const templatesQuery = useQuery({
+    queryKey: queryKeys.templates,
+    queryFn: api.templates.list,
+  })
+  const templates = templatesQuery.data ?? []
 
   useEffect(() => {
     const handleTemplateEvent = (event: Event) => {
       const detail = (event as CustomEvent<{ templateId?: string }>).detail
-      const nextTemplateId = detail?.templateId ?? 'note'
-      const template = getTemplate(nextTemplateId)
-      setTemplateId(template.id)
-      setFolder(template.folder)
+      const nextTemplateId = detail?.templateId ?? 'adr'
+      const template = templates.find((item) => item.name === nextTemplateId) ?? templates[0]
+      if (template) {
+        setTemplateId(template.name)
+        setFolder(template.default_folder)
+      }
       setOpen(true)
     }
 
     window.addEventListener(TEMPLATE_EVENT, handleTemplateEvent)
     return () => window.removeEventListener(TEMPLATE_EVENT, handleTemplateEvent)
-  }, [])
+  }, [templates])
 
   useEffect(() => {
-    const template = getTemplate(templateId)
-    setFolder(template.folder)
-  }, [templateId])
+    const template = templates.find((item) => item.name === templateId)
+    if (template) {
+      setFolder(template.default_folder)
+    }
+  }, [templateId, templates])
 
-  const template = useMemo(() => getTemplate(templateId), [templateId])
+  const template = useMemo(
+    () => templates.find((item) => item.name === templateId) ?? templates[0] ?? null,
+    [templateId, templates],
+  )
   const filename = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -52,13 +65,17 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   const relativePath = `${folder.replace(/\/$/, '')}/${filename}`.replace(/^\/+/, '')
 
   const handleSubmit = async () => {
+    if (!template) {
+      return
+    }
     setSaving(true)
     try {
+      const rendered = await api.templates.render(templateId, title)
       const document = await api.documents.create(projectSlug, {
         relative_path: relativePath,
         title,
-        doc_type: template.docType,
-        content: template.buildContent(title),
+        doc_type: rendered.doc_type,
+        content: rendered.content,
       })
       setOpen(false)
       setTitle('')
@@ -93,9 +110,9 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
           onChange={(event) => setTemplateId(event.target.value)}
           className="w-full rounded-lg border border-input bg-background px-2 py-2 text-sm outline-none"
         >
-          {DOCUMENT_TEMPLATES.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
+          {templates.map((item) => (
+            <option key={item.name} value={item.name}>
+              {item.title}
             </option>
           ))}
         </select>
@@ -120,12 +137,13 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
       </label>
 
       <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-        <div className="font-medium text-foreground">{template.label}</div>
+        <div className="font-medium text-foreground">{template?.title ?? 'Template'}</div>
         <div className="mt-1 font-mono">{relativePath}</div>
+        {template && <div className="mt-1">{template.description}</div>}
       </div>
 
       <div className="flex gap-2">
-        <Button size="sm" onClick={handleSubmit} disabled={!title || saving}>
+        <Button size="sm" onClick={handleSubmit} disabled={!title || saving || !template}>
           {saving ? 'Creating…' : 'Create'}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
