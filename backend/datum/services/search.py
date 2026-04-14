@@ -133,6 +133,25 @@ class SearchExecution:
     entity_facets: list[SearchEntityFacet] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class PrefetchedSearchChunk:
+    chunk_id: str
+    document_title: str
+    document_path: str
+    document_type: str
+    document_status: str
+    project_slug: str
+    heading_path: list[str]
+    content: str
+    version_number: int
+    content_hash: str
+    document_uid: str
+    start_line: int | None
+    end_line: int | None
+    matched_terms: list[str] = field(default_factory=list)
+    entities: list[SearchResultEntity] = field(default_factory=list)
+
+
 def parse_query(
     query: str,
     project_scope: str | None = None,
@@ -555,23 +574,167 @@ async def _build_limited_search_results(
     results: list[SearchResult] = []
     per_document_counts: dict[str, int] = {}
     allowed_types = set(allowed_document_types or ())
+    payloads = await _prefetch_search_chunks(session, fused_results, parsed)
 
     for item in fused_results:
-        built = await _build_search_result(session, item, parsed)
-        if built is None:
+        payload = payloads.get(item.chunk_id)
+        if payload is None:
             continue
-        if allowed_types and built.document_type not in allowed_types:
+        if allowed_types and payload.document_type not in allowed_types:
             continue
         if max_results_per_document is not None:
-            doc_count = per_document_counts.get(built.document_uid, 0)
+            doc_count = per_document_counts.get(payload.document_uid, 0)
             if doc_count >= max_results_per_document:
                 continue
-            per_document_counts[built.document_uid] = doc_count + 1
-        results.append(built)
+            per_document_counts[payload.document_uid] = doc_count + 1
+
+        snippet = payload.content.strip()
+        if len(snippet) > 200:
+            snippet = snippet[:200].rstrip() + "..."
+
+        match_signals: list[str] = []
+        if item.rank_bm25 is not None:
+            match_signals.append("keyword")
+        if item.rank_vector is not None:
+            match_signals.append("semantic")
+        if item.rank_terms is not None:
+            match_signals.append("exact-term")
+
+        matched_terms = payload.matched_terms
+        if not matched_terms:
+            matched_terms = [term.raw_text for term in parsed.detected_terms]
+
+        results.append(
+            SearchResult(
+                document_title=payload.document_title,
+                document_path=payload.document_path,
+                document_type=payload.document_type,
+                document_status=payload.document_status,
+                project_slug=payload.project_slug,
+                heading_path=" > ".join(payload.heading_path),
+                snippet=snippet,
+                version_number=payload.version_number,
+                content_hash=payload.content_hash,
+                fused_score=item.fused_score,
+                matched_terms=matched_terms,
+                document_uid=payload.document_uid,
+                chunk_id=payload.chunk_id,
+                line_start=payload.start_line or 0,
+                line_end=payload.end_line or 0,
+                match_signals=match_signals,
+                entities=list(payload.entities),
+            )
+        )
         if len(results) >= limit:
             break
 
     return results
+
+
+async def _prefetch_search_chunks(
+    session: AsyncSession,
+    fused_results: list[FusedResult],
+    parsed: ParsedQuery,
+) -> dict[str, PrefetchedSearchChunk]:
+    if not fused_results:
+        return {}
+
+    chunk_ids = [UUID(item.chunk_id) for item in fused_results]
+    chunk_rows = await session.execute(
+        select(
+            DocumentChunk.id,
+            DocumentChunk.heading_path,
+            DocumentChunk.content,
+            DocumentChunk.start_line,
+            DocumentChunk.end_line,
+            DocumentVersion.version_number,
+            DocumentVersion.content_hash,
+            Document.uid,
+            Document.title,
+            Document.canonical_path,
+            Document.doc_type,
+            Document.status,
+            Project.slug,
+        )
+        .select_from(DocumentChunk)
+        .join(DocumentVersion, DocumentChunk.version_id == DocumentVersion.id)
+        .join(Document, DocumentVersion.document_id == Document.id)
+        .join(Project, Document.project_id == Project.id)
+        .where(DocumentChunk.id.in_(chunk_ids))
+    )
+
+    payloads: dict[str, PrefetchedSearchChunk] = {}
+    for row in chunk_rows.fetchall():
+        chunk_id = str(row[0])
+        payloads[chunk_id] = PrefetchedSearchChunk(
+            chunk_id=chunk_id,
+            heading_path=row[1] or [],
+            content=row[2],
+            start_line=row[3],
+            end_line=row[4],
+            version_number=row[5],
+            content_hash=row[6],
+            document_uid=row[7],
+            document_title=row[8],
+            document_path=row[9],
+            document_type=row[10],
+            document_status=row[11],
+            project_slug=row[12],
+        )
+
+    if not payloads:
+        return payloads
+
+    db_chunk_ids = [UUID(chunk_id) for chunk_id in payloads]
+    if parsed.detected_terms:
+        normalized_terms = [term.normalized_text for term in parsed.detected_terms]
+        term_rows = await session.execute(
+            select(TechnicalTerm.chunk_id, TechnicalTerm.raw_text)
+            .where(
+                TechnicalTerm.chunk_id.in_(db_chunk_ids),
+                TechnicalTerm.normalized_text.in_(normalized_terms),
+            )
+            .order_by(TechnicalTerm.chunk_id.asc(), TechnicalTerm.raw_text.asc())
+        )
+        for chunk_id, raw_text in term_rows.fetchall():
+            if raw_text is None:
+                continue
+            key = str(chunk_id)
+            payload = payloads.get(key)
+            if payload is None or raw_text in payload.matched_terms:
+                continue
+            payload.matched_terms.append(raw_text)
+
+    entity_rows = await session.execute(
+        select(EntityMention.chunk_id, Entity.canonical_name, Entity.entity_type)
+        .select_from(EntityMention)
+        .join(Entity, EntityMention.entity_id == Entity.id)
+        .where(EntityMention.chunk_id.in_(db_chunk_ids))
+        .order_by(
+            EntityMention.chunk_id.asc(),
+            Entity.entity_type.asc(),
+            Entity.canonical_name.asc(),
+        )
+    )
+    seen_entities: dict[str, set[tuple[str, str]]] = {}
+    for chunk_id, canonical_name, entity_type in entity_rows.fetchall():
+        key = str(chunk_id)
+        payload = payloads.get(key)
+        if payload is None:
+            continue
+        pair = (canonical_name, entity_type)
+        seen = seen_entities.setdefault(key, set())
+        if pair in seen:
+            continue
+        seen.add(pair)
+        payload.entities.append(
+            SearchResultEntity(
+                canonical_name=canonical_name,
+                entity_type=entity_type,
+            )
+        )
+
+    return payloads
 
 
 def _build_scope_sql(version_scope: str, project_scope: str | None) -> tuple[str, dict]:
@@ -777,110 +940,6 @@ async def _term_search(
     except Exception as exc:
         logger.warning("term search failed: %s", exc)
         return []
-
-
-async def _build_search_result(
-    session: AsyncSession,
-    fused: FusedResult,
-    parsed: ParsedQuery,
-) -> SearchResult | None:
-    try:
-        chunk = await session.get(DocumentChunk, UUID(fused.chunk_id))
-        if chunk is None:
-            return None
-
-        version = await session.get(DocumentVersion, chunk.version_id)
-        document = await session.get(Document, version.document_id) if version else None
-        project = await session.get(Project, document.project_id) if document else None
-        if version is None or document is None or project is None:
-            return None
-
-        snippet = chunk.content.strip()
-        if len(snippet) > 200:
-            snippet = snippet[:200].rstrip() + "..."
-
-        matched_terms = await _matched_terms_for_chunk(session, chunk.id, parsed)
-        entities = await _entities_for_chunk(session, chunk.id)
-        match_signals: list[str] = []
-        if fused.rank_bm25 is not None:
-            match_signals.append("keyword")
-        if fused.rank_vector is not None:
-            match_signals.append("semantic")
-        if fused.rank_terms is not None:
-            match_signals.append("exact-term")
-
-        return SearchResult(
-            document_title=document.title,
-            document_path=document.canonical_path,
-            document_type=document.doc_type,
-            document_status=document.status,
-            project_slug=project.slug,
-            heading_path=" > ".join(chunk.heading_path or []),
-            snippet=snippet,
-            version_number=version.version_number,
-            content_hash=version.content_hash,
-            fused_score=fused.fused_score,
-            matched_terms=matched_terms,
-            document_uid=document.uid,
-            chunk_id=str(chunk.id),
-            line_start=chunk.start_line or 0,
-            line_end=chunk.end_line or 0,
-            match_signals=match_signals,
-            entities=entities,
-        )
-    except Exception as exc:
-        logger.warning("failed to build search result: %s", exc)
-        return None
-
-
-async def _matched_terms_for_chunk(
-    session: AsyncSession,
-    chunk_id: UUID,
-    parsed: ParsedQuery,
-) -> list[str]:
-    if not parsed.detected_terms:
-        return []
-
-    normalized_terms = [term.normalized_text for term in parsed.detected_terms]
-    result = await session.execute(
-        select(TechnicalTerm.raw_text)
-        .where(
-            TechnicalTerm.chunk_id == chunk_id,
-            TechnicalTerm.normalized_text.in_(normalized_terms),
-        )
-        .order_by(TechnicalTerm.raw_text.asc())
-    )
-    matched = list(dict.fromkeys(row[0] for row in result.fetchall() if row[0]))
-    if matched:
-        return matched
-    return [term.raw_text for term in parsed.detected_terms]
-
-
-async def _entities_for_chunk(
-    session: AsyncSession,
-    chunk_id: UUID,
-) -> list[SearchResultEntity]:
-    result = await session.execute(
-        select(Entity.canonical_name, Entity.entity_type)
-        .select_from(EntityMention)
-        .join(Entity, EntityMention.entity_id == Entity.id)
-        .where(EntityMention.chunk_id == chunk_id)
-        .order_by(Entity.entity_type.asc(), Entity.canonical_name.asc())
-    )
-    seen: set[tuple[str, str]] = set()
-    entities: list[SearchResultEntity] = []
-    for canonical_name, entity_type in result.fetchall():
-        key = (canonical_name, entity_type)
-        if key in seen:
-            continue
-        seen.add(key)
-        entities.append(
-            SearchResultEntity(
-                canonical_name=canonical_name,
-                entity_type=entity_type,
-            )
-        )
-    return entities
 
 
 async def _log_search_run(

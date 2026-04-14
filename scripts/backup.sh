@@ -22,7 +22,8 @@ SNAPSHOT_LABEL="${DATUM_BACKUP_SNAPSHOT_LABEL:-daily}"
 mkdir -p "$BACKUPS_ROOT/pgdump"
 
 run() {
-    echo "+ $*"
+    # Keep command tracing on stderr so piped command stdout remains pristine.
+    echo "+ $*" >&2
     "$@"
 }
 

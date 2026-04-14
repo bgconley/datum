@@ -12,6 +12,7 @@ from datum.services.search import (
     SearchResultEntity,
     _build_entity_facets,
     _log_search_run,
+    _prefetch_search_chunks,
     _prepare_search_context,
     _term_search,
     _vector_search,
@@ -54,6 +55,17 @@ class _FakeSession:
 
     async def rollback(self):
         self.rolled_back = True
+
+
+class _QueuedSession(_FakeSession):
+    def __init__(self, responses):
+        super().__init__(rows=[])
+        self._responses = list(responses)
+
+    async def execute(self, statement, params=None):
+        self.executed.append((statement, params or {}))
+        rows = self._responses.pop(0) if self._responses else []
+        return _FakeExecuteResult(rows)
 
 
 class TestParseQuery:
@@ -290,3 +302,86 @@ async def test_log_search_run_persists_config_references():
     assert search_run_result.search_run_id == search_run.id
     assert search_run_result.rerank_score == 0.7
     assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_prefetch_search_chunks_batches_metadata_terms_and_entities():
+    chunk_a = uuid4()
+    chunk_b = uuid4()
+
+    chunk_rows = [
+        (
+            chunk_a,
+            ["docs", "a"],
+            "Chunk A content",
+            1,
+            5,
+            2,
+            "sha256:a",
+            "doc_uid_a",
+            "Doc A",
+            "docs/a.md",
+            "plan",
+            "draft",
+            "alpha",
+        ),
+        (
+            chunk_b,
+            ["docs", "b"],
+            "Chunk B content",
+            6,
+            9,
+            3,
+            "sha256:b",
+            "doc_uid_b",
+            "Doc B",
+            "docs/b.md",
+            "decision",
+            "active",
+            "alpha",
+        ),
+    ]
+    term_rows = [
+        (chunk_a, "DATABASE_URL"),
+        (chunk_a, "DATABASE_URL"),  # duplicate should dedupe
+    ]
+    entity_rows = [
+        (chunk_a, "postgresql", "technology"),
+        (chunk_a, "postgresql", "technology"),  # duplicate should dedupe
+        (chunk_b, "redis", "technology"),
+    ]
+    session = _QueuedSession([chunk_rows, term_rows, entity_rows])
+    parsed = ParsedQuery(
+        raw="DATABASE_URL redis",
+        bm25_query="DATABASE_URL redis",
+        detected_terms=[
+            TermMatch(
+                raw_text="DATABASE_URL",
+                normalized_text="database_url",
+                term_type="env_var",
+                start_char=0,
+                end_char=12,
+                confidence=1.0,
+            )
+        ],
+        version_scope="current",
+        project_scope="alpha",
+    )
+
+    payloads = await _prefetch_search_chunks(
+        session,
+        fused_results=[
+            FusedResult(chunk_id=str(chunk_a), fused_score=1.0),
+            FusedResult(chunk_id=str(chunk_b), fused_score=0.9),
+        ],
+        parsed=parsed,
+    )
+
+    assert len(session.executed) == 3
+    assert payloads[str(chunk_a)].matched_terms == ["DATABASE_URL"]
+    assert payloads[str(chunk_a)].entities == [
+        SearchResultEntity(canonical_name="postgresql", entity_type="technology")
+    ]
+    assert payloads[str(chunk_b)].entities == [
+        SearchResultEntity(canonical_name="redis", entity_type="technology")
+    ]
