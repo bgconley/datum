@@ -5,10 +5,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+os.environ.setdefault(
+    "DATUM_DATABASE_URL",
+    "postgresql+asyncpg://datum:"
+    f"{os.getenv('DATUM_DB_PASSWORD', 'datum_dev')}"
+    "@localhost:5432/datum",
+)
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from datum.db import async_session_factory, engine  # noqa: E402
