@@ -146,7 +146,7 @@ WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
    );
 DELETE FROM audit_events
 WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
-DO $$
+DO \$\$
 BEGIN
     IF to_regclass('public.idempotency_records') IS NOT NULL THEN
         DELETE FROM idempotency_records
@@ -157,7 +157,7 @@ BEGIN
         DELETE FROM api_keys
         WHERE name LIKE '${PHASE6_KEY_NAME_PREFIX}-%';
     END IF;
-END $$;
+END \$\$;
 DELETE FROM document_versions
 WHERE document_id IN (
     SELECT id FROM documents
