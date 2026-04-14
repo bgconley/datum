@@ -10,6 +10,10 @@
         reverse_proxy datum-api:8001
     }
 
+    handle /mcp/* {
+        reverse_proxy datum-api:8001
+    }
+
     handle {
         reverse_proxy datum-frontend:3000
     }

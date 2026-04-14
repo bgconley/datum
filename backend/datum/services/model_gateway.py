@@ -36,6 +36,7 @@ class ModelGateway:
     embedding: ModelConfig | None = None
     reranker: ModelConfig | None = None
     ner: ModelConfig | None = None
+    llm: ModelConfig | None = None
     _client: httpx.AsyncClient = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -194,6 +195,30 @@ class ModelGateway:
         response.raise_for_status()
         return response.json()
 
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        if not self.llm:
+            raise RuntimeError("No LLM model configured")
+
+        config = self.llm
+        response = await self._post(
+            f"{config.endpoint}/v1/chat/completions",
+            {
+                "model": config.name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens if max_tokens is not None else settings.llm_max_tokens,
+                "temperature": (
+                    temperature if temperature is not None else settings.llm_temperature
+                ),
+            },
+        )
+        return str(response["choices"][0]["message"]["content"])
+
 
 def build_model_gateway() -> ModelGateway:
     embedding = None
@@ -220,5 +245,13 @@ def build_model_gateway() -> ModelGateway:
             endpoint=settings.ner_endpoint,
             protocol=settings.ner_protocol,
         )
+    llm = None
+    if settings.llm_endpoint:
+        llm = ModelConfig(
+            name=settings.llm_model,
+            endpoint=settings.llm_endpoint,
+            protocol="openai",
+            timeout=60.0,
+        )
 
-    return ModelGateway(embedding=embedding, reranker=reranker, ner=ner)
+    return ModelGateway(embedding=embedding, reranker=reranker, ner=ner, llm=llm)

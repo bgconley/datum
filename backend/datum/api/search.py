@@ -7,12 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.db import get_session
 from datum.schemas.search import (
+    AnswerModeResponse,
+    CitationResponse,
     SearchEntityFacetResponse,
     SearchRequest,
     SearchResponse,
     SearchResultResponse,
     SearchStreamEventResponse,
+    SourceRefResponse,
 )
+from datum.services.answer import generate_answer
 from datum.services.model_gateway import build_model_gateway
 from datum.services.search import search_execution, stream_search
 
@@ -23,6 +27,7 @@ router = APIRouter(prefix="/api/v1", tags=["search"])
 async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_session)):
     started = time.monotonic()
     gateway = build_model_gateway()
+    answer = None
     try:
         execution = await search_execution(
             session=session,
@@ -32,6 +37,22 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
             version_scope=body.version_scope,
             limit=body.limit,
         )
+        if body.answer_mode:
+            answer_response = await generate_answer(gateway, body.query, execution.results)
+            answer = AnswerModeResponse(
+                answer=answer_response.answer,
+                citations=[
+                    CitationResponse(
+                        index=item.index,
+                        human_readable=item.human_readable,
+                        source_ref=SourceRefResponse(**item.source_ref.__dict__),
+                    )
+                    for item in answer_response.citations
+                    if item.source_ref is not None
+                ],
+                error=answer_response.error,
+                model=answer_response.model,
+            )
     finally:
         await gateway.close()
 
@@ -44,6 +65,7 @@ async def api_search(body: SearchRequest, session: AsyncSession = Depends(get_se
         query=body.query,
         result_count=len(execution.results),
         latency_ms=int((time.monotonic() - started) * 1000),
+        answer=answer,
     )
 
 

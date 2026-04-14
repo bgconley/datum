@@ -9,6 +9,7 @@ class SearchRequest(BaseModel):
     project: str | None = None
     version_scope: str = "current"
     limit: int = Field(default=20, ge=1, le=100)
+    answer_mode: bool = False
 
     @field_validator("version_scope")
     @classmethod
@@ -52,6 +53,31 @@ class SearchResultEntityResponse(BaseModel):
     entity_type: str
 
 
+class SourceRefResponse(BaseModel):
+    project_slug: str
+    document_uid: str
+    version_number: int
+    content_hash: str
+    chunk_id: str
+    canonical_path: str
+    heading_path: list[str] = Field(default_factory=list)
+    line_start: int = 0
+    line_end: int = 0
+
+
+class CitationResponse(BaseModel):
+    index: int = 0
+    human_readable: str = ""
+    source_ref: SourceRefResponse
+
+
+class AnswerModeResponse(BaseModel):
+    answer: str = ""
+    citations: list[CitationResponse] = Field(default_factory=list)
+    error: str = ""
+    model: str = ""
+
+
 class SearchEntityFacetResponse(BaseModel):
     canonical_name: str
     entity_type: str
@@ -64,6 +90,7 @@ class SearchResponse(BaseModel):
     query: str
     result_count: int
     latency_ms: int | None = None
+    answer: AnswerModeResponse | None = None
 
 
 class SearchStreamEventResponse(BaseModel):

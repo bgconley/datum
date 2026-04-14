@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     ner_model: str = "knowledgator/gliner-bi-large-v2.0"
     ner_protocol: str = "gliner_http"
     ner_threshold: float = 0.5
+    llm_endpoint: str = "http://localhost:8000"
+    llm_model: str = "gpt-oss-20b"
+    llm_max_tokens: int = 2048
+    llm_temperature: float = 0.1
 
     # For local dev/testing, override paths
     model_config = {"env_prefix": "DATUM_"}
@@ -54,3 +58,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    return settings

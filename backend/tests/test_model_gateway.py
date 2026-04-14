@@ -116,3 +116,26 @@ class TestModelGateway:
             result = await gateway.rerank("query", ["a", "b", "c"], top_n=2)
             assert result == [(2, 0.95), (0, 0.75)]
         await gateway.close()
+
+    @pytest.mark.asyncio
+    async def test_generate_uses_openai_chat_completions(self):
+        gateway = ModelGateway(
+            llm=ModelConfig(
+                name="gpt-oss-20b",
+                endpoint="http://localhost:8000",
+                protocol="openai",
+            )
+        )
+        with patch.object(
+            ModelGateway,
+            "_post",
+            new_callable=AsyncMock,
+            return_value={"choices": [{"message": {"content": "Hello world"}}]},
+        ) as mocked_post:
+            result = await gateway.generate("Say hello", max_tokens=32, temperature=0.2)
+            assert result == "Hello world"
+            payload = mocked_post.await_args.args[1]
+            assert payload["messages"][0]["content"] == "Say hello"
+            assert payload["max_tokens"] == 32
+            assert payload["temperature"] == 0.2
+        await gateway.close()

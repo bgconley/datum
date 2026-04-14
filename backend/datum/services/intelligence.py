@@ -119,6 +119,10 @@ async def accept_candidate(
     candidate_type: CandidateType,
     candidate_id: str,
     body: AcceptCandidateRequest,
+    actor_type: str = "web",
+    actor_name: str | None = "inbox",
+    request_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> CandidateAction:
     project = await get_project_or_404(session, slug)
     project_path = Path(project.filesystem_path)
@@ -165,12 +169,14 @@ async def accept_candidate(
         row.valid_from = row.valid_from or datetime.now(UTC)
         await log_audit_event(
             session,
-            actor_type="web",
-            actor_name="inbox",
+            actor_type=actor_type,
+            actor_name=actor_name,
             operation="accept_candidate",
             project_id=project.id,
             target_path=row.canonical_record_path,
             new_hash=row.record_hash,
+            request_id=request_id,
+            metadata=metadata,
         )
         await session.commit()
         return CandidateAction(
@@ -227,12 +233,14 @@ async def accept_candidate(
         requirement_row.valid_from = requirement_row.valid_from or datetime.now(UTC)
         await log_audit_event(
             session,
-            actor_type="web",
-            actor_name="inbox",
+            actor_type=actor_type,
+            actor_name=actor_name,
             operation="accept_candidate",
             project_id=project.id,
             target_path=requirement_row.canonical_record_path,
             new_hash=requirement_row.record_hash,
+            request_id=request_id,
+            metadata=metadata,
         )
         await session.commit()
         return CandidateAction(
@@ -279,12 +287,14 @@ async def accept_candidate(
     question_row.canonical_record_path = record_path.relative_to(project_path).as_posix()
     await log_audit_event(
         session,
-        actor_type="web",
-        actor_name="inbox",
+        actor_type=actor_type,
+        actor_name=actor_name,
         operation="accept_candidate",
         project_id=project.id,
         target_path=question_row.canonical_record_path,
         new_hash=f"sha256:{hashlib.sha256(record_bytes).hexdigest()}",
+        request_id=request_id,
+        metadata=metadata,
     )
     await session.commit()
     return CandidateAction(
@@ -300,6 +310,10 @@ async def reject_candidate(
     slug: str,
     candidate_type: CandidateType,
     candidate_id: str,
+    actor_type: str = "web",
+    actor_name: str | None = "inbox",
+    request_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> CandidateAction:
     project = await get_project_or_404(session, slug)
     table_map: dict[CandidateType, type[Any]] = {
@@ -314,11 +328,13 @@ async def reject_candidate(
     row.curation_status = "rejected"
     await log_audit_event(
         session,
-        actor_type="web",
-        actor_name="inbox",
+        actor_type=actor_type,
+        actor_name=actor_name,
         operation="reject_candidate",
         project_id=project.id,
         target_path=getattr(row, "canonical_record_path", None),
+        request_id=request_id,
+        metadata=metadata,
     )
     await session.commit()
     return CandidateAction(id=str(row.id), curation_status=row.curation_status)

@@ -38,6 +38,9 @@ export DATUM_PGDATA="${DATUM_PGDATA:-/tank/datum/pgdata}"
 export DATUM_EMBEDDING_ENDPOINT="${DATUM_EMBEDDING_ENDPOINT:-http://localhost:8010}"
 export DATUM_RERANKER_ENDPOINT="${DATUM_RERANKER_ENDPOINT:-http://localhost:8011}"
 export DATUM_NER_ENDPOINT="${DATUM_NER_ENDPOINT:-http://localhost:8012}"
+export INTEGRATION_RUN_ID="${INTEGRATION_RUN_ID:-$(date +%s)-$$}"
+export PHASE6_KEY_NAME_PREFIX="${PHASE6_KEY_NAME_PREFIX:-integration-test-phase6}"
+export PHASE6_IDEMPOTENCY_PREFIX="${PHASE6_IDEMPOTENCY_PREFIX:-phase6-integration}"
 API_TEST_SLUG="api-test"
 
 cleanup_api_test_state() {
@@ -143,6 +146,10 @@ WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}')
    );
 DELETE FROM audit_events
 WHERE project_id IN (SELECT id FROM projects WHERE slug = '${slug}');
+DELETE FROM idempotency_records
+WHERE idempotency_key LIKE '${PHASE6_IDEMPOTENCY_PREFIX}-%';
+DELETE FROM api_keys
+WHERE name LIKE '${PHASE6_KEY_NAME_PREFIX}-%';
 DELETE FROM document_versions
 WHERE document_id IN (
     SELECT id FROM documents
@@ -721,6 +728,127 @@ SQL
     [ "${RERANK_ROWS:-0}" -gt 0 ] 2>/dev/null || { echo "    FAIL: rerank telemetry missing"; exit 1; }
 fi
 echo "  Evaluation harness: OK"
+echo ""
+
+# --- 6.8. Agent API & MCP ---
+echo "--- 6.8. Agent API & MCP ---"
+PHASE6_ADMIN_NAME="${PHASE6_KEY_NAME_PREFIX}-admin-${INTEGRATION_RUN_ID}"
+PHASE6_RW_NAME="${PHASE6_KEY_NAME_PREFIX}-rw-${INTEGRATION_RUN_ID}"
+PHASE6_RO_NAME="${PHASE6_KEY_NAME_PREFIX}-ro-${INTEGRATION_RUN_ID}"
+PHASE6_SESSION_ID="sess-${INTEGRATION_RUN_ID}"
+PHASE6_IDEM_SESSION_ID="idem-sess-${INTEGRATION_RUN_ID}"
+PHASE6_CREATE_IDEM_KEY="${PHASE6_IDEMPOTENCY_PREFIX}-create-${INTEGRATION_RUN_ID}"
+PHASE6_IDEM_IDEM_KEY="${PHASE6_IDEMPOTENCY_PREFIX}-idem-${INTEGRATION_RUN_ID}"
+
+echo "  Bootstrapping admin API key..."
+ADMIN_KEY_OUTPUT="$(python "$REPO_DIR/scripts/create-admin-key.py" \
+  --name "$PHASE6_ADMIN_NAME" \
+  --created-by "integration-test")"
+PHASE6_ADMIN_KEY="$(echo "$ADMIN_KEY_OUTPUT" | awk '/^Key:/ {print $2}')"
+[ -n "$PHASE6_ADMIN_KEY" ] || { echo "    FAIL: could not create admin key"; exit 1; }
+echo "    Admin key: OK"
+
+echo "  Creating scoped API keys..."
+RW_KEY_RESP=$(curl --fail-with-body -sS -X POST "$API/admin/api-keys" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_ADMIN_KEY" \
+  -d "{\"name\":\"${PHASE6_RW_NAME}\",\"scope\":\"readwrite\"}")
+PHASE6_RW_KEY="$(echo "$RW_KEY_RESP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')"
+[ -n "$PHASE6_RW_KEY" ] || { echo "    FAIL: readwrite key missing"; exit 1; }
+
+RO_KEY_RESP=$(curl --fail-with-body -sS -X POST "$API/admin/api-keys" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_ADMIN_KEY" \
+  -d "{\"name\":\"${PHASE6_RO_NAME}\",\"scope\":\"read\"}")
+PHASE6_RO_KEY="$(echo "$RO_KEY_RESP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')"
+[ -n "$PHASE6_RO_KEY" ] || { echo "    FAIL: read-only key missing"; exit 1; }
+echo "    Keys: admin + readwrite + read"
+
+echo "  Verifying scope enforcement on admin endpoints..."
+SCOPE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/admin/api-keys" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RO_KEY" \
+  -d "{\"name\":\"${PHASE6_KEY_NAME_PREFIX}-should-fail-${INTEGRATION_RUN_ID}\",\"scope\":\"read\"}")
+[ "$SCOPE_STATUS" = "403" ] || { echo "    FAIL: expected 403 from read-only key, got $SCOPE_STATUS"; exit 1; }
+echo "    Read-only key correctly rejected"
+
+echo "  Listing admin-managed API keys..."
+KEY_LIST=$(curl --fail-with-body -sS "$API/admin/api-keys" \
+  -H "X-API-Key: $PHASE6_ADMIN_KEY")
+echo "$KEY_LIST" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert any(item["name"].startswith("integration-test-phase6-") for item in data["keys"])'
+echo "    Admin list: OK"
+
+echo "  Creating and appending a session note..."
+SESSION_CREATE=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Idempotency-Key: $PHASE6_CREATE_IDEM_KEY" \
+  -d "{\"session_id\":\"${PHASE6_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Integration session ${INTEGRATION_RUN_ID}\",\"content\":\"## Session\\nCreated during Phase 6 integration verification.\",\"repo_path\":\"/tank/repos/datum\",\"git_branch\":\"main\",\"files_touched\":[\"docs/api-test.md\"],\"commands_run\":[\"pytest -q\"],\"next_steps\":[\"verify mcp\"]}")
+SESSION_PATH="$(echo "$SESSION_CREATE" | python3 -c 'import sys,json;print(json.load(sys.stdin)["path"])')"
+[ -n "$SESSION_PATH" ] || { echo "    FAIL: session creation returned no path"; exit 1; }
+
+SESSION_APPEND=$(curl --fail-with-body -sS -X PUT "$API/projects/${API_TEST_SLUG}/sessions/${PHASE6_SESSION_ID}" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Idempotency-Key: ${PHASE6_IDEMPOTENCY_PREFIX}-append-${INTEGRATION_RUN_ID}" \
+  -d "{\"content\":\"## Follow-up\\nAppended content for audit verification.\",\"files_touched\":[\"docs/sessions/${PHASE6_SESSION_ID}.md\"],\"commands_run\":[\"curl /api/v1/projects/${API_TEST_SLUG}/sessions\"],\"next_steps\":[\"review audit\"],\"summary\":\"Integration session ${INTEGRATION_RUN_ID} updated\"}")
+echo "$SESSION_APPEND" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["status"] == "appended"'
+
+SESSION_LIST=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/sessions" \
+  -H "X-API-Key: $PHASE6_RW_KEY")
+SESSION_MATCH_COUNT="$(echo "$SESSION_LIST" | python3 -c 'import sys,json; data=json.load(sys.stdin); print(sum(1 for item in data["sessions"] if item["session_id"] == sys.argv[1]))' "$PHASE6_SESSION_ID")"
+[ "$SESSION_MATCH_COUNT" = "1" ] || { echo "    FAIL: expected 1 matching session, got $SESSION_MATCH_COUNT"; exit 1; }
+echo "    Session note API: OK"
+
+echo "  Verifying project context budget endpoint..."
+CONTEXT_RESP=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/context?detail=brief&max_tokens=400" \
+  -H "X-API-Key: $PHASE6_RW_KEY")
+echo "$CONTEXT_RESP" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert data["content_kind"] == "retrieved_project_document"; assert data["data"]["project"]["slug"] == "api-test"; assert isinstance(data["data"]["documents"], list)'
+echo "    Context endpoint: OK"
+
+echo "  Resolving an exact citation..."
+CITATION_RESP=$(curl --fail-with-body -sS -X POST "$API/citations/resolve" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -d "{\"source_ref\":{\"project_slug\":\"${API_TEST_SLUG}\",\"document_uid\":\"doc_phase6\",\"version_number\":2,\"content_hash\":\"sha256:phase6\",\"chunk_id\":\"chunk_phase6\",\"canonical_path\":\"docs/api-test.md\",\"heading_path\":[],\"line_start\":1,\"line_end\":20}}")
+echo "$CITATION_RESP" | python3 -c 'import sys,json; data=json.load(sys.stdin); assert "Updated via API" in (data.get("content") or "")'
+echo "    Citation endpoint: OK"
+
+echo "  Querying audit events..."
+AUDIT_RESP=$(curl --fail-with-body -sS "$API/admin/audit?actor_type=agent&limit=20" \
+  -H "X-API-Key: $PHASE6_ADMIN_KEY")
+echo "$AUDIT_RESP" | python3 -c 'import sys,json; data=json.load(sys.stdin); ops={item["operation"] for item in data["events"]}; assert "create_session_note" in ops; assert "append_session_note" in ops'
+echo "    Audit query: OK"
+
+echo "  Checking MCP SSE endpoint..."
+MCP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://localhost:8001/mcp/sse")
+if [ "$MCP_STATUS" != "200" ] && [ "$MCP_STATUS" != "307" ]; then
+  echo "    FAIL: datum-api MCP SSE endpoint returned $MCP_STATUS"
+  exit 1
+fi
+MCP_CADDY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://localhost:3080/mcp/sse")
+if [ "$MCP_CADDY_STATUS" != "200" ] && [ "$MCP_CADDY_STATUS" != "307" ]; then
+  echo "    FAIL: Caddy MCP SSE endpoint returned $MCP_CADDY_STATUS"
+  exit 1
+fi
+echo "    MCP SSE: datum-api $MCP_STATUS, Caddy $MCP_CADDY_STATUS"
+
+echo "  Verifying idempotent session creation..."
+IDEM_RESP1=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Idempotency-Key: $PHASE6_IDEM_IDEM_KEY" \
+  -d "{\"session_id\":\"${PHASE6_IDEM_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Idempotency ${INTEGRATION_RUN_ID}\",\"content\":\"## Idempotent\\nFirst create.\"}")
+IDEM_RESP2=$(curl --fail-with-body -sS -X POST "$API/projects/${API_TEST_SLUG}/sessions" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $PHASE6_RW_KEY" \
+  -H "X-Idempotency-Key: $PHASE6_IDEM_IDEM_KEY" \
+  -d "{\"session_id\":\"${PHASE6_IDEM_SESSION_ID}\",\"agent_name\":\"codex\",\"summary\":\"Idempotency ${INTEGRATION_RUN_ID}\",\"content\":\"## Idempotent\\nFirst create.\"}")
+[ "$IDEM_RESP1" = "$IDEM_RESP2" ] || { echo "    FAIL: idempotent create responses differ"; exit 1; }
+IDEM_COUNT=$(curl --fail-with-body -sS "$API/projects/${API_TEST_SLUG}/sessions" \
+  -H "X-API-Key: $PHASE6_RW_KEY" | python3 -c 'import sys,json; data=json.load(sys.stdin); print(sum(1 for item in data["sessions"] if item["session_id"] == sys.argv[1]))' "$PHASE6_IDEM_SESSION_ID")
+[ "$IDEM_COUNT" = "1" ] || { echo "    FAIL: expected 1 idempotent session note, got $IDEM_COUNT"; exit 1; }
+echo "    Idempotency: OK"
 echo ""
 
 # --- 7. Background workers health check ---

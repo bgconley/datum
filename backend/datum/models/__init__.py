@@ -1,3 +1,9 @@
+from datum.models.agent import (
+    ApiKey as ApiKey,
+)
+from datum.models.agent import (
+    IdempotencyRecord as IdempotencyRecord,
+)
 from datum.models.base import Base as Base
 from datum.models.core import (
     AuditEvent as AuditEvent,
@@ -68,6 +74,7 @@ from datum.models.search import (
 
 __all__ = [
     "AuditEvent",
+    "ApiKey",
     "Base",
     "ChunkEmbedding",
     "Document",
@@ -76,6 +83,7 @@ __all__ = [
     "Decision",
     "EvaluationRun",
     "EvaluationSet",
+    "IdempotencyRecord",
     "Entity",
     "EntityMention",
     "IngestionJob",

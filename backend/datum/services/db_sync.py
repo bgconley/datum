@@ -249,6 +249,8 @@ async def log_audit_event(
     old_hash: str | None = None,
     new_hash: str | None = None,
     actor_name: str | None = None,
+    request_id: str | None = None,
+    metadata: dict | None = None,
 ) -> None:
     """Record an audit event."""
     session.add(AuditEvent(
@@ -259,5 +261,7 @@ async def log_audit_event(
         target_path=target_path,
         old_hash=old_hash,
         new_hash=new_hash,
+        request_id=request_id,
+        metadata_=metadata,
     ))
     await session.commit()
