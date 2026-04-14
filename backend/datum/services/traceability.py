@@ -349,6 +349,7 @@ async def get_traceability_chains(
                         target_entity.canonical_name,
                         target_entity.entity_type,
                     )
+                    .select_from(EntityRelationship)
                     .join(
                         source_entity,
                         EntityRelationship.source_entity_id == source_entity.id,
