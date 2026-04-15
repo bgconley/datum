@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import settings
 from datum.db import get_session
+from datum.schemas.attachment import AttachmentResponse
 from datum.schemas.document import DocumentResponse, GeneratedFileResponse
 from datum.schemas.project import ProjectCreate, ProjectResponse, WorkspaceSnapshotResponse
+from datum.services.attachment_manager import list_attachments
 from datum.services.db_sync import log_audit_event, sync_project_to_db
 from datum.services.document_manager import list_documents
 from datum.services.filesystem import compute_content_hash
@@ -49,10 +51,15 @@ def _workspace_snapshot(slug: str) -> WorkspaceSnapshotResponse:
 
     project_path = settings.projects_root / slug
     documents = [DocumentResponse(**doc.__dict__) for doc in list_documents(project_path)]
+    attachments = [
+        AttachmentResponse(**attachment.__dict__)
+        for attachment in list_attachments(project_path)
+    ]
     generated_files = _list_generated_files(project_path)
     return WorkspaceSnapshotResponse(
         project=ProjectResponse(**project.__dict__),
         documents=documents,
+        attachments=attachments,
         generated_files=generated_files,
     )
 
@@ -92,9 +99,9 @@ async def api_create_project(body: ProjectCreate, session: AsyncSession = Depend
         )
         await log_audit_event(session, "web", "create_project", project_db_id, info.slug)
         await session.commit()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        logger.debug("DB sync skipped (no database connection)", exc_info=True)
+        logger.warning("DB sync skipped for create_project: %s", exc, exc_info=True)
 
     return ProjectResponse(**info.__dict__)
 

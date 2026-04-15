@@ -10,6 +10,7 @@ from datum.cli import doctor as doctor_cli
 from datum.cli import eval as eval_cli
 from datum.cli import gc as gc_cli
 from datum.cli import insights as insights_cli
+from datum.cli import portable as portable_cli
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,6 +20,17 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("insights", help="Insight analysis and listing")
     subparsers.add_parser("doctor", help="Run cabinet and DB integrity checks")
     subparsers.add_parser("gc", help="Blob garbage collection")
+    portable_parser = subparsers.add_parser("export", help="Export a portable project bundle")
+    portable_parser.add_argument("project_slug")
+    portable_parser.add_argument("--output")
+    portable_parser.add_argument("--include-operational", action="store_true")
+    import_parser = subparsers.add_parser("import", help="Import a portable project bundle")
+    import_parser.add_argument("bundle_path")
+    import_parser.add_argument(
+        "--conflict",
+        choices=("skip", "merge", "replace"),
+        default="merge",
+    )
     return parser
 
 
@@ -39,6 +51,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
     if args[0] == "gc":
         gc_cli.main(args[1:], prog="datum gc")
+        return
+    if args[0] == "export":
+        portable_cli.main(["export", *args[1:]], prog="datum")
+        return
+    if args[0] == "import":
+        portable_cli.main(["import", *args[1:]], prog="datum")
         return
     if args:
         parser.error(f"unknown command: {args[0]}")

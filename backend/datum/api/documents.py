@@ -21,24 +21,28 @@ from datum.schemas.document import (
     DocumentResponse,
     DocumentSave,
     FolderCreateRequest,
+    FolderRenameRequest,
     GeneratedFileResponse,
 )
 from datum.services.db_sync import (
     log_audit_event,
-    move_document_path_in_db,
     soft_delete_document_in_db,
+    sync_document_move_to_db,
     sync_document_version_to_db,
 )
 from datum.services.document_manager import (
     ConflictError,
+    _iter_folder_documents,
     _validate_document_path,
     create_document,
     create_document_folder,
     delete_document,
+    delete_document_folder,
     get_document,
     is_binary_document_path,
     list_documents,
     move_document,
+    rename_document_folder,
     save_document,
 )
 from datum.services.filesystem import ManifestLayoutConflictError
@@ -251,6 +255,131 @@ async def api_create_folder(slug: str, body: FolderCreateRequest):
     return {"relative_path": relative_path}
 
 
+@router.post("/folders/rename", response_model=dict[str, object])
+async def api_rename_folder(
+    slug: str,
+    body: FolderRenameRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    project_path = _get_project_path(slug)
+    source_documents = _iter_folder_documents(project_path, body.relative_path)
+    try:
+        moved_documents = rename_document_folder(
+            project_path,
+            body.relative_path,
+            body.new_relative_path,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Folder '{body.relative_path}' not found")
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        project_db_id = await _get_project_db_id(slug, session)
+        if project_db_id:
+            from datum.services.versioning import get_current_version
+
+            for old_path, moved_document in zip(source_documents, moved_documents, strict=False):
+                version_info = get_current_version(project_path, moved_document.relative_path)
+                if version_info is None:
+                    continue
+                file_bytes = (project_path / moved_document.relative_path).read_bytes()
+                await sync_document_move_to_db(
+                    session=session,
+                    project_id=project_db_id,
+                    document_uid=moved_document.document_uid,
+                    old_canonical_path=old_path,
+                    new_canonical_path=moved_document.relative_path,
+                    version_info=version_info,
+                    title=moved_document.title,
+                    doc_type=moved_document.doc_type,
+                    status=moved_document.status,
+                    tags=moved_document.tags,
+                    content_hash=moved_document.content_hash,
+                    byte_size=len(file_bytes),
+                    filesystem_path=version_info.version_file,
+                )
+            await log_audit_event(
+                session,
+                "web",
+                "rename_folder",
+                project_db_id,
+                moved_documents[0].relative_path if moved_documents else body.new_relative_path,
+                metadata={
+                    "old_path": body.relative_path,
+                    "moved_documents": len(moved_documents),
+                },
+            )
+            await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        _log_db_sync_skip(
+            operation="rename_folder",
+            project_slug=slug,
+            canonical_path=body.new_relative_path,
+            exc=exc,
+        )
+
+    return {
+        "relative_path": body.relative_path,
+        "new_relative_path": body.new_relative_path,
+        "moved_documents": [
+            DocumentResponse(**doc.__dict__).model_dump()
+            for doc in moved_documents
+        ],
+    }
+
+
+@router.delete("/folders/{folder_path:path}", response_model=dict[str, object])
+async def api_delete_folder(
+    slug: str,
+    folder_path: str,
+    session: AsyncSession = Depends(get_session),
+):
+    project_path = _get_project_path(slug)
+    canonical_paths = _iter_folder_documents(project_path, folder_path)
+    try:
+        archived_paths = delete_document_folder(project_path, folder_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Folder '{folder_path}' not found")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        project_db_id = await _get_project_db_id(slug, session)
+        if project_db_id:
+            for canonical_path in canonical_paths:
+                await soft_delete_document_in_db(session, project_db_id, canonical_path)
+            await log_audit_event(
+                session,
+                "web",
+                "delete_folder",
+                project_db_id,
+                folder_path,
+                metadata={
+                    "deleted_documents": canonical_paths,
+                    "archived_paths": archived_paths,
+                },
+            )
+            await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        _log_db_sync_skip(
+            operation="delete_folder",
+            project_slug=slug,
+            canonical_path=folder_path,
+            exc=exc,
+        )
+
+    return {
+        "relative_path": folder_path,
+        "deleted_documents": canonical_paths,
+        "archived_paths": archived_paths,
+    }
+
+
 @router.get("/generated", response_model=list[GeneratedFileResponse])
 async def api_list_generated_files(slug: str):
     project_path = _get_project_path(slug)
@@ -304,11 +433,28 @@ async def api_move_document(
     try:
         project_db_id = await _get_project_db_id(slug, session)
         if project_db_id and original is not None:
-            await move_document_path_in_db(
+            from datum.services.versioning import get_current_version
+
+            version_info = get_current_version(project_path, doc_info.relative_path)
+            if version_info is None:
+                raise RuntimeError(
+                    f"Moved document version missing for {doc_info.relative_path}"
+                )
+            file_bytes = (project_path / doc_info.relative_path).read_bytes()
+            await sync_document_move_to_db(
                 session=session,
                 project_id=project_db_id,
+                document_uid=doc_info.document_uid,
                 old_canonical_path=original.relative_path,
                 new_canonical_path=doc_info.relative_path,
+                version_info=version_info,
+                title=doc_info.title,
+                doc_type=doc_info.doc_type,
+                status=doc_info.status,
+                tags=doc_info.tags,
+                content_hash=doc_info.content_hash,
+                byte_size=len(file_bytes),
+                filesystem_path=version_info.version_file,
             )
             await log_audit_event(
                 session,
@@ -553,7 +699,11 @@ async def api_delete_document(
 ):
     project_path = _get_project_path(slug)
     try:
-        archived_path = delete_document(project_path, doc_path)
+        canonical_path = _validate_document_path(doc_path)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    try:
+        archived_path = delete_document(project_path, canonical_path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
     except ValueError as e:
@@ -562,13 +712,13 @@ async def api_delete_document(
     try:
         project_db_id = await _get_project_db_id(slug, session)
         if project_db_id:
-            await soft_delete_document_in_db(session, project_db_id, doc_path)
+            await soft_delete_document_in_db(session, project_db_id, canonical_path)
             await log_audit_event(
                 session,
                 "web",
                 "delete_document",
                 project_db_id,
-                doc_path,
+                canonical_path,
                 metadata={"archived_path": archived_path},
             )
             await session.commit()
@@ -577,7 +727,7 @@ async def api_delete_document(
         _log_db_sync_skip(
             operation="delete_document",
             project_slug=slug,
-            canonical_path=doc_path,
+            canonical_path=canonical_path,
             exc=exc,
         )
 

@@ -9,8 +9,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { useContextPanel } from '@/lib/context-panel'
 import { api, type VersionDiff, type VersionInfo } from '@/lib/api'
+import { useContextPanel } from '@/lib/context-panel'
+import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
 
 const EMPTY_VERSIONS: VersionInfo[] = []
@@ -163,7 +164,7 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
       })
     },
     onError: (error) => {
-      alert(String(error))
+      notify(String(error))
     },
   })
 

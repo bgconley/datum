@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -11,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datum.config import settings
 from datum.db import get_session
 from datum.models.core import Project
-from datum.models.operational import Attachment
 from datum.services.blob_store import store_blob
-from datum.services.filesystem import atomic_write
+from datum.services.db_sync import upsert_attachment_to_db
+from datum.services.filesystem import atomic_write, generate_uid
 from datum.services.project_manager import get_project
 
 router = APIRouter(prefix="/api/v1/projects/{slug}/upload", tags=["upload"])
@@ -52,11 +53,14 @@ async def api_upload_file(
     attachment_dir = settings.projects_root / slug / "attachments" / attachment_name
     attachment_dir.mkdir(parents=True, exist_ok=True)
     metadata_payload = {
+        "attachment_uid": generate_uid("att"),
+        "canonical_path": attachment_relative,
         "filename": filename,
         "content_type": file.content_type or "application/octet-stream",
         "size_bytes": int(blob["size_bytes"]),
         "blob_ref": blob["content_hash"],
         "blob_path": blob["blob_path"],
+        "created_at": datetime.now(UTC).isoformat(),
     }
     atomic_write(
         attachment_dir / "metadata.yaml",
@@ -67,17 +71,18 @@ async def api_upload_file(
         project_result = await session.execute(select(Project).where(Project.slug == slug))
         project = project_result.scalar_one_or_none()
         if project is not None:
-            attachment = Attachment(
+            await upsert_attachment_to_db(
+                session=session,
                 project_id=project.id,
+                attachment_uid=str(metadata_payload["attachment_uid"]),
                 filename=filename,
-                content_type=file.content_type or "application/octet-stream",
+                content_type=str(metadata_payload["content_type"]),
                 byte_size=int(blob["size_bytes"]),
                 content_hash=str(blob["content_hash"]),
                 blob_path=str(blob["blob_path"]),
                 filesystem_path=attachment_relative,
-                metadata_=metadata_payload,
+                metadata=metadata_payload,
             )
-            session.add(attachment)
             await session.commit()
     except Exception as exc:
         await session.rollback()

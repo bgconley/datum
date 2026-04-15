@@ -17,24 +17,34 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { api, type DocumentMeta, type GeneratedFile } from '@/lib/api'
+import { api, type AttachmentItem, type DocumentMeta, type GeneratedFile } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { useProjectsQuery, useProjectWorkspaceQuery } from '@/lib/workspace-query'
 import { CreateDocumentDialog } from './CreateDocumentDialog'
 import { CreateProjectDialog } from './CreateProjectDialog'
 
 const EMPTY_DOCUMENTS: DocumentMeta[] = []
+const EMPTY_ATTACHMENTS: AttachmentItem[] = []
 const EMPTY_GENERATED_FILES: GeneratedFile[] = []
 
 export function Sidebar() {
   const [showGenerated, setShowGenerated] = useState(false)
   const [folderPath, setFolderPath] = useState('docs')
+  const [folderActionPath, setFolderActionPath] = useState('docs')
+  const [folderRenamePath, setFolderRenamePath] = useState('docs-renamed')
   const [movePath, setMovePath] = useState('')
+  const [selectedAttachmentPath, setSelectedAttachmentPath] = useState<string | null>(null)
+  const [attachmentMovePath, setAttachmentMovePath] = useState('')
   const [moving, setMoving] = useState(false)
+  const [movingAttachment, setMovingAttachment] = useState(false)
   const [creatingFolder, setCreatingFolder] = useState(false)
+  const [renamingFolder, setRenamingFolder] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deletingFolder, setDeletingFolder] = useState(false)
+  const [deletingAttachment, setDeletingAttachment] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
+  const [operationError, setOperationError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
@@ -56,6 +66,7 @@ export function Sidebar() {
   const projects = projectsQuery.data ?? []
   const project = workspaceQuery.data?.project ?? null
   const docs = workspaceQuery.data?.documents ?? EMPTY_DOCUMENTS
+  const attachments = workspaceQuery.data?.attachments ?? EMPTY_ATTACHMENTS
   const generatedFiles = workspaceQuery.data?.generated_files ?? EMPTY_GENERATED_FILES
   const intelligenceQuery = useQuery({
     queryKey: selectedProject ? queryKeys.intelligenceSummary(selectedProject) : ['projects', 'intelligence', 'idle'],
@@ -72,10 +83,42 @@ export function Sidebar() {
     project?.filesystem_path && selectedDocument
       ? `${project.filesystem_path}/${selectedDocument}`
       : null
+  const selectedAttachmentMeta = useMemo(
+    () => attachments.find((attachment) => attachment.relative_path === selectedAttachmentPath) ?? null,
+    [attachments, selectedAttachmentPath],
+  )
+  const absoluteAttachmentPath =
+    project?.filesystem_path && selectedAttachmentMeta
+      ? `${project.filesystem_path}/${selectedAttachmentMeta.relative_path}`
+      : null
 
   useEffect(() => {
     setMovePath(selectedDocument ?? '')
   }, [selectedDocument])
+
+  useEffect(() => {
+    if (!selectedDocument) {
+      return
+    }
+    const lastSlash = selectedDocument.lastIndexOf('/')
+    const parentFolder = lastSlash >= 0 ? selectedDocument.slice(0, lastSlash) : 'docs'
+    setFolderActionPath(parentFolder || 'docs')
+    setFolderRenamePath(parentFolder ? `${parentFolder}-renamed` : 'docs-renamed')
+  }, [selectedDocument])
+
+  useEffect(() => {
+    if (attachments.length === 0) {
+      setSelectedAttachmentPath(null)
+      return
+    }
+    if (!selectedAttachmentPath || !attachments.some((attachment) => attachment.relative_path === selectedAttachmentPath)) {
+      setSelectedAttachmentPath(attachments[0]?.relative_path ?? null)
+    }
+  }, [attachments, selectedAttachmentPath])
+
+  useEffect(() => {
+    setAttachmentMovePath(selectedAttachmentPath ?? '')
+  }, [selectedAttachmentPath])
 
   const refreshProjectState = async () => {
     if (!selectedProject) {
@@ -99,13 +142,64 @@ export function Sidebar() {
       return
     }
     setCreatingFolder(true)
+    setOperationError(null)
     try {
       await api.filesystem.mkdir(selectedProject, { path: folderPath.trim() })
       await refreshProjectState()
     } catch (error) {
-      alert(String(error))
+      setOperationError(error instanceof Error ? error.message : String(error))
     } finally {
       setCreatingFolder(false)
+    }
+  }
+
+  const handleRenameFolder = async () => {
+    if (!selectedProject || !folderActionPath.trim() || !folderRenamePath.trim()) {
+      return
+    }
+    setRenamingFolder(true)
+    setOperationError(null)
+    try {
+      await api.documents.renameFolder(selectedProject, {
+        relative_path: folderActionPath.trim(),
+        new_relative_path: folderRenamePath.trim(),
+      })
+      await refreshProjectState()
+      if (selectedDocument?.startsWith(`${folderActionPath.trim()}/`)) {
+        const nextPath = selectedDocument.replace(folderActionPath.trim(), folderRenamePath.trim())
+        navigate({
+          to: '/projects/$slug/docs/$',
+          params: { slug: selectedProject, _splat: nextPath },
+        })
+      }
+      setFolderActionPath(folderRenamePath.trim())
+      setFolderRenamePath(`${folderRenamePath.trim()}-renamed`)
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRenamingFolder(false)
+    }
+  }
+
+  const handleDeleteFolder = async () => {
+    if (!selectedProject || !folderActionPath.trim()) {
+      return
+    }
+    if (!window.confirm(`Delete folder ${folderActionPath.trim()} and archive its documents?`)) {
+      return
+    }
+    setDeletingFolder(true)
+    setOperationError(null)
+    try {
+      await api.documents.deleteFolder(selectedProject, folderActionPath.trim())
+      await refreshProjectState()
+      if (selectedDocument?.startsWith(`${folderActionPath.trim()}/`)) {
+        navigate({ to: '/projects/$slug', params: { slug: selectedProject } })
+      }
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setDeletingFolder(false)
     }
   }
 
@@ -114,6 +208,7 @@ export function Sidebar() {
       return
     }
     setMoving(true)
+    setOperationError(null)
     try {
       const moved = await api.filesystem.rename(selectedProject, {
         old_path: selectedDocument,
@@ -125,7 +220,7 @@ export function Sidebar() {
         params: { slug: selectedProject, _splat: moved.new_path },
       })
     } catch (error) {
-      alert(String(error))
+      setOperationError(error instanceof Error ? error.message : String(error))
     } finally {
       setMoving(false)
     }
@@ -139,14 +234,54 @@ export function Sidebar() {
       return
     }
     setDeleting(true)
+    setOperationError(null)
     try {
       await api.filesystem.delete(selectedProject, selectedDocument)
       await refreshProjectState()
       navigate({ to: '/projects/$slug', params: { slug: selectedProject } })
     } catch (error) {
-      alert(String(error))
+      setOperationError(error instanceof Error ? error.message : String(error))
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleMoveAttachment = async () => {
+    if (!selectedProject || !selectedAttachmentMeta || !attachmentMovePath.trim()) {
+      return
+    }
+    setMovingAttachment(true)
+    setOperationError(null)
+    try {
+      const moved = await api.attachments.move(selectedProject, selectedAttachmentMeta.relative_path, {
+        new_relative_path: attachmentMovePath.trim(),
+      })
+      await refreshProjectState()
+      setSelectedAttachmentPath(moved.relative_path)
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMovingAttachment(false)
+    }
+  }
+
+  const handleDeleteAttachment = async () => {
+    if (!selectedProject || !selectedAttachmentMeta) {
+      return
+    }
+    if (!window.confirm(`Delete attachment ${selectedAttachmentMeta.filename}? Blob bytes will be retained.`)) {
+      return
+    }
+    setDeletingAttachment(true)
+    setOperationError(null)
+    try {
+      await api.attachments.delete(selectedProject, selectedAttachmentMeta.relative_path)
+      await refreshProjectState()
+      setSelectedAttachmentPath(null)
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setDeletingAttachment(false)
     }
   }
 
@@ -156,11 +291,12 @@ export function Sidebar() {
       return
     }
     setUploading(true)
+    setOperationError(null)
     try {
       await api.upload.file(selectedProject, file)
       await refreshProjectState()
     } catch (error) {
-      alert(String(error))
+      setOperationError(error instanceof Error ? error.message : String(error))
     } finally {
       setUploading(false)
       event.target.value = ''
@@ -304,6 +440,12 @@ export function Sidebar() {
               />
             </div>
 
+            {operationError && (
+              <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {operationError}
+              </div>
+            )}
+
             <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">
               <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
                 <FolderPlus className="size-3.5" />
@@ -322,6 +464,42 @@ export function Sidebar() {
             </div>
 
             <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">
+              <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                Folder actions
+              </div>
+              <div className="mt-3 space-y-2">
+                <Input
+                  value={folderActionPath}
+                  onChange={(event) => setFolderActionPath(event.target.value)}
+                  className="text-xs font-mono"
+                  placeholder="docs/specs"
+                />
+                <Input
+                  value={folderRenamePath}
+                  onChange={(event) => setFolderRenamePath(event.target.value)}
+                  className="text-xs font-mono"
+                  placeholder="docs/specs-renamed"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={handleRenameFolder} disabled={renamingFolder}>
+                    <MoveRight className="size-3.5" />
+                    {renamingFolder ? 'Renaming…' : 'Rename'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-red-500/30 text-red-100 hover:bg-red-500/10"
+                    onClick={handleDeleteFolder}
+                    disabled={deletingFolder}
+                  >
+                    <Trash2 className="size-3.5" />
+                    {deletingFolder ? 'Deleting…' : 'Delete'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">
               <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
                 <Upload className="size-3.5" />
                 Upload attachment
@@ -331,6 +509,108 @@ export function Sidebar() {
                 {uploading ? 'Uploading…' : 'Choose file'}
               </label>
             </div>
+
+            <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Attachments
+                </div>
+                <span className="text-xs text-muted-foreground">{attachments.length}</span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {attachments.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No attachments uploaded yet.</div>
+                ) : (
+                  attachments.map((attachment) => (
+                    <button
+                      key={attachment.relative_path}
+                      type="button"
+                      className={`block w-full rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                        selectedAttachmentMeta?.relative_path === attachment.relative_path
+                          ? 'bg-foreground text-background'
+                          : 'hover:bg-accent/70'
+                      }`}
+                      onClick={() => setSelectedAttachmentPath(attachment.relative_path)}
+                    >
+                      <div className="truncate font-medium">{attachment.filename}</div>
+                      <div className="mt-1 truncate text-xs text-current/70">{attachment.relative_path}</div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {selectedAttachmentMeta && (
+              <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">
+                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Attachment actions
+                </div>
+                <div className="mt-3 space-y-3">
+                  <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-xs">
+                    <div className="font-medium text-foreground">{selectedAttachmentMeta.filename}</div>
+                    <div className="mt-1 font-mono text-muted-foreground">
+                      {selectedAttachmentMeta.relative_path}
+                    </div>
+                    <div className="mt-2 text-muted-foreground">
+                      {selectedAttachmentMeta.byte_size} bytes · {selectedAttachmentMeta.content_type}
+                    </div>
+                    {absoluteAttachmentPath && (
+                      <div className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
+                        {absoluteAttachmentPath}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => copyText(selectedAttachmentMeta.relative_path, 'attachment-relative')}
+                    >
+                      <Copy className="size-3" />
+                      {copied === 'attachment-relative' ? 'Copied path' : 'Copy relative path'}
+                    </Button>
+                    {absoluteAttachmentPath && (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={() => copyText(absoluteAttachmentPath, 'attachment-absolute')}
+                      >
+                        <Files className="size-3" />
+                        {copied === 'attachment-absolute' ? 'Copied absolute path' : 'Copy absolute path'}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                      Rename / move
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={attachmentMovePath}
+                        onChange={(event) => setAttachmentMovePath(event.target.value)}
+                        className="text-xs font-mono"
+                      />
+                      <Button size="sm" variant="outline" onClick={handleMoveAttachment} disabled={movingAttachment}>
+                        <MoveRight className="size-3.5" />
+                        {movingAttachment ? 'Moving…' : 'Move'}
+                      </Button>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-red-500/30 text-red-100 hover:bg-red-500/10"
+                    onClick={handleDeleteAttachment}
+                    disabled={deletingAttachment}
+                  >
+                    <Trash2 className="size-3.5" />
+                    {deletingAttachment ? 'Deleting…' : 'Delete'}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {selectedDocMeta && (
               <div className="mt-3 rounded-2xl border border-border/80 bg-card/70 p-3">

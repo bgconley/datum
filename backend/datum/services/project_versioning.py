@@ -107,4 +107,7 @@ def sync_project_yaml_to_db(project_slug: str, project_path: Path):
 
         asyncio.run(_sync())
     except Exception:
-        logger.debug("Project metadata DB sync failed (database may be unavailable)", exc_info=True)
+        logger.warning(
+            "Project metadata DB sync failed (database may be unavailable)",
+            exc_info=True,
+        )

@@ -12,10 +12,11 @@ from datum.db import get_session
 from datum.models.core import Project
 from datum.services.db_sync import (
     log_audit_event,
-    move_document_path_in_db,
     soft_delete_document_in_db,
+    sync_document_move_to_db,
 )
 from datum.services.document_manager import (
+    _validate_document_path,
     create_document_folder,
     delete_document,
     move_document,
@@ -85,14 +86,35 @@ async def api_rename_document(
     try:
         project_id = await _project_db_id(slug, session)
         if project_id:
-            await move_document_path_in_db(session, project_id, body.old_path, moved.relative_path)
+            from datum.services.versioning import get_current_version
+
+            old_canonical_path = _validate_document_path(body.old_path)
+            version_info = get_current_version(project_path, moved.relative_path)
+            if version_info is None:
+                raise RuntimeError(f"Moved document version missing for {moved.relative_path}")
+            file_bytes = (project_path / moved.relative_path).read_bytes()
+            await sync_document_move_to_db(
+                session=session,
+                project_id=project_id,
+                document_uid=moved.document_uid,
+                old_canonical_path=old_canonical_path,
+                new_canonical_path=moved.relative_path,
+                version_info=version_info,
+                title=moved.title,
+                doc_type=moved.doc_type,
+                status=moved.status,
+                tags=moved.tags,
+                content_hash=moved.content_hash,
+                byte_size=len(file_bytes),
+                filesystem_path=version_info.version_file,
+            )
             await log_audit_event(
                 session,
                 "web",
                 "rename_document",
                 project_id,
                 moved.relative_path,
-                metadata={"old_path": body.old_path},
+                metadata={"old_path": old_canonical_path},
             )
             await session.commit()
     except Exception as exc:
@@ -104,7 +126,10 @@ async def api_rename_document(
             exc=exc,
         )
 
-    return {"old_path": body.old_path, "new_path": moved.relative_path}
+    return {
+        "old_path": _validate_document_path(body.old_path),
+        "new_path": moved.relative_path,
+    }
 
 
 @router.delete("/{doc_path:path}")
@@ -115,7 +140,11 @@ async def api_delete_document(
 ):
     project_path = _project_path(slug)
     try:
-        archived_path = delete_document(project_path, doc_path)
+        canonical_path = _validate_document_path(doc_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    try:
+        archived_path = delete_document(project_path, canonical_path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Document '{doc_path}' not found")
     except ValueError as exc:
@@ -124,13 +153,13 @@ async def api_delete_document(
     try:
         project_id = await _project_db_id(slug, session)
         if project_id:
-            await soft_delete_document_in_db(session, project_id, doc_path)
+            await soft_delete_document_in_db(session, project_id, canonical_path)
             await log_audit_event(
                 session,
                 "web",
                 "delete_document",
                 project_id,
-                doc_path,
+                canonical_path,
                 metadata={"archived_path": archived_path},
             )
             await session.commit()
@@ -139,7 +168,7 @@ async def api_delete_document(
         _log_db_sync_skip(
             operation="delete_document",
             project_slug=slug,
-            canonical_path=doc_path,
+            canonical_path=canonical_path,
             exc=exc,
         )
 

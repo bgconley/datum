@@ -32,7 +32,20 @@ class SearchRequest(BaseModel):
             if parsed.tzinfo is None or parsed.utcoffset() is None:
                 raise ValueError("version_scope as_of timestamp must include a timezone")
             return f"as_of:{parsed.isoformat()}"
-        raise ValueError("version_scope must be current, all, or as_of:<timestamp>")
+        if value.startswith("snapshot:"):
+            snapshot_name = value.split(":", 1)[1].strip()
+            if not snapshot_name:
+                raise ValueError("version_scope snapshot name must be non-empty")
+            return f"snapshot:{snapshot_name}"
+        if value.startswith("branch:"):
+            branch_name = value.split(":", 1)[1].strip()
+            if not branch_name:
+                raise ValueError("version_scope branch name must be non-empty")
+            return f"branch:{branch_name}"
+        raise ValueError(
+            "version_scope must be current, all, as_of:<timestamp>, "
+            "snapshot:<name>, or branch:<name>"
+        )
 
 
 class SearchResultResponse(BaseModel):

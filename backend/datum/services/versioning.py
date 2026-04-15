@@ -27,6 +27,7 @@ from datum.services.filesystem import (
     resolve_manifest_dir,
     write_manifest,
 )
+from datum.services.manifest_history import ensure_manifest_head_events, record_manifest_save_event
 
 
 class StalePendingCommitError(Exception):
@@ -65,6 +66,8 @@ def create_version(
     branch: str = "main",
     label: str | None = None,
     restored_from: int | None = None,
+    force: bool = False,
+    document_uid: str | None = None,
 ) -> VersionInfo | None:
     """Create a new immutable version of a document.
 
@@ -81,10 +84,14 @@ def create_version(
     # Initialize manifest for new documents
     if not manifest:
         manifest = {
-            "document_uid": generate_uid("doc"),
+            "document_uid": document_uid or generate_uid("doc"),
             "canonical_path": canonical_path,
             "branches": {},
         }
+    elif document_uid and not manifest.get("document_uid"):
+        manifest["document_uid"] = document_uid
+
+    ensure_manifest_head_events(manifest)
 
     branch_data = manifest.get("branches", {}).get(branch, {"head": None, "versions": []})
 
@@ -110,7 +117,7 @@ def create_version(
             write_manifest(manifest_path, manifest)
 
     # Idempotency check: skip if content hash matches head
-    if branch_data["versions"]:
+    if branch_data["versions"] and not force:
         head_hash = branch_data["versions"][-1].get("content_hash")
         if head_hash == content_hash:
             return None
@@ -183,6 +190,15 @@ def create_version(
     branch_data["versions"].append(version_entry)
     branch_data["head"] = version_str
     manifest.setdefault("branches", {})[branch] = branch_data
+    manifest["canonical_path"] = canonical_path
+    manifest.pop("deleted_at", None)
+    record_manifest_save_event(
+        manifest,
+        branch=branch,
+        version_number=next_version,
+        canonical_path=canonical_path,
+        at=now,
+    )
     del manifest["pending_commit"]
     write_manifest(manifest_path, manifest)
 

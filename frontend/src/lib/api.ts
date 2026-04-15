@@ -146,6 +146,17 @@ export interface UploadResponse {
   size_bytes: number
 }
 
+export interface AttachmentItem {
+  attachment_uid: string
+  filename: string
+  content_type: string
+  byte_size: number
+  content_hash: string
+  blob_path: string
+  relative_path: string
+  created_at: string | null
+}
+
 export interface DocumentMoveRequest {
   new_relative_path: string
 }
@@ -159,6 +170,7 @@ export interface GeneratedFile {
 export interface WorkspaceSnapshot {
   project: Project
   documents: DocumentMeta[]
+  attachments: AttachmentItem[]
   generated_files: GeneratedFile[]
 }
 
@@ -415,6 +427,27 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       }),
+    renameFolder: (
+      projectSlug: string,
+      data: { relative_path: string; new_relative_path: string },
+    ) =>
+      fetchJSON<{
+        relative_path: string
+        new_relative_path: string
+        moved_documents: DocumentMeta[]
+      }>(`${API_BASE}/projects/${projectSlug}/docs/folders/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    deleteFolder: (projectSlug: string, folderPath: string) =>
+      fetchJSON<{
+        relative_path: string
+        deleted_documents: string[]
+        archived_paths: string[]
+      }>(`${API_BASE}/projects/${projectSlug}/docs/folders/${encodeDocumentPath(folderPath)}`, {
+        method: 'DELETE',
+      }),
     delete: (projectSlug: string, docPath: string) =>
       fetchJSON<{ status: string; archived_path: string }>(
         `${API_BASE}/projects/${projectSlug}/docs/${encodeDocumentPath(docPath)}`,
@@ -458,6 +491,24 @@ export const api = {
       }
       return response.json() as Promise<UploadResponse>
     },
+  },
+  attachments: {
+    list: (projectSlug: string) =>
+      fetchJSON<AttachmentItem[]>(`${API_BASE}/projects/${projectSlug}/attachments`),
+    move: (projectSlug: string, attachmentPath: string, data: { new_relative_path: string }) =>
+      fetchJSON<AttachmentItem>(
+        `${API_BASE}/projects/${projectSlug}/attachments/${encodeDocumentPath(attachmentPath)}/move`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        },
+      ),
+    delete: (projectSlug: string, attachmentPath: string) =>
+      fetchJSON<{ status: string; archived_path: string }>(
+        `${API_BASE}/projects/${projectSlug}/attachments/${encodeDocumentPath(attachmentPath)}`,
+        { method: 'DELETE' },
+      ),
   },
   versions: {
     list: (projectSlug: string, docPath: string) =>

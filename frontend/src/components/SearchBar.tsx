@@ -133,6 +133,8 @@ export function SearchBar({
               <option value="current">Current only</option>
               <option value="all">All versions</option>
               <option value="as_of">As of timestamp</option>
+              <option value="snapshot">Named snapshot</option>
+              <option value="branch">Branch head</option>
             </select>
           </label>
 
@@ -145,6 +147,30 @@ export function SearchBar({
               value={value.asOf}
               onChange={(event) => onChange({ ...value, asOf: event.target.value })}
               disabled={value.versionMode !== 'as_of'}
+            />
+          </label>
+
+          <label className="space-y-1 text-sm">
+            <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              Snapshot
+            </span>
+            <Input
+              value={value.snapshot}
+              onChange={(event) => onChange({ ...value, snapshot: event.target.value })}
+              disabled={value.versionMode !== 'snapshot'}
+              placeholder="approved-v1"
+            />
+          </label>
+
+          <label className="space-y-1 text-sm">
+            <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              Branch
+            </span>
+            <Input
+              value={value.branch}
+              onChange={(event) => onChange({ ...value, branch: event.target.value })}
+              disabled={value.versionMode !== 'branch'}
+              placeholder="main"
             />
           </label>
 
@@ -170,7 +196,7 @@ export function SearchBar({
         </div>
 
         <div className="text-xs leading-5 text-muted-foreground">
-          Search modes shape the retrieval task without hiding the underlying cabinet scope. Use project scope for focused lookup, all versions for archaeology, or as-of mode to inspect a historical cabinet snapshot.
+          Search modes shape the retrieval task without hiding the underlying cabinet scope. Use current/all for day-to-day retrieval, as-of for temporal reconstruction, snapshot for named release states, and branch for head-set lookup outside main.
         </div>
       </div>
     </form>

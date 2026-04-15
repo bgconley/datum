@@ -23,6 +23,11 @@ class FolderCreateRequest(BaseModel):
     relative_path: str
 
 
+class FolderRenameRequest(BaseModel):
+    relative_path: str
+    new_relative_path: str
+
+
 class GeneratedFileResponse(BaseModel):
     relative_path: str
     absolute_path: str

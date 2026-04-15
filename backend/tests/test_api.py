@@ -254,6 +254,8 @@ async def test_restore_version_endpoint(client):
 
 @pytest.mark.asyncio
 async def test_move_document_endpoint(client):
+    from datum.services.filesystem import read_manifest
+
     await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
     created = await client.post("/api/v1/projects/p/docs", json={
         "relative_path": "docs/notes.md",
@@ -279,7 +281,20 @@ async def test_move_document_endpoint(client):
 
     versions = await client.get("/api/v1/projects/p/docs/docs/archive/renamed-notes.md/versions")
     assert versions.status_code == 200
-    assert len(versions.json()) == 1
+    assert [version["version_number"] for version in versions.json()] == [1, 2]
+
+    manifest = read_manifest(
+        settings.projects_root
+        / "p"
+        / ".piq"
+        / "docs"
+        / "archive"
+        / "renamed-notes.md"
+        / "manifest.yaml"
+    )
+    assert [event["event_type"] for event in manifest["head_events"]] == ["save", "save", "delete"]
+    assert manifest["head_events"][1]["canonical_path"] == "docs/archive/renamed-notes.md"
+    assert manifest["head_events"][2]["canonical_path"] == "docs/notes.md"
 
 
 @pytest.mark.asyncio
@@ -305,6 +320,80 @@ async def test_create_folder_and_list_generated_files(client):
     assert generated.status_code == 200
     generated_paths = [item["relative_path"] for item in generated.json()]
     assert ".piq/docs/adr/decision.md/manifest.yaml" in generated_paths
+
+
+@pytest.mark.asyncio
+async def test_rename_folder_endpoint_moves_documents(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    await client.post(
+        "/api/v1/projects/p/docs",
+        json={
+            "relative_path": "docs/specs/a.md",
+            "title": "A",
+            "doc_type": "plan",
+            "content": "# A",
+        },
+    )
+    await client.post(
+        "/api/v1/projects/p/docs",
+        json={
+            "relative_path": "docs/specs/sub/b.md",
+            "title": "B",
+            "doc_type": "plan",
+            "content": "# B",
+        },
+    )
+
+    renamed = await client.post(
+        "/api/v1/projects/p/docs/folders/rename",
+        json={"relative_path": "docs/specs", "new_relative_path": "docs/archive/specs"},
+    )
+
+    assert renamed.status_code == 200
+    payload = renamed.json()
+    assert payload["relative_path"] == "docs/specs"
+    assert payload["new_relative_path"] == "docs/archive/specs"
+    assert sorted(document["relative_path"] for document in payload["moved_documents"]) == [
+        "docs/archive/specs/a.md",
+        "docs/archive/specs/sub/b.md",
+    ]
+
+    missing = await client.get("/api/v1/projects/p/docs/docs/specs/a.md")
+    assert missing.status_code == 404
+    moved = await client.get("/api/v1/projects/p/docs/docs/archive/specs/a.md")
+    assert moved.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_folder_endpoint_archives_documents(client):
+    await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+    await client.post(
+        "/api/v1/projects/p/docs",
+        json={
+            "relative_path": "docs/specs/a.md",
+            "title": "A",
+            "doc_type": "plan",
+            "content": "# A",
+        },
+    )
+    await client.post(
+        "/api/v1/projects/p/docs",
+        json={
+            "relative_path": "docs/specs/b.md",
+            "title": "B",
+            "doc_type": "plan",
+            "content": "# B",
+        },
+    )
+
+    deleted = await client.delete("/api/v1/projects/p/docs/folders/docs/specs")
+
+    assert deleted.status_code == 200
+    payload = deleted.json()
+    assert payload["relative_path"] == "docs/specs"
+    assert sorted(payload["deleted_documents"]) == ["docs/specs/a.md", "docs/specs/b.md"]
+    assert len(payload["archived_paths"]) == 2
+    assert not (settings.projects_root / "p" / "docs" / "specs").exists()
 
 
 @pytest.mark.asyncio
@@ -350,6 +439,8 @@ async def test_templates_endpoints(client):
 
 @pytest.mark.asyncio
 async def test_delete_document_endpoint_soft_deletes_and_archives(client):
+    from datum.services.filesystem import read_manifest
+
     await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
     created = await client.post("/api/v1/projects/p/docs", json={
         "relative_path": "docs/delete-me.md",
@@ -370,6 +461,12 @@ async def test_delete_document_endpoint_soft_deletes_and_archives(client):
     archived_file = settings.projects_root / "p" / archived_path
     assert archived_file.exists()
     assert "# delete me" in archived_file.read_text()
+
+    manifest = read_manifest(
+        settings.projects_root / "p" / ".piq" / "docs" / "delete-me.md" / "manifest.yaml"
+    )
+    assert manifest["deleted_at"] is not None
+    assert [event["event_type"] for event in manifest["head_events"]] == ["save", "delete"]
 
 
 class _ScalarListResult:
@@ -922,6 +1019,45 @@ async def test_upload_endpoint_logs_warning_when_db_sync_fails(client, caplog):
 
 
 @pytest.mark.asyncio
+async def test_attachment_lifecycle_endpoints(client, tmp_blobs):
+    del tmp_blobs
+    settings.blobs_root = settings.projects_root.parent / "blobs"
+    settings.blobs_root.mkdir(parents=True, exist_ok=True)
+    await client.post("/api/v1/projects", json={"name": "Uploads", "slug": "uploads"})
+
+    uploaded = await client.post(
+        "/api/v1/projects/uploads/upload",
+        files={"file": ("notes.txt", b"phase-8 upload", "text/plain")},
+    )
+    assert uploaded.status_code == 201
+    attachment_path = uploaded.json()["attachment_path"]
+    blob_path = uploaded.json()["blob_path"]
+
+    workspace = await client.get("/api/v1/projects/uploads/workspace")
+    assert workspace.status_code == 200
+    assert workspace.json()["attachments"][0]["relative_path"] == attachment_path
+
+    moved = await client.post(
+        f"/api/v1/projects/uploads/attachments/{attachment_path}/move",
+        json={"new_relative_path": "attachments/archive/notes.txt/metadata.yaml"},
+    )
+    assert moved.status_code == 200
+    moved_path = moved.json()["relative_path"]
+    assert moved_path == "attachments/archive/notes.txt/metadata.yaml"
+
+    listed = await client.get("/api/v1/projects/uploads/attachments")
+    assert listed.status_code == 200
+    assert [item["relative_path"] for item in listed.json()] == [moved_path]
+
+    deleted = await client.delete(f"/api/v1/projects/uploads/attachments/{moved_path}")
+    assert deleted.status_code == 200
+    archived_path = deleted.json()["archived_path"]
+    assert archived_path.startswith(".piq/deleted/attachments/archive/notes.txt/metadata.yaml.")
+    assert not (settings.projects_root / "uploads" / moved_path).exists()
+    assert (settings.projects_root.parent / "blobs" / blob_path).exists()
+
+
+@pytest.mark.asyncio
 async def test_create_document_db_sync_uses_normalized_canonical_path(client, monkeypatch):
     captured: dict[str, str] = {}
 
@@ -1028,6 +1164,157 @@ async def test_save_document_db_sync_uses_normalized_canonical_path(client, monk
     assert resp.json()["relative_path"] == "docs/normalized-save.md"
     assert captured["canonical_path"] == "docs/normalized-save.md"
     assert captured["target_path"] == "docs/normalized-save.md"
+
+
+@pytest.mark.asyncio
+async def test_move_document_db_sync_uses_normalized_canonical_path(client, monkeypatch):
+    captured: dict[str, str] = {}
+
+    class _Session:
+        async def execute(self, statement, *args, **kwargs):
+            del statement, args, kwargs
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+    async def override_get_session():
+        yield _Session()
+
+    async def fake_project_db_id(slug, session):
+        del slug, session
+        return uuid4()
+
+    async def fake_sync_document_move_to_db(*, old_canonical_path, new_canonical_path, **kwargs):
+        del kwargs
+        captured["old_canonical_path"] = old_canonical_path
+        captured["new_canonical_path"] = new_canonical_path
+
+    async def fake_log_audit_event(
+        session,
+        actor_type,
+        operation,
+        project_id,
+        target_path,
+        *,
+        metadata=None,
+        **kwargs,
+    ):
+        del session, actor_type, operation, project_id, kwargs
+        captured["target_path"] = target_path
+        captured["audit_old_path"] = metadata["old_path"]
+
+    from datum.db import get_session
+    from datum.main import app
+
+    app.dependency_overrides[get_session] = override_get_session
+    monkeypatch.setattr("datum.api.filesystem._project_db_id", fake_project_db_id)
+    monkeypatch.setattr(
+        "datum.api.filesystem.sync_document_move_to_db",
+        fake_sync_document_move_to_db,
+    )
+    monkeypatch.setattr("datum.api.filesystem.log_audit_event", fake_log_audit_event)
+
+    try:
+        await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+        created = await client.post("/api/v1/projects/p/docs", json={
+            "relative_path": "docs/normalized-move.md",
+            "title": "Normalized Move",
+            "doc_type": "plan",
+            "content": "# Move",
+        })
+        assert created.status_code == 201
+
+        moved = await client.post(
+            "/api/v1/projects/p/fs/rename",
+            json={
+                "old_path": "docs/../docs/normalized-move.md",
+                "new_path": "docs/archive/normalized-move.md",
+            },
+        )
+
+        assert moved.status_code == 200
+        assert moved.json()["old_path"] == "docs/normalized-move.md"
+        assert captured["old_canonical_path"] == "docs/normalized-move.md"
+        assert captured["new_canonical_path"] == "docs/archive/normalized-move.md"
+        assert captured["audit_old_path"] == "docs/normalized-move.md"
+        assert captured["target_path"] == "docs/archive/normalized-move.md"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_delete_document_db_sync_uses_normalized_canonical_path(client, monkeypatch):
+    captured: dict[str, str] = {}
+
+    class _Session:
+        async def execute(self, statement, *args, **kwargs):
+            del statement, args, kwargs
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+    async def override_get_session():
+        yield _Session()
+
+    async def fake_project_db_id(slug, session):
+        del slug, session
+        return uuid4()
+
+    async def fake_soft_delete_document_in_db(session, project_id, canonical_path):
+        del session, project_id
+        captured["canonical_path"] = canonical_path
+
+    async def fake_log_audit_event(
+        session,
+        actor_type,
+        operation,
+        project_id,
+        target_path,
+        *,
+        metadata=None,
+        **kwargs,
+    ):
+        del session, actor_type, operation, project_id, kwargs
+        captured["target_path"] = target_path
+        captured["archived_path"] = metadata["archived_path"]
+
+    from datum.db import get_session
+    from datum.main import app
+
+    app.dependency_overrides[get_session] = override_get_session
+    monkeypatch.setattr("datum.api.documents._get_project_db_id", fake_project_db_id)
+    monkeypatch.setattr(
+        "datum.api.documents.soft_delete_document_in_db",
+        fake_soft_delete_document_in_db,
+    )
+    monkeypatch.setattr("datum.api.documents.log_audit_event", fake_log_audit_event)
+
+    try:
+        await client.post("/api/v1/projects", json={"name": "P", "slug": "p"})
+        created = await client.post("/api/v1/projects/p/docs", json={
+            "relative_path": "docs/normalized-delete.md",
+            "title": "Normalized Delete",
+            "doc_type": "plan",
+            "content": "# Delete",
+        })
+        assert created.status_code == 201
+
+        deleted = await client.delete("/api/v1/projects/p/docs/docs/../docs/normalized-delete.md")
+
+        assert deleted.status_code == 200
+        assert captured["canonical_path"] == "docs/normalized-delete.md"
+        assert captured["target_path"] == "docs/normalized-delete.md"
+        assert captured["archived_path"].startswith(".piq/deleted/docs/normalized-delete.md.")
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -1372,6 +1659,62 @@ async def test_search_rejects_invalid_as_of_scope(client):
         json={"query": "test", "version_scope": "as_of:not-a-timestamp"},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_search_accepts_snapshot_and_branch_scopes(client, monkeypatch):
+    captured: list[str] = []
+
+    class StubGateway:
+        embedding = None
+        reranker = None
+
+        async def close(self):
+            return None
+
+    async def fake_search(**kwargs):
+        captured.append(kwargs["version_scope"])
+        return SearchExecution(
+            phase="hybrid",
+            query=kwargs["query"],
+            results=[],
+            fused_results=[],
+            latency_ms=1,
+            semantic_enabled=False,
+            rerank_applied=False,
+            entity_facets=[],
+        )
+
+    monkeypatch.setattr("datum.api.search.build_model_gateway", lambda: StubGateway())
+    monkeypatch.setattr("datum.api.search.search_execution", fake_search)
+
+    snapshot = await client.post(
+        "/api/v1/search",
+        json={"query": "test", "version_scope": "snapshot:release-v1"},
+    )
+    branch = await client.post(
+        "/api/v1/search",
+        json={"query": "test", "version_scope": "branch:release"},
+    )
+
+    assert snapshot.status_code == 200
+    assert branch.status_code == 200
+    assert captured == ["snapshot:release-v1", "branch:release"]
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_empty_snapshot_and_branch_scopes(client):
+    snapshot = await client.post(
+        "/api/v1/search",
+        json={"query": "test", "version_scope": "snapshot:"},
+    )
+    branch = await client.post(
+        "/api/v1/search",
+        json={"query": "test", "version_scope": "branch:"},
+    )
+
+    assert snapshot.status_code == 422
+    assert branch.status_code == 422
 
 
 @pytest.mark.asyncio

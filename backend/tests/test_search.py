@@ -7,6 +7,7 @@ from datum.services.search import (
     FusedResult,
     ParsedQuery,
     RankedCandidate,
+    ResolvedVersionScope,
     SearchOptions,
     SearchResult,
     SearchResultEntity,
@@ -159,6 +160,7 @@ async def test_vector_search_scopes_to_active_model_run():
         version_scope="current",
         project_scope="alpha",
         limit=10,
+        resolved_scope=ResolvedVersionScope(),
     )
 
     assert results == []
@@ -218,6 +220,7 @@ async def test_vector_search_skips_dimension_mismatch():
         version_scope="current",
         project_scope="alpha",
         limit=10,
+        resolved_scope=ResolvedVersionScope(),
     )
 
     assert results == []
@@ -248,6 +251,7 @@ async def test_term_search_applies_as_of_scope():
         ),
         version_scope="as_of:2026-01-01T00:00:00+00:00",
         limit=10,
+        resolved_scope=ResolvedVersionScope(),
     )
 
     assert results == []
@@ -256,6 +260,74 @@ async def test_term_search_applies_as_of_scope():
     assert "version_head_events" in rendered
     assert "valid_from" in rendered
     assert "projects.slug" in rendered
+
+
+@pytest.mark.asyncio
+async def test_term_search_applies_branch_scope():
+    session = _FakeSession()
+
+    results = await _term_search(
+        session,
+        ParsedQuery(
+            raw="DATABASE_URL",
+            bm25_query="DATABASE_URL",
+            detected_terms=[
+                TermMatch(
+                    raw_text="DATABASE_URL",
+                    normalized_text="database_url",
+                    term_type="env_var",
+                    start_char=0,
+                    end_char=12,
+                    confidence=1.0,
+                )
+            ],
+            version_scope="branch:release",
+            project_scope="alpha",
+        ),
+        version_scope="branch:release",
+        limit=10,
+        resolved_scope=ResolvedVersionScope(),
+    )
+
+    assert results == []
+    statement, _ = session.executed[0]
+    rendered = str(statement)
+    assert "version_head_events" in rendered
+    assert "valid_to IS NULL" in rendered
+
+
+@pytest.mark.asyncio
+async def test_term_search_applies_snapshot_scope():
+    session = _FakeSession()
+    snapshot_version_id = uuid4()
+
+    results = await _term_search(
+        session,
+        ParsedQuery(
+            raw="DATABASE_URL",
+            bm25_query="DATABASE_URL",
+            detected_terms=[
+                TermMatch(
+                    raw_text="DATABASE_URL",
+                    normalized_text="database_url",
+                    term_type="env_var",
+                    start_char=0,
+                    end_char=12,
+                    confidence=1.0,
+                )
+            ],
+            version_scope=f"snapshot:release-{snapshot_version_id}",
+            project_scope="alpha",
+        ),
+        version_scope=f"snapshot:release-{snapshot_version_id}",
+        limit=10,
+        resolved_scope=ResolvedVersionScope(snapshot_version_ids=(snapshot_version_id,)),
+    )
+
+    assert results == []
+    statement, _ = session.executed[0]
+    rendered = str(statement)
+    assert "document_versions.id IN" in rendered
 
 
 @pytest.mark.asyncio
@@ -308,6 +380,8 @@ async def test_log_search_run_persists_config_references():
 async def test_prefetch_search_chunks_batches_metadata_terms_and_entities():
     chunk_a = uuid4()
     chunk_b = uuid4()
+    version_a = uuid4()
+    version_b = uuid4()
 
     chunk_rows = [
         (
@@ -316,6 +390,7 @@ async def test_prefetch_search_chunks_batches_metadata_terms_and_entities():
             "Chunk A content",
             1,
             5,
+            version_a,
             2,
             "sha256:a",
             "doc_uid_a",
@@ -331,6 +406,7 @@ async def test_prefetch_search_chunks_batches_metadata_terms_and_entities():
             "Chunk B content",
             6,
             9,
+            version_b,
             3,
             "sha256:b",
             "doc_uid_b",
@@ -375,6 +451,7 @@ async def test_prefetch_search_chunks_batches_metadata_terms_and_entities():
             FusedResult(chunk_id=str(chunk_b), fused_score=0.9),
         ],
         parsed=parsed,
+        path_overrides={str(uuid4()): "docs/ignored.md"},
     )
 
     assert len(session.executed) == 3
@@ -385,3 +462,46 @@ async def test_prefetch_search_chunks_batches_metadata_terms_and_entities():
     assert payloads[str(chunk_b)].entities == [
         SearchResultEntity(canonical_name="redis", entity_type="technology")
     ]
+
+
+@pytest.mark.asyncio
+async def test_prefetch_search_chunks_applies_path_overrides():
+    chunk_id = uuid4()
+    version_id = uuid4()
+    session = _QueuedSession([
+        [
+            (
+                chunk_id,
+                ["docs", "a"],
+                "Chunk content",
+                1,
+                3,
+                version_id,
+                4,
+                "sha256:a",
+                "doc_uid_a",
+                "Doc A",
+                "docs/original.md",
+                "plan",
+                "draft",
+                "alpha",
+            )
+        ],
+        [],
+        [],
+    ])
+
+    payloads = await _prefetch_search_chunks(
+        session,
+        fused_results=[FusedResult(chunk_id=str(chunk_id), fused_score=1.0)],
+        parsed=ParsedQuery(
+            raw="query",
+            bm25_query="query",
+            detected_terms=[],
+            version_scope="as_of:2026-01-01T00:00:00+00:00",
+            project_scope="alpha",
+        ),
+        path_overrides={str(version_id): "docs/historical.md"},
+    )
+
+    assert payloads[str(chunk_id)].document_path == "docs/historical.md"

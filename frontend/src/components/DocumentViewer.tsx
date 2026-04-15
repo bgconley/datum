@@ -21,6 +21,7 @@ import {
   type DocumentContent,
   type VersionInfo,
 } from '@/lib/api'
+import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
 import { extractHeadings } from '@/lib/technical-terms'
 
@@ -255,9 +256,9 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
 
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes('409')) {
-        alert('Document was modified externally. Reload the latest cabinet state and try again.')
+        notify('Document was modified externally. Reload the latest cabinet state and try again.')
       } else {
-        alert(message)
+        notify(message)
       }
     },
     onSuccess: async (metadata, nextContent) => {
@@ -402,19 +403,19 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
     try {
       await createAnnotationMutation.mutateAsync()
     } catch (error) {
-      alert(error instanceof Error ? error.message : String(error))
+      notify(error instanceof Error ? error.message : String(error))
     }
   }
 
   const handleAddToCollection = async () => {
     if (!selectedCollectionId) {
-      alert('Choose a collection first.')
+      notify('Choose a collection first.')
       return
     }
     try {
       await addToCollectionMutation.mutateAsync(selectedCollectionId)
     } catch (error) {
-      alert(error instanceof Error ? error.message : String(error))
+      notify(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -422,7 +423,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
     try {
       await createCollectionMutation.mutateAsync()
     } catch (error) {
-      alert(error instanceof Error ? error.message : String(error))
+      notify(error instanceof Error ? error.message : String(error))
     }
   }
 

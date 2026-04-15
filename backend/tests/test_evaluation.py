@@ -102,7 +102,7 @@ def test_root_cli_help_prints_available_commands(capsys):
     output = capsys.readouterr().out
 
     assert "usage: datum" in output
-    assert "{eval,insights,doctor,gc}" in output
+    assert "{eval,insights,doctor,gc,export,import}" in output
 
 
 def test_compare_runs_prefers_higher_ndcg():

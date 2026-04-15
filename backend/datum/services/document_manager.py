@@ -4,8 +4,9 @@ Documents are filesystem-first: the .md/.sql/.yaml file on disk is canonical.
 Frontmatter stores human metadata. Hashes and versions live in .piq/ manifests.
 """
 
-import os
 import shutil
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,11 @@ from datum.services.filesystem import (
     resolve_manifest_dir,
     validate_canonical_path,
     write_manifest,
+)
+from datum.services.manifest_history import (
+    ensure_manifest_head_events,
+    get_manifest_head_version,
+    record_manifest_delete_event,
 )
 from datum.services.versioning import (
     VersionInfo,
@@ -52,6 +58,8 @@ _BINARY_DOCUMENT_EXTENSIONS = {
     ".webp",
     ".svg",
 }
+_PATH_LOCKS: dict[str, threading.RLock] = {}
+_PATH_LOCKS_GUARD = threading.Lock()
 
 
 class ConflictError(Exception):
@@ -94,6 +102,30 @@ def _deleted_archive_path(project_path: Path, relative_path: str) -> Path:
     archived = project_path / ".piq" / "deleted" / f"{relative_path}.{timestamp}"
     archived.parent.mkdir(parents=True, exist_ok=True)
     return archived
+
+
+def _lock_key(project_path: Path, canonical_path: str) -> str:
+    return f"{project_path.resolve()}::{canonical_path}"
+
+
+def _path_lock(project_path: Path, canonical_path: str) -> threading.RLock:
+    key = _lock_key(project_path, canonical_path)
+    with _PATH_LOCKS_GUARD:
+        return _PATH_LOCKS.setdefault(key, threading.RLock())
+
+
+@contextmanager
+def _locked_paths(project_path: Path, *canonical_paths: str):
+    locks = []
+    for canonical_path in sorted(set(canonical_paths)):
+        lock = _path_lock(project_path, canonical_path)
+        lock.acquire()
+        locks.append(lock)
+    try:
+        yield
+    finally:
+        for lock in reversed(locks):
+            lock.release()
 
 
 @dataclass
@@ -170,38 +202,39 @@ def create_document(
     """
     normalized_path = _validate_document_path(relative_path)
 
-    # Reject if canonical file already exists
-    canonical_full = project_path / normalized_path
-    if canonical_full.exists():
-        raise FileExistsError(f"Document already exists: {normalized_path}")
+    with _locked_paths(project_path, normalized_path):
+        # Reject if canonical file already exists
+        canonical_full = project_path / normalized_path
+        if canonical_full.exists():
+            raise FileExistsError(f"Document already exists: {normalized_path}")
 
-    now = datetime.now(UTC).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).strftime("%Y-%m-%d")
 
-    # Build frontmatter + content
-    fm = frontmatter.Post(
-        content,
-        title=title,
-        type=doc_type,
-        status=status,
-        created=now,
-        updated=now,
-    )
-    if tags:
-        fm["tags"] = tags
+        # Build frontmatter + content
+        fm = frontmatter.Post(
+            content,
+            title=title,
+            type=doc_type,
+            status=status,
+            created=now,
+            updated=now,
+        )
+        if tags:
+            fm["tags"] = tags
 
-    file_bytes = frontmatter.dumps(fm).encode()
+        file_bytes = frontmatter.dumps(fm).encode()
 
-    # create_version owns the canonical write transaction.
-    # It writes: pending_commit -> version file -> canonical file -> final manifest.
-    # Do NOT write the canonical file here — that bypasses the pending_commit protocol.
-    version_info = create_version(
-        project_path=project_path,
-        canonical_path=normalized_path,
-        content=file_bytes,
-        change_source="web",
-    )
-    if version_info is None:
-        raise RuntimeError(f"Initial version was not created for {normalized_path}")
+        # create_version owns the canonical write transaction.
+        # It writes: pending_commit -> version file -> canonical file -> final manifest.
+        # Do NOT write the canonical file here — that bypasses the pending_commit protocol.
+        version_info = create_version(
+            project_path=project_path,
+            canonical_path=normalized_path,
+            content=file_bytes,
+            change_source="web",
+        )
+        if version_info is None:
+            raise RuntimeError(f"Initial version was not created for {normalized_path}")
 
     return DocumentInfo(
         title=title,
@@ -234,50 +267,51 @@ def save_document(
     base_hash must match the current file's hash, or ConflictError is raised.
     """
     normalized_path = _validate_document_path(relative_path)
-    canonical_full = project_path / normalized_path
+    with _locked_paths(project_path, normalized_path):
+        canonical_full = project_path / normalized_path
 
-    if not canonical_full.exists():
-        raise FileNotFoundError(f"Document not found: {normalized_path}")
+        if not canonical_full.exists():
+            raise FileNotFoundError(f"Document not found: {normalized_path}")
 
-    # Conflict check
-    current_bytes = canonical_full.read_bytes()
-    current_hash = compute_content_hash(current_bytes)
-    if current_hash != base_hash:
-        raise ConflictError(current_hash, base_hash)
+        # Conflict check
+        current_bytes = canonical_full.read_bytes()
+        current_hash = compute_content_hash(current_bytes)
+        if current_hash != base_hash:
+            raise ConflictError(current_hash, base_hash)
 
-    is_frontmatter_document = current_bytes.startswith(b"---\n")
-    if is_frontmatter_document:
-        # Parse the incoming content as a full frontmatter document.
-        # This preserves whatever the client sent (including frontmatter).
-        post = frontmatter.loads(content)
-        post["updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
-        new_bytes = frontmatter.dumps(post).encode()
-    else:
-        post = None
-        new_bytes = content.encode()
+        is_frontmatter_document = current_bytes.startswith(b"---\n")
+        if is_frontmatter_document:
+            # Parse the incoming content as a full frontmatter document.
+            # This preserves whatever the client sent (including frontmatter).
+            post = frontmatter.loads(content)
+            post["updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
+            new_bytes = frontmatter.dumps(post).encode()
+        else:
+            post = None
+            new_bytes = content.encode()
 
-    new_hash = compute_content_hash(new_bytes)
-    if new_hash == current_hash:
-        # Content unchanged after frontmatter rebuild — return current state
-        ver = get_current_version(project_path, normalized_path)
-        return _build_doc_info(post, normalized_path, ver)
+        new_hash = compute_content_hash(new_bytes)
+        if new_hash == current_hash:
+            # Content unchanged after frontmatter rebuild — return current state
+            ver = get_current_version(project_path, normalized_path)
+            return _build_doc_info(post, normalized_path, ver)
 
-    # create_version owns the canonical write transaction.
-    # It writes: pending_commit -> version file -> canonical file -> final manifest.
-    # Do NOT write the canonical file here — that bypasses the pending_commit protocol.
-    version_info = create_version(
-        project_path=project_path,
-        canonical_path=normalized_path,
-        content=new_bytes,
-        change_source=change_source,
-        label=label,
-    )
-    if version_info is None:
-        raise RuntimeError(f"Updated version was not created for {normalized_path}")
+        # create_version owns the canonical write transaction.
+        # It writes: pending_commit -> version file -> canonical file -> final manifest.
+        # Do NOT write the canonical file here — that bypasses the pending_commit protocol.
+        version_info = create_version(
+            project_path=project_path,
+            canonical_path=normalized_path,
+            content=new_bytes,
+            change_source=change_source,
+            label=label,
+        )
+        if version_info is None:
+            raise RuntimeError(f"Updated version was not created for {normalized_path}")
 
-    if post is not None:
-        return _build_doc_info(post, normalized_path, version_info)
-    return _generic_doc_info(normalized_path, version_info)
+        if post is not None:
+            return _build_doc_info(post, normalized_path, version_info)
+        return _generic_doc_info(normalized_path, version_info)
 
 
 def get_document(project_path: Path, relative_path: str) -> DocumentInfo | None:
@@ -312,12 +346,68 @@ def create_document_folder(project_path: Path, relative_path: str) -> str:
     return normalized_path
 
 
+def rename_document_folder(
+    project_path: Path,
+    relative_path: str,
+    new_relative_path: str,
+) -> list[DocumentInfo]:
+    """Rename a docs/ folder by decomposing the operation into per-document moves."""
+    normalized_path = _validate_document_folder_path(relative_path)
+    normalized_new_path = _validate_document_folder_path(new_relative_path)
+    source_dir = project_path / normalized_path
+    destination_dir = project_path / normalized_new_path
+
+    if not source_dir.exists():
+        raise FileNotFoundError(f"Folder not found: {normalized_path}")
+    if source_dir.is_file():
+        raise ValueError(f"Folder path points to a file: {normalized_path}")
+    if destination_dir.exists() and any(destination_dir.iterdir()):
+        raise FileExistsError(f"Folder already exists: {normalized_new_path}")
+
+    documents = _iter_folder_documents(project_path, normalized_path)
+    moved: list[DocumentInfo] = []
+    for canonical_path in documents:
+        suffix = Path(canonical_path).relative_to(normalized_path).as_posix()
+        moved.append(
+            move_document(
+                project_path,
+                canonical_path,
+                f"{normalized_new_path.rstrip('/')}/{suffix}",
+            )
+        )
+
+    if not documents:
+        destination_dir.parent.mkdir(parents=True, exist_ok=True)
+        source_dir.rename(destination_dir)
+
+    _prune_empty_dirs(source_dir, stop_at=project_path / "docs")
+    return moved
+
+
+def delete_document_folder(project_path: Path, relative_path: str) -> list[str]:
+    """Delete a docs/ folder by decomposing the operation into per-document deletes."""
+    normalized_path = _validate_document_folder_path(relative_path)
+    folder_path = project_path / normalized_path
+    if not folder_path.exists():
+        raise FileNotFoundError(f"Folder not found: {normalized_path}")
+    if folder_path.is_file():
+        raise ValueError(f"Folder path points to a file: {normalized_path}")
+
+    documents = _iter_folder_documents(project_path, normalized_path)
+    archived = [delete_document(project_path, canonical_path) for canonical_path in documents]
+
+    if folder_path.exists():
+        shutil.rmtree(folder_path)
+    _prune_empty_dirs(folder_path.parent, stop_at=project_path / "docs")
+    return archived
+
+
 def move_document(
     project_path: Path,
     relative_path: str,
     new_relative_path: str,
 ) -> DocumentInfo:
-    """Move or rename a document and its manifest history to a new docs/ path."""
+    """Move or rename a document while preserving lifecycle history."""
     normalized_path = _validate_document_path(relative_path)
     normalized_new_path = _validate_document_path(new_relative_path)
 
@@ -327,66 +417,147 @@ def move_document(
             raise FileNotFoundError(f"Document not found: {normalized_path}")
         return info
 
-    source_path = project_path / normalized_path
-    destination_path = project_path / normalized_new_path
-    if not source_path.exists():
-        raise FileNotFoundError(f"Document not found: {normalized_path}")
-    if destination_path.exists():
-        raise FileExistsError(f"Document already exists: {normalized_new_path}")
+    with _locked_paths(project_path, normalized_path, normalized_new_path):
+        source_path = project_path / normalized_path
+        destination_path = project_path / normalized_new_path
+        if not source_path.exists():
+            raise FileNotFoundError(f"Document not found: {normalized_path}")
+        if destination_path.exists():
+            raise FileExistsError(f"Document already exists: {normalized_new_path}")
 
-    source_manifest_dir = resolve_manifest_dir(
-        project_path,
-        normalized_path,
-        for_write=True,
-    )
-    destination_manifest_dir = resolve_manifest_dir(
-        project_path,
-        normalized_new_path,
-        for_write=False,
-    )
-    if (destination_manifest_dir / "manifest.yaml").exists():
-        raise FileExistsError(f"Manifest already exists for: {normalized_new_path}")
+        source_bytes = source_path.read_bytes()
+        previous_version = get_current_version(project_path, normalized_path)
 
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    destination_manifest_dir.parent.mkdir(parents=True, exist_ok=True)
+        source_manifest_dir = resolve_manifest_dir(
+            project_path,
+            normalized_path,
+            for_write=False,
+        )
+        source_manifest_path = source_manifest_dir / "manifest.yaml"
+        has_manifest = source_manifest_path.exists()
+        destination_manifest_dir = resolve_manifest_dir(
+            project_path,
+            normalized_new_path,
+            for_write=False,
+        )
+        if (destination_manifest_dir / "manifest.yaml").exists():
+            raise FileExistsError(f"Manifest already exists for: {normalized_new_path}")
 
-    source_bytes = source_path.read_bytes()
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(destination_path, source_bytes)
 
-    os.rename(source_path, destination_path)
-    os.rename(source_manifest_dir, destination_manifest_dir)
+        if has_manifest:
+            destination_manifest_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source_manifest_dir), str(destination_manifest_dir))
+            manifest_path = destination_manifest_dir / "manifest.yaml"
+            manifest = read_manifest(manifest_path)
+            manifest["canonical_path"] = normalized_new_path
+            ensure_manifest_head_events(manifest)
+            write_manifest(manifest_path, manifest)
 
-    manifest_path = destination_manifest_dir / "manifest.yaml"
-    manifest = read_manifest(manifest_path)
-    manifest["canonical_path"] = normalized_new_path
-    write_manifest(manifest_path, manifest)
+            moved_version = create_version(
+                project_path=project_path,
+                canonical_path=normalized_new_path,
+                content=source_bytes,
+                change_source="rename",
+                force=True,
+            )
+            if moved_version is None:
+                raise RuntimeError(f"Moved version was not created for {normalized_new_path}")
 
-    archived_path = _deleted_archive_path(project_path, normalized_path)
-    atomic_write(archived_path, source_bytes)
+            manifest = read_manifest(manifest_path)
+            previous_version_number = (
+                previous_version.version_number
+                if previous_version is not None
+                else moved_version.version_number
+            )
+            record_manifest_delete_event(
+                manifest,
+                branch=moved_version.branch,
+                version_number=previous_version_number,
+                canonical_path=normalized_path,
+                at=moved_version.created_at,
+            )
+            write_manifest(manifest_path, manifest)
 
-    info = get_document(project_path, normalized_new_path)
-    if info is None:
-        raise RuntimeError(f"Moved document could not be loaded: {normalized_new_path}")
-    return info
+        archived_path = _deleted_archive_path(project_path, normalized_path)
+        shutil.move(str(source_path), str(archived_path))
+        _prune_empty_dirs(source_path.parent, stop_at=project_path / "docs")
+
+        info = get_document(project_path, normalized_new_path)
+        if info is None:
+            raise RuntimeError(f"Moved document could not be loaded: {normalized_new_path}")
+        return info
 
 
 def delete_document(project_path: Path, relative_path: str) -> str:
     """Soft-delete a document into .piq/deleted and preserve manifest history."""
     normalized_path = _validate_document_path(relative_path)
-    canonical_full = project_path / normalized_path
-    if not canonical_full.exists():
-        raise FileNotFoundError(f"Document not found: {normalized_path}")
+    with _locked_paths(project_path, normalized_path):
+        canonical_full = project_path / normalized_path
+        if not canonical_full.exists():
+            raise FileNotFoundError(f"Document not found: {normalized_path}")
 
-    archived_path = _deleted_archive_path(project_path, normalized_path)
-    shutil.move(str(canonical_full), str(archived_path))
+        deleted_at = datetime.now(UTC)
+        archived_path = _deleted_archive_path(project_path, normalized_path)
+        shutil.move(str(canonical_full), str(archived_path))
 
-    manifest_dir = resolve_manifest_dir(project_path, normalized_path, for_write=False)
-    manifest_path = manifest_dir / "manifest.yaml"
-    manifest = read_manifest(manifest_path)
-    if manifest:
-        manifest["deleted_at"] = datetime.now(UTC).isoformat()
-        write_manifest(manifest_path, manifest)
+        manifest_dir = resolve_manifest_dir(project_path, normalized_path, for_write=False)
+        manifest_path = manifest_dir / "manifest.yaml"
+        manifest = read_manifest(manifest_path)
+        if manifest:
+            manifest["deleted_at"] = deleted_at.isoformat()
+            ensure_manifest_head_events(manifest)
+            head_version = get_manifest_head_version(manifest) or 0
+            if head_version:
+                record_manifest_delete_event(
+                    manifest,
+                    branch="main",
+                    version_number=head_version,
+                    canonical_path=normalized_path,
+                    at=deleted_at,
+                )
+            write_manifest(manifest_path, manifest)
 
-    return archived_path.relative_to(project_path).as_posix()
+        _prune_empty_dirs(canonical_full.parent, stop_at=project_path / "docs")
+        return archived_path.relative_to(project_path).as_posix()
+
+
+def _iter_folder_documents(project_path: Path, folder_relative_path: str) -> list[str]:
+    folder_path = project_path / folder_relative_path
+    if not folder_path.exists() or not folder_path.is_dir():
+        return []
+
+    documents: list[str] = []
+    for file_path in sorted(folder_path.rglob("*")):
+        if not file_path.is_file():
+            continue
+        if (
+            file_path.suffix.lower() not in _TEXT_DOCUMENT_EXTENSIONS
+            and file_path.suffix.lower() not in _BINARY_DOCUMENT_EXTENSIONS
+        ):
+            continue
+        documents.append(file_path.relative_to(project_path).as_posix())
+    return documents
+
+
+def _prune_empty_dirs(path: Path, *, stop_at: Path) -> None:
+    current = path
+    stop_at = stop_at.resolve()
+    while True:
+        try:
+            current_resolved = current.resolve()
+        except FileNotFoundError:
+            current_resolved = current
+        if current_resolved == stop_at or current == current.parent:
+            return
+        if not current.exists() or not current.is_dir():
+            current = current.parent
+            continue
+        if any(current.iterdir()):
+            return
+        current.rmdir()
+        current = current.parent
 
 
 def restore_document_version(

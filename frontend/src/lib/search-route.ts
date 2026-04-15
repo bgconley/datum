@@ -1,4 +1,4 @@
-export type SearchVersionMode = 'current' | 'all' | 'as_of'
+export type SearchVersionMode = 'current' | 'all' | 'as_of' | 'snapshot' | 'branch'
 export type SearchMode =
   | 'find_docs'
   | 'ask_question'
@@ -12,6 +12,8 @@ export interface SearchDraft {
   mode: SearchMode
   versionMode: SearchVersionMode
   asOf: string
+  snapshot: string
+  branch: string
   limit: number
 }
 
@@ -21,6 +23,8 @@ export interface SearchRouteState {
   mode?: SearchMode
   scope?: SearchVersionMode
   as_of?: string
+  snapshot?: string
+  branch?: string
   limit?: number
 }
 
@@ -30,6 +34,8 @@ export const DEFAULT_SEARCH_DRAFT: SearchDraft = {
   mode: 'find_docs',
   versionMode: 'current',
   asOf: '',
+  snapshot: '',
+  branch: '',
   limit: 20,
 }
 
@@ -54,6 +60,8 @@ export function draftsEqual(left: SearchDraft, right: SearchDraft): boolean {
     left.mode === right.mode &&
     left.versionMode === right.versionMode &&
     left.asOf === right.asOf &&
+    left.snapshot === right.snapshot &&
+    left.branch === right.branch &&
     left.limit === right.limit
   )
 }
@@ -71,6 +79,34 @@ export function draftFromRouteSearch(search: SearchRouteState): SearchDraft {
       mode,
       versionMode: 'as_of',
       asOf: search.as_of ? toDatetimeLocalValue(search.as_of) : '',
+      snapshot: '',
+      branch: '',
+      limit,
+    }
+  }
+
+  if (scope === 'snapshot') {
+    return {
+      query: search.query ?? '',
+      project: search.project ?? '',
+      mode,
+      versionMode: 'snapshot',
+      asOf: '',
+      snapshot: search.snapshot ?? '',
+      branch: '',
+      limit,
+    }
+  }
+
+  if (scope === 'branch') {
+    return {
+      query: search.query ?? '',
+      project: search.project ?? '',
+      mode,
+      versionMode: 'branch',
+      asOf: '',
+      snapshot: '',
+      branch: search.branch ?? '',
       limit,
     }
   }
@@ -81,6 +117,8 @@ export function draftFromRouteSearch(search: SearchRouteState): SearchDraft {
     mode,
     versionMode: scope === 'all' ? 'all' : 'current',
     asOf: '',
+    snapshot: '',
+    branch: '',
     limit,
   }
 }
@@ -106,6 +144,12 @@ export function routeSearchFromDraft(draft: SearchDraft): SearchRouteState {
     if (!Number.isNaN(asOfDate.getTime())) {
       next.as_of = asOfDate.toISOString()
     }
+  }
+  if (draft.versionMode === 'snapshot' && draft.snapshot.trim()) {
+    next.snapshot = draft.snapshot.trim()
+  }
+  if (draft.versionMode === 'branch' && draft.branch.trim()) {
+    next.branch = draft.branch.trim()
   }
   if (draft.limit !== DEFAULT_SEARCH_DRAFT.limit) {
     next.limit = draft.limit

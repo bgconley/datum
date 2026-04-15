@@ -23,12 +23,18 @@ Interpretation rule: per-phase plan docs are phase-boundary snapshots; use
 ## Implementation Status At HEAD
 
 - Implemented and validated locally: Phase 1 through Phase 9
-- Phase 9 lifecycle enforcement is now part of the active runtime:
-  - DB tables: `agent_sessions`, `session_deltas`
-  - Server-side write barrier: `428 Precondition Required` in blocking mode
-  - Stop barrier: `409 Conflict` for dirty-session finalize in blocking mode
-  - Claude Code hook adapter: `hooks/claude/*`
-  - Codex lifecycle wrapper + template: `adapters/codex/*`
+- UAT-critical appendix/runtime surfaces now active at `HEAD`:
+  - portable CLI: `datum export ...`, `datum import ...`
+  - search scopes: `current`, `all`, `as_of`, `snapshot`, `branch`
+  - document lifecycle truth: delete + rename/move write temporal head events
+  - folder lifecycle: create, rename, delete
+  - attachment lifecycle: upload, move, delete with blob retention
+  - Phase 9 lifecycle enforcement remains active:
+    - DB tables: `agent_sessions`, `session_deltas`
+    - write barrier: `428 Precondition Required` in blocking mode
+    - stop barrier: `409 Conflict` for dirty-session finalize in blocking mode
+    - Claude Code hook adapter: `hooks/claude/*`
+    - Codex lifecycle wrapper + template: `adapters/codex/*`
 
 ## Purpose
 
@@ -50,6 +56,11 @@ Datum is a filesystem-canonical project intelligence platform. It stores, versio
 - Datum app/test venv on the node: `/tank/venvs/datum`
 - Datum model-services venv on the node: `/tank/venvs/datum-model-services`
 - Datum GLiNER venv on the node: `/tank/venvs/datum-gliner`
+- The compose profile in this repo now defaults UAT deployments to:
+  - `DATUM_LIFECYCLE_ENFORCEMENT_MODE=blocking`
+  - restart policy `unless-stopped` for `datum-api`, `datum-worker`, `datum-watcher`
+  - readiness gating for Caddy on healthy API/frontend containers
+  - watcher heartbeat health checks
 - Native model services are the current production path:
   - embedder: `qwen3_embedder` on `:8010`
   - reranker: `qwen3_reranker` on `:8011`
@@ -72,10 +83,12 @@ Datum is a filesystem-canonical project intelligence platform. It stores, versio
 2. The archive must survive the app. Canonical docs, project metadata, manifests, curated records, and attachment metadata must remain usable on disk.
 3. No canonical write may bypass the Phase 1 versioning contract. `pending_commit` owns the canonical write transaction.
 4. Content hashes are the sync contract. Watcher is an accelerator; reconciler is the authority.
-5. All agent-visible retrieved content is untrusted. Use citations, version info, and source references.
-6. Candidates are not curated truth. Accepted records must be written to disk under `.piq/records/`.
-7. Blob storage is not canonical by itself. Attachments require canonical `attachments/.../metadata.yaml` pointing to blobs.
-8. Model choice is empirical. Do not hard-lock a model or server path without evaluation evidence.
+5. Rename/move is lifecycle-preserving, not a raw path mutation:
+   old path becomes a delete transition and new path becomes the current save head.
+6. All agent-visible retrieved content is untrusted. Use citations, version info, and source references.
+7. Candidates are not curated truth. Accepted records must be written to disk under `.piq/records/`.
+8. Blob storage is not canonical by itself. Attachments require canonical `attachments/.../metadata.yaml` pointing to blobs.
+9. Model choice is empirical. Do not hard-lock a model or server path without evaluation evidence.
 
 ## Required Agent Workflow
 
@@ -207,6 +220,8 @@ When adding a new write surface, wire all of these:
 - Rename/delete/mkdir must respect filesystem and manifest contracts.
 - Delete is soft-delete, not destructive removal of history.
 - Uploads create canonical attachment metadata plus blob refs.
+- Folder rename/delete decompose into per-document lifecycle operations.
+- Attachment move/delete preserve blob bytes and archive metadata transitions.
 - Blob GC and doctor must scan attachment metadata, not invented schema columns.
 - Backup scripts, systemd units, and query benchmark tooling are part of the active operational surface.
 

@@ -144,6 +144,7 @@ class VersionHeadEvent(Base):
     version_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("document_versions.id")
     )
+    canonical_path: Mapped[str] = mapped_column(String, nullable=False)
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     event_type: Mapped[str] = mapped_column(String, nullable=False)

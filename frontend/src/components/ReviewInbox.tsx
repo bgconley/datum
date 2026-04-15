@@ -18,6 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { useContextPanel } from '@/lib/context-panel'
 import { api, type Candidate } from '@/lib/api'
+import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
 import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
@@ -192,7 +193,7 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
       stopEditing()
       await invalidateIntelligence()
     } catch (error) {
-      alert(String(error))
+      notify(String(error))
     } finally {
       setActingId(null)
     }
@@ -207,7 +208,7 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
       }
       await invalidateIntelligence()
     } catch (error) {
-      alert(String(error))
+      notify(String(error))
     } finally {
       setActingId(null)
     }

@@ -293,7 +293,7 @@ async def api_restore_version(
                 await session.commit()
     except Exception:
         await session.rollback()
-        logger.debug("DB sync skipped for restore", exc_info=True)
+        logger.warning("DB sync skipped for restore", exc_info=True)
 
     latest = get_document(project_path, canonical_path)
     if latest is None:

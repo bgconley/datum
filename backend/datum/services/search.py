@@ -7,9 +7,11 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, text
+import yaml
+from sqlalchemy import and_, false, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -23,6 +25,7 @@ from datum.models.search import (
     SearchRunResult,
     TechnicalTerm,
 )
+from datum.services.filesystem import read_manifest, resolve_manifest_dir
 from datum.services.pipeline_configs import (
     RETRIEVAL_RRF_K,
     RETRIEVAL_WEIGHTS,
@@ -99,6 +102,7 @@ class SearchEntityFacet:
 class SearchExecutionContext:
     query: str
     parsed: ParsedQuery
+    resolved_scope: ResolvedVersionScope
     retrieval_config_id: UUID | None
     active_embedding_run_id: UUID | None
     semantic_enabled: bool
@@ -152,6 +156,12 @@ class PrefetchedSearchChunk:
     entities: list[SearchResultEntity] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class ResolvedVersionScope:
+    snapshot_version_ids: tuple[UUID, ...] | None = None
+    path_overrides: dict[str, str] = field(default_factory=dict)
+
+
 def parse_query(
     query: str,
     project_scope: str | None = None,
@@ -175,6 +185,161 @@ def _parse_as_of_scope(version_scope: str) -> datetime | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("as_of scope must include a timezone-aware timestamp")
     return parsed
+
+
+def _parse_branch_scope(version_scope: str) -> str | None:
+    if not version_scope.startswith("branch:"):
+        return None
+    branch_name = version_scope.split(":", 1)[1].strip()
+    return branch_name or None
+
+
+def _parse_snapshot_scope(version_scope: str) -> str | None:
+    if not version_scope.startswith("snapshot:"):
+        return None
+    snapshot_name = version_scope.split(":", 1)[1].strip()
+    return snapshot_name or None
+
+
+async def _resolve_version_scope(
+    session: AsyncSession,
+    *,
+    version_scope: str,
+    project_scope: str | None,
+) -> ResolvedVersionScope:
+    if version_scope == "current" or version_scope == "all":
+        return ResolvedVersionScope()
+
+    if version_scope.startswith("as_of:"):
+        as_of_ts = _parse_as_of_scope(version_scope)
+        if as_of_ts is None:
+            return ResolvedVersionScope()
+        statement = (
+            select(VersionHeadEvent.version_id, VersionHeadEvent.canonical_path)
+            .select_from(VersionHeadEvent)
+            .join(Project, VersionHeadEvent.project_id == Project.id)
+            .where(
+                VersionHeadEvent.event_type == "save",
+                VersionHeadEvent.valid_from <= as_of_ts,
+                or_(
+                    VersionHeadEvent.valid_to.is_(None),
+                    VersionHeadEvent.valid_to > as_of_ts,
+                ),
+            )
+        )
+        if project_scope:
+            statement = statement.where(Project.slug == project_scope)
+        rows = await session.execute(statement)
+        return ResolvedVersionScope(
+            path_overrides={
+                str(version_id): canonical_path
+                for version_id, canonical_path in rows.fetchall()
+            }
+        )
+
+    branch_name = _parse_branch_scope(version_scope)
+    if branch_name is not None:
+        statement = (
+            select(VersionHeadEvent.version_id, VersionHeadEvent.canonical_path)
+            .select_from(VersionHeadEvent)
+            .join(Project, VersionHeadEvent.project_id == Project.id)
+            .where(
+                VersionHeadEvent.branch == branch_name,
+                VersionHeadEvent.event_type == "save",
+                VersionHeadEvent.valid_to.is_(None),
+            )
+        )
+        if project_scope:
+            statement = statement.where(Project.slug == project_scope)
+        rows = await session.execute(statement)
+        return ResolvedVersionScope(
+            path_overrides={
+                str(version_id): canonical_path
+                for version_id, canonical_path in rows.fetchall()
+            }
+        )
+
+    snapshot_name = _parse_snapshot_scope(version_scope)
+    if snapshot_name is not None:
+        snapshot_version_ids, path_overrides = await _resolve_snapshot_membership(
+            session,
+            snapshot_name=snapshot_name,
+            project_scope=project_scope,
+        )
+        return ResolvedVersionScope(
+            snapshot_version_ids=tuple(snapshot_version_ids),
+            path_overrides=path_overrides,
+        )
+
+    return ResolvedVersionScope()
+
+
+async def _resolve_snapshot_membership(
+    session: AsyncSession,
+    *,
+    snapshot_name: str,
+    project_scope: str | None,
+) -> tuple[list[UUID], dict[str, str]]:
+    project_statement = select(Project.slug, Project.filesystem_path)
+    if project_scope:
+        project_statement = project_statement.where(Project.slug == project_scope)
+    project_rows = await session.execute(project_statement)
+
+    scope_entries: dict[tuple[str, str, str], str] = {}
+    for project_slug, filesystem_path in project_rows.fetchall():
+        project_path = Path(filesystem_path)
+        snapshots_path = project_path / ".piq" / "snapshots.yaml"
+        if not snapshots_path.exists():
+            continue
+        snapshot_payload = yaml.safe_load(snapshots_path.read_text()) or {}
+        snapshot = (snapshot_payload.get("snapshots") or {}).get(snapshot_name) or {}
+        documents = snapshot.get("documents") or {}
+        if not isinstance(documents, dict):
+            continue
+        for canonical_path, content_hash in documents.items():
+            manifest_dir = resolve_manifest_dir(project_path, str(canonical_path), for_write=False)
+            manifest = read_manifest(manifest_dir / "manifest.yaml")
+            document_uid = manifest.get("document_uid")
+            if not document_uid:
+                continue
+            key = (str(project_slug), str(document_uid), str(content_hash))
+            scope_entries[key] = str(canonical_path)
+
+    if not scope_entries:
+        return [], {}
+
+    filters = [
+        and_(
+            Project.slug == project_slug,
+            Document.uid == document_uid,
+            DocumentVersion.content_hash == content_hash,
+        )
+        for project_slug, document_uid, content_hash in scope_entries
+    ]
+    rows = await session.execute(
+        select(
+            DocumentVersion.id,
+            Project.slug,
+            Document.uid,
+            DocumentVersion.content_hash,
+        )
+        .select_from(DocumentVersion)
+        .join(Document, DocumentVersion.document_id == Document.id)
+        .join(Project, Document.project_id == Project.id)
+        .where(or_(*filters))
+    )
+
+    version_ids: list[UUID] = []
+    path_overrides: dict[str, str] = {}
+    for version_id, project_slug, document_uid, content_hash in rows.fetchall():
+        key = (str(project_slug), str(document_uid), str(content_hash))
+        override = scope_entries.get(key)
+        if override is None:
+            continue
+        version_ids.append(version_id)
+        path_overrides[str(version_id)] = override
+
+    return version_ids, path_overrides
 
 
 async def _resolve_retrieval_config(
@@ -341,6 +506,11 @@ async def _prepare_search_context(
     search_options: SearchOptions | None,
 ) -> SearchExecutionContext:
     parsed = parse_query(query, project_scope, version_scope)
+    resolved_scope = await _resolve_version_scope(
+        session,
+        version_scope=version_scope,
+        project_scope=project_scope,
+    )
     retrieval_config = await _resolve_retrieval_config(session, search_options)
     active_embedding_run_id = search_options.embedding_model_run_id if search_options else None
     if active_embedding_run_id is None and gateway and gateway.embedding:
@@ -364,6 +534,7 @@ async def _prepare_search_context(
     return SearchExecutionContext(
         query=query,
         parsed=parsed,
+        resolved_scope=resolved_scope,
         retrieval_config_id=retrieval_config.id,
         active_embedding_run_id=active_embedding_run_id,
         semantic_enabled=(
@@ -395,8 +566,20 @@ async def _execute_search(
     started = time.monotonic()
     parsed = context.parsed
 
-    bm25_results = await _bm25_search(session, parsed, version_scope, limit=100)
-    term_results = await _term_search(session, parsed, version_scope, limit=100)
+    bm25_results = await _bm25_search(
+        session,
+        parsed,
+        version_scope,
+        limit=100,
+        resolved_scope=context.resolved_scope,
+    )
+    term_results = await _term_search(
+        session,
+        parsed,
+        version_scope,
+        limit=100,
+        resolved_scope=context.resolved_scope,
+    )
 
     vector_results: list[RankedCandidate] = []
     semantic_applied = False
@@ -421,6 +604,7 @@ async def _execute_search(
                     version_scope=version_scope,
                     project_scope=project_scope,
                     limit=100,
+                    resolved_scope=context.resolved_scope,
                 )
         except Exception as exc:
             logger.warning("vector search unavailable: %s", exc)
@@ -453,6 +637,7 @@ async def _execute_search(
         session=session,
         fused_results=fused,
         parsed=parsed,
+        resolved_scope=context.resolved_scope,
         limit=limit,
         max_results_per_document=(
             search_options.max_results_per_document if search_options is not None else 3
@@ -567,6 +752,7 @@ async def _build_limited_search_results(
     session: AsyncSession,
     fused_results: list[FusedResult],
     parsed: ParsedQuery,
+    resolved_scope: ResolvedVersionScope,
     limit: int,
     max_results_per_document: int | None,
     allowed_document_types: tuple[str, ...] | None,
@@ -574,7 +760,12 @@ async def _build_limited_search_results(
     results: list[SearchResult] = []
     per_document_counts: dict[str, int] = {}
     allowed_types = set(allowed_document_types or ())
-    payloads = await _prefetch_search_chunks(session, fused_results, parsed)
+    payloads = await _prefetch_search_chunks(
+        session,
+        fused_results,
+        parsed,
+        path_overrides=resolved_scope.path_overrides,
+    )
 
     for item in fused_results:
         payload = payloads.get(item.chunk_id)
@@ -635,6 +826,8 @@ async def _prefetch_search_chunks(
     session: AsyncSession,
     fused_results: list[FusedResult],
     parsed: ParsedQuery,
+    *,
+    path_overrides: dict[str, str] | None = None,
 ) -> dict[str, PrefetchedSearchChunk]:
     if not fused_results:
         return {}
@@ -647,6 +840,7 @@ async def _prefetch_search_chunks(
             DocumentChunk.content,
             DocumentChunk.start_line,
             DocumentChunk.end_line,
+            DocumentVersion.id,
             DocumentVersion.version_number,
             DocumentVersion.content_hash,
             Document.uid,
@@ -672,14 +866,14 @@ async def _prefetch_search_chunks(
             content=row[2],
             start_line=row[3],
             end_line=row[4],
-            version_number=row[5],
-            content_hash=row[6],
-            document_uid=row[7],
-            document_title=row[8],
-            document_path=row[9],
-            document_type=row[10],
-            document_status=row[11],
-            project_slug=row[12],
+            version_number=row[6],
+            content_hash=row[7],
+            document_uid=row[8],
+            document_title=row[9],
+            document_path=(path_overrides or {}).get(str(row[5]), row[10]),
+            document_type=row[11],
+            document_status=row[12],
+            project_slug=row[13],
         )
 
     if not payloads:
@@ -737,13 +931,35 @@ async def _prefetch_search_chunks(
     return payloads
 
 
-def _build_scope_sql(version_scope: str, project_scope: str | None) -> tuple[str, dict]:
+def _build_scope_sql(
+    version_scope: str,
+    project_scope: str | None,
+    resolved_scope: ResolvedVersionScope,
+) -> tuple[str, dict]:
     clauses: list[str] = []
     params: dict[str, object] = {}
 
     if version_scope == "current":
         clauses.append("dv.id = d.current_version_id")
         clauses.append("d.status != 'deleted'")
+    elif version_scope.startswith("branch:"):
+        branch_name = _parse_branch_scope(version_scope)
+        if branch_name is None:
+            clauses.append("FALSE")
+        else:
+            params["branch_name"] = branch_name
+            clauses.append(
+                """
+                dv.id IN (
+                    SELECT vhe.version_id
+                    FROM version_head_events vhe
+                    WHERE vhe.document_id = d.id
+                      AND vhe.branch = :branch_name
+                      AND vhe.event_type = 'save'
+                      AND vhe.valid_to IS NULL
+                )
+                """
+            )
     elif version_scope.startswith("as_of:"):
         as_of_ts = _parse_as_of_scope(version_scope)
         params["as_of_ts"] = as_of_ts
@@ -753,11 +969,19 @@ def _build_scope_sql(version_scope: str, project_scope: str | None) -> tuple[str
                 SELECT vhe.version_id
                 FROM version_head_events vhe
                 WHERE vhe.document_id = d.id
+                  AND vhe.event_type = 'save'
                   AND vhe.valid_from <= :as_of_ts::timestamptz
                   AND (vhe.valid_to IS NULL OR vhe.valid_to > :as_of_ts::timestamptz)
             )
             """
         )
+    elif version_scope.startswith("snapshot:"):
+        snapshot_version_ids = resolved_scope.snapshot_version_ids or ()
+        if not snapshot_version_ids:
+            clauses.append("FALSE")
+        else:
+            params["snapshot_version_ids"] = list(snapshot_version_ids)
+            clauses.append("dv.id = ANY(CAST(:snapshot_version_ids AS uuid[]))")
 
     if project_scope:
         clauses.append("p.slug = :project_scope")
@@ -767,19 +991,37 @@ def _build_scope_sql(version_scope: str, project_scope: str | None) -> tuple[str
 
 
 def _build_term_scope_filters(
-    version_scope: str, project_scope: str | None
+    version_scope: str,
+    project_scope: str | None,
+    resolved_scope: ResolvedVersionScope,
 ) -> list[ColumnElement[bool]]:
     filters: list[ColumnElement[bool]] = []
 
     if version_scope == "current":
         filters.append(DocumentVersion.id == Document.current_version_id)
         filters.append(Document.status != "deleted")
+    elif version_scope.startswith("branch:"):
+        branch_name = _parse_branch_scope(version_scope)
+        if branch_name is None:
+            filters.append(false())
+        else:
+            filters.append(
+                DocumentVersion.id.in_(
+                    select(VersionHeadEvent.version_id).where(
+                        VersionHeadEvent.document_id == Document.id,
+                        VersionHeadEvent.branch == branch_name,
+                        VersionHeadEvent.event_type == "save",
+                        VersionHeadEvent.valid_to.is_(None),
+                    )
+                )
+            )
     elif version_scope.startswith("as_of:"):
         as_of_ts = _parse_as_of_scope(version_scope)
         filters.append(
             DocumentVersion.id.in_(
                 select(VersionHeadEvent.version_id).where(
                     VersionHeadEvent.document_id == Document.id,
+                    VersionHeadEvent.event_type == "save",
                     VersionHeadEvent.valid_from <= as_of_ts,
                     or_(
                         VersionHeadEvent.valid_to.is_(None),
@@ -788,6 +1030,12 @@ def _build_term_scope_filters(
                 )
             )
         )
+    elif version_scope.startswith("snapshot:"):
+        snapshot_version_ids = resolved_scope.snapshot_version_ids or ()
+        if not snapshot_version_ids:
+            filters.append(false())
+        else:
+            filters.append(DocumentVersion.id.in_(list(snapshot_version_ids)))
 
     if project_scope:
         filters.append(Project.slug == project_scope)
@@ -825,8 +1073,14 @@ async def _bm25_search(
     parsed: ParsedQuery,
     version_scope: str,
     limit: int,
+    *,
+    resolved_scope: ResolvedVersionScope,
 ) -> list[RankedCandidate]:
-    scope_sql, params = _build_scope_sql(version_scope, parsed.project_scope)
+    scope_sql, params = _build_scope_sql(
+        version_scope,
+        parsed.project_scope,
+        resolved_scope,
+    )
     sql = text(
         f"""
         SELECT dc.id::text, pdb.score(dc.id) AS score
@@ -859,6 +1113,7 @@ async def _vector_search(
     version_scope: str,
     project_scope: str | None,
     limit: int,
+    resolved_scope: ResolvedVersionScope,
 ) -> list[RankedCandidate]:
     if not query_embedding or embedding_model_run_id is None:
         return []
@@ -890,7 +1145,11 @@ async def _vector_search(
         .limit(limit)
     )
 
-    for filter_clause in _build_term_scope_filters(version_scope, project_scope):
+    for filter_clause in _build_term_scope_filters(
+        version_scope,
+        project_scope,
+        resolved_scope,
+    ):
         query = query.where(filter_clause)
 
     try:
@@ -909,6 +1168,8 @@ async def _term_search(
     parsed: ParsedQuery,
     version_scope: str,
     limit: int,
+    *,
+    resolved_scope: ResolvedVersionScope,
 ) -> list[RankedCandidate]:
     if not parsed.detected_terms:
         return []
@@ -926,7 +1187,11 @@ async def _term_search(
         .limit(limit)
     )
 
-    for filter_clause in _build_term_scope_filters(version_scope, parsed.project_scope):
+    for filter_clause in _build_term_scope_filters(
+        version_scope,
+        parsed.project_scope,
+        resolved_scope,
+    ):
         query = query.where(filter_clause)
 
     try:

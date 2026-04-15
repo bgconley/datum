@@ -55,6 +55,22 @@ function buildSearchRequest(draft: SearchDraft): SearchRequestParams | null {
     request.version_scope = `as_of:${asOfDate.toISOString()}`
   }
 
+  if (draft.versionMode === 'snapshot') {
+    const snapshot = draft.snapshot.trim()
+    if (!snapshot) {
+      return null
+    }
+    request.version_scope = `snapshot:${snapshot}`
+  }
+
+  if (draft.versionMode === 'branch') {
+    const branch = draft.branch.trim()
+    if (!branch) {
+      return null
+    }
+    request.version_scope = `branch:${branch}`
+  }
+
   return request
 }
 
@@ -66,6 +82,14 @@ function describeScope(draft: SearchDraft, projects: Project[]): string {
         ? draft.asOf
           ? `versions current at ${new Date(draft.asOf).toLocaleString()}`
           : 'versions at a selected timestamp'
+        : draft.versionMode === 'snapshot'
+          ? draft.snapshot.trim()
+            ? `snapshot ${draft.snapshot.trim()}`
+            : 'a named snapshot'
+          : draft.versionMode === 'branch'
+            ? draft.branch.trim()
+              ? `branch ${draft.branch.trim()}`
+              : 'a branch head'
         : 'current versions'
 
   if (!draft.project) {
@@ -113,7 +137,9 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       routeSearch.mode,
       routeSearch.project,
       routeSearch.query,
+      routeSearch.branch,
       routeSearch.scope,
+      routeSearch.snapshot,
     ],
   )
   const routeDraftKey = useMemo(() => JSON.stringify(routeDraft), [routeDraft])
@@ -134,6 +160,10 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         setError(
           nextDraft.versionMode === 'as_of'
             ? 'Choose a valid as-of timestamp before searching.'
+            : nextDraft.versionMode === 'snapshot'
+              ? 'Choose a snapshot name before searching.'
+              : nextDraft.versionMode === 'branch'
+                ? 'Choose a branch name before searching.'
             : null,
         )
       })
@@ -260,12 +290,12 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
 
   const handleSaveSearch = async () => {
     if (!draft.project) {
-      alert('Choose a project before saving a search.')
+      setError('Choose a project before saving a search.')
       return
     }
     const request = buildSearchRequest(draft)
     if (!request) {
-      alert('Enter a valid query before saving.')
+      setError('Enter a valid query before saving.')
       return
     }
 
@@ -290,6 +320,8 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     const filters = savedSearch.filters ?? {}
     const versionScope =
       typeof filters.version_scope === 'string' ? filters.version_scope : 'current'
+    const snapshot = versionScope.startsWith('snapshot:') ? versionScope.slice(9) : ''
+    const branch = versionScope.startsWith('branch:') ? versionScope.slice(7) : ''
     const nextDraft: SearchDraft = {
       ...draft,
       query: savedSearch.query_text,
@@ -304,8 +336,14 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
           ? 'all'
           : versionScope.startsWith('as_of:')
             ? 'as_of'
+            : versionScope.startsWith('snapshot:')
+              ? 'snapshot'
+              : versionScope.startsWith('branch:')
+                ? 'branch'
             : 'current',
       asOf: versionScope.startsWith('as_of:') ? versionScope.slice(6) : '',
+      snapshot,
+      branch,
     }
     setDraft(nextDraft)
     navigateToSearch(nextDraft)
@@ -338,8 +376,17 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     if (nextDraft.mode === 'compare_over_time' && nextDraft.versionMode === 'current') {
       adjustedDraft = { ...nextDraft, versionMode: 'as_of' }
     }
-    if (nextDraft.mode === 'find_docs' && nextDraft.versionMode === 'as_of' && !nextDraft.asOf) {
-      adjustedDraft = { ...nextDraft, versionMode: 'current' }
+    if (adjustedDraft.mode === 'find_docs' && adjustedDraft.versionMode === 'as_of' && !adjustedDraft.asOf) {
+      adjustedDraft = { ...adjustedDraft, versionMode: 'current' }
+    }
+    if (adjustedDraft.versionMode !== 'as_of') {
+      adjustedDraft = { ...adjustedDraft, asOf: '' }
+    }
+    if (adjustedDraft.versionMode !== 'snapshot') {
+      adjustedDraft = { ...adjustedDraft, snapshot: '' }
+    }
+    if (adjustedDraft.versionMode !== 'branch') {
+      adjustedDraft = { ...adjustedDraft, branch: '' }
     }
     setDraft(adjustedDraft)
   }

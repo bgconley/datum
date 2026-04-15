@@ -207,7 +207,12 @@ const searchRoute = createRoute({
   path: 'search',
   validateSearch: (search: Record<string, unknown>): SearchRouteState => {
     const scope =
-      search.scope === 'all' || search.scope === 'as_of' ? search.scope : 'current'
+      search.scope === 'all' ||
+      search.scope === 'as_of' ||
+      search.scope === 'snapshot' ||
+      search.scope === 'branch'
+        ? search.scope
+        : 'current'
     const mode =
       search.mode === 'ask_question' ||
       search.mode === 'find_decisions' ||
@@ -233,6 +238,8 @@ const searchRoute = createRoute({
       mode,
       scope,
       as_of: typeof search.as_of === 'string' ? search.as_of : undefined,
+      snapshot: typeof search.snapshot === 'string' ? search.snapshot : undefined,
+      branch: typeof search.branch === 'string' ? search.branch : undefined,
       limit,
     }
   },

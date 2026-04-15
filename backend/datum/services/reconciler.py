@@ -174,7 +174,7 @@ async def reconcile_project(project_path: Path, db_session=None) -> ReconcileRes
                         await db_session.commit()
                 except Exception:
                     await db_session.rollback()
-                    logger.debug("Reconciler project.yaml DB sync failed", exc_info=True)
+                    logger.warning("Reconciler project.yaml DB sync failed", exc_info=True)
             else:
                 # No session provided — use standalone best-effort sync
                 sync_project_yaml_to_db(project_path.name, project_path)

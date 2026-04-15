@@ -5,6 +5,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
+import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
 
 interface Props {
@@ -85,7 +86,7 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
         params: { slug: projectSlug, _splat: document.relative_path },
       })
     } catch (error) {
-      alert(String(error))
+      notify(String(error))
     } finally {
       setSaving(false)
     }

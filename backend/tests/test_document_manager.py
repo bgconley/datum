@@ -1,14 +1,20 @@
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from datum.services.document_manager import (
     ConflictError,
     create_document,
+    delete_document,
+    delete_document_folder,
     get_document,
     list_documents,
+    move_document,
+    rename_document_folder,
     save_document,
 )
-from datum.services.filesystem import compute_content_hash
+from datum.services.filesystem import compute_content_hash, read_manifest
 from datum.services.project_manager import create_project
 
 
@@ -86,6 +92,31 @@ class TestSaveDocument:
         with pytest.raises(FileNotFoundError):
             save_document(project, "docs/missing.md", "# Content", "sha256:fake", "web")
 
+    def test_parallel_saves_allow_one_winner_and_one_conflict(self, project):
+        create_document(project, "docs/a.md", "A", "plan", "# V1")
+        original = (project / "docs" / "a.md").read_text()
+        base_hash = compute_content_hash((project / "docs" / "a.md").read_bytes())
+
+        def _save(replacement: str):
+            updated = original.replace("# V1", replacement)
+            try:
+                info = save_document(project, "docs/a.md", updated, base_hash, "web")
+                return ("ok", info.version)
+            except ConflictError as exc:
+                return ("conflict", exc.current_hash)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = list(
+                executor.map(
+                    _save,
+                    ("# V2 from writer one", "# V2 from writer two"),
+                )
+            )
+
+        assert sorted(result[0] for result in outcomes) == ["conflict", "ok"]
+        assert any(result == ("ok", 2) for result in outcomes)
+        assert get_document(project, "docs/a.md").version == 2
+
 
 class TestListDocuments:
     def test_lists_documents(self, project):
@@ -146,6 +177,67 @@ class TestGenericDocumentHandling:
         assert saved.relative_path == "docs/app.ts"
         assert raw_doc.read_text() == "export const version = 2\n"
         assert not raw_doc.read_text().startswith("---\n")
+
+
+class TestLifecycleSemantics:
+    def test_move_records_temporal_head_events(self, project):
+        create_document(project, "docs/a.md", "A", "plan", "# A")
+
+        moved = move_document(project, "docs/a.md", "docs/archive/a.md")
+
+        assert moved.relative_path == "docs/archive/a.md"
+        manifest = read_manifest(
+            project / ".piq" / "docs" / "archive" / "a.md" / "manifest.yaml"
+        )
+        assert manifest["canonical_path"] == "docs/archive/a.md"
+        assert [
+            version["version"] for version in manifest["branches"]["main"]["versions"]
+        ] == [1, 2]
+        assert [event["event_type"] for event in manifest["head_events"]] == [
+            "save",
+            "save",
+            "delete",
+        ]
+        assert manifest["head_events"][0]["canonical_path"] == "docs/a.md"
+        assert manifest["head_events"][0]["valid_to"] is not None
+        assert manifest["head_events"][1]["canonical_path"] == "docs/archive/a.md"
+        assert manifest["head_events"][1]["valid_to"] is None
+        assert manifest["head_events"][2]["canonical_path"] == "docs/a.md"
+        assert manifest["head_events"][2]["version"] == 1
+
+    def test_delete_records_delete_head_event(self, project):
+        create_document(project, "docs/delete-me.md", "Delete", "plan", "# Delete")
+
+        archived_path = delete_document(project, "docs/delete-me.md")
+
+        assert archived_path.startswith(".piq/deleted/docs/delete-me.md.")
+        manifest = read_manifest(project / ".piq" / "docs" / "delete-me.md" / "manifest.yaml")
+        assert manifest["deleted_at"] is not None
+        assert [event["event_type"] for event in manifest["head_events"]] == ["save", "delete"]
+        assert manifest["head_events"][0]["valid_to"] is not None
+        assert manifest["head_events"][1]["canonical_path"] == "docs/delete-me.md"
+        assert manifest["head_events"][1]["valid_to"] == manifest["head_events"][1]["valid_from"]
+
+    def test_folder_rename_decomposes_into_document_moves(self, project):
+        create_document(project, "docs/specs/a.md", "A", "plan", "# A")
+        create_document(project, "docs/specs/sub/b.md", "B", "plan", "# B")
+
+        moved = rename_document_folder(project, "docs/specs", "docs/archive/specs")
+
+        moved_paths = {document.relative_path for document in moved}
+        assert moved_paths == {"docs/archive/specs/a.md", "docs/archive/specs/sub/b.md"}
+        assert get_document(project, "docs/specs/a.md") is None
+        assert get_document(project, "docs/archive/specs/a.md") is not None
+
+    def test_folder_delete_decomposes_into_document_deletes(self, project):
+        create_document(project, "docs/specs/a.md", "A", "plan", "# A")
+        create_document(project, "docs/specs/b.md", "B", "plan", "# B")
+
+        archived = delete_document_folder(project, "docs/specs")
+
+        assert len(archived) == 2
+        assert get_document(project, "docs/specs/a.md") is None
+        assert not (project / "docs" / "specs").exists()
 
 
 class TestDocumentPathEnforcement:

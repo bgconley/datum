@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
+import { notify } from '@/lib/notifications'
 
 interface Props {
   onCreated: () => void
@@ -38,7 +39,7 @@ export function CreateProjectDialog({ onCreated }: Props) {
       onCreated()
       navigate({ to: '/projects/$slug', params: { slug: project.slug } })
     } catch (e) {
-      alert(String(e))
+      notify(String(e))
     } finally {
       setSaving(false)
     }

@@ -29,12 +29,13 @@ services:
       - ${DATUM_CACHE_ROOT:-./dev/cache}:/tank/datum/cache
     ports:
       - "127.0.0.1:8001:8001"
+    restart: unless-stopped
     environment:
       DATUM_DATABASE_URL: postgresql+asyncpg://datum:${DATUM_DB_PASSWORD:-datum_dev}@paradedb:5432/datum
       DATUM_PROJECTS_ROOT: /tank/datum/projects
       DATUM_BLOBS_ROOT: /tank/datum/blobs
       DATUM_CACHE_ROOT: /tank/datum/cache
-      DATUM_LIFECYCLE_ENFORCEMENT_MODE: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-advisory}
+      DATUM_LIFECYCLE_ENFORCEMENT_MODE: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-blocking}
       DATUM_EMBEDDING_ENDPOINT: ${DATUM_EMBEDDING_ENDPOINT:-http://host.docker.internal:8010}
       DATUM_EMBEDDING_MODEL: ${DATUM_EMBEDDING_MODEL:-Qwen3-Embedding-4B}
       DATUM_EMBEDDING_PROTOCOL: ${DATUM_EMBEDDING_PROTOCOL:-qwen3_embedder}
@@ -48,6 +49,18 @@ services:
     depends_on:
       paradedb:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/api/v1/health', timeout=2).status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   datum-watcher:
     build:
@@ -57,13 +70,26 @@ services:
     command: python -m datum.watcher
     volumes:
       - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
+    restart: unless-stopped
     environment:
       DATUM_DATABASE_URL: postgresql+asyncpg://datum:${DATUM_DB_PASSWORD:-datum_dev}@paradedb:5432/datum
       DATUM_PROJECTS_ROOT: /tank/datum/projects
-      DATUM_LIFECYCLE_ENFORCEMENT_MODE: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-advisory}
+      DATUM_LIFECYCLE_ENFORCEMENT_MODE: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-blocking}
     depends_on:
       paradedb:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from pathlib import Path; import sys, time; heartbeat = Path('/tmp/datum-watcher-heartbeat'); sys.exit(0 if heartbeat.exists() and time.time() - heartbeat.stat().st_mtime < 30 else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   datum-worker:
     build:
@@ -77,12 +103,13 @@ services:
       - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
       - ${DATUM_BLOBS_ROOT:-./dev/blobs}:/tank/datum/blobs
       - ${DATUM_CACHE_ROOT:-./dev/cache}:/tank/datum/cache
+    restart: unless-stopped
     environment:
       DATUM_DATABASE_URL: postgresql+asyncpg://datum:${DATUM_DB_PASSWORD:-datum_dev}@paradedb:5432/datum
       DATUM_PROJECTS_ROOT: /tank/datum/projects
       DATUM_BLOBS_ROOT: /tank/datum/blobs
       DATUM_CACHE_ROOT: /tank/datum/cache
-      DATUM_LIFECYCLE_ENFORCEMENT_MODE: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-advisory}
+      DATUM_LIFECYCLE_ENFORCEMENT_MODE: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-blocking}
       DATUM_EMBEDDING_ENDPOINT: ${DATUM_EMBEDDING_ENDPOINT:-http://host.docker.internal:8010}
       DATUM_EMBEDDING_MODEL: ${DATUM_EMBEDDING_MODEL:-Qwen3-Embedding-4B}
       DATUM_EMBEDDING_PROTOCOL: ${DATUM_EMBEDDING_PROTOCOL:-qwen3_embedder}
@@ -103,6 +130,18 @@ services:
       dockerfile: Dockerfile
     # No published port — access through caddy at :3080
     # For isolated dev: docker compose run --service-ports -p 3000:3000 datum-frontend
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   caddy:
     image: caddy:2-alpine@sha256:fce4f15aad23222c0ac78a1220adf63bae7b94355d5ea28eee53910624acedfa
@@ -111,5 +150,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
-      - datum-api
-      - datum-frontend
+      datum-api:
+        condition: service_healthy
+      datum-frontend:
+        condition: service_healthy

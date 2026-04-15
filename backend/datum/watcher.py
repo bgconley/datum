@@ -19,6 +19,7 @@ from datum.services.watcher_utils import compute_file_state, should_process_path
 logger = logging.getLogger(__name__)
 
 DEBOUNCE_SECONDS = 2.0
+HEARTBEAT_PATH = Path("/tmp/datum-watcher-heartbeat")
 
 
 class DebouncedHandler(FileSystemEventHandler):
@@ -166,7 +167,12 @@ class DebouncedHandler(FileSystemEventHandler):
 
             asyncio.run(_sync())
         except Exception:
-            logger.debug("Watcher DB sync failed (database may be unavailable)", exc_info=True)
+            logger.warning("Watcher DB sync failed (database may be unavailable)", exc_info=True)
+
+
+def _touch_heartbeat() -> None:
+    HEARTBEAT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HEARTBEAT_PATH.touch()
 
 
 def main():
@@ -185,6 +191,7 @@ def main():
 
     try:
         while True:
+            _touch_heartbeat()
             handler.process_settled()
             time.sleep(0.5)
     except KeyboardInterrupt:

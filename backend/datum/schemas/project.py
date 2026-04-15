@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 
+from datum.schemas.attachment import AttachmentResponse
 from datum.schemas.document import DocumentResponse, GeneratedFileResponse
 
 
@@ -24,4 +25,5 @@ class ProjectResponse(BaseModel):
 class WorkspaceSnapshotResponse(BaseModel):
     project: ProjectResponse
     documents: list[DocumentResponse]
+    attachments: list[AttachmentResponse]
     generated_files: list[GeneratedFileResponse]
