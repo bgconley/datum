@@ -1,150 +1,142 @@
 import { Link } from '@tanstack/react-router'
-import { Clock3, Hash, History, Tags } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import type { DocumentMeta, VersionInfo } from '@/lib/api'
+import type { DocumentMeta, DocumentEntityMention, VersionInfo } from '@/lib/api'
 
 interface ContextPanelProps {
   projectSlug: string
   document: DocumentMeta
   versions: VersionInfo[]
   headings?: Array<{ id: string; level: number; text: string }>
+  entityMentions?: DocumentEntityMention[]
 }
+
+const SECTION = 'text-[11px] font-semibold text-[#666]'
+const DIVIDER = 'h-px w-full bg-[#e1e8ed]'
 
 export function ContextPanel({
   projectSlug,
-  document,
+  document: doc,
   versions,
   headings = [],
+  entityMentions = [],
 }: ContextPanelProps) {
   const recentVersions = [...versions].slice(-5).reverse()
+  const latestVersion = recentVersions[0]
+
+  // Deduplicate entity mentions
+  const seen = new Set<string>()
+  const uniqueMentions = entityMentions.filter((m) => {
+    const key = `${m.entity_type}:${m.canonical_name}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-5 p-5">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Context: Document
-          </div>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight">{document.title}</h2>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{document.doc_type}</Badge>
-            <Badge variant="outline">{document.status}</Badge>
-            <Badge variant="outline">v{document.version}</Badge>
-          </div>
+      <div className="flex flex-col gap-[10px] p-[16px]">
+        {/* Header */}
+        <p className={SECTION}>CONTEXT: DOCUMENT</p>
+        <div className={DIVIDER} />
+
+        {/* Version / Updated / By */}
+        <div className="flex items-start justify-between text-[11px]">
+          <span className="text-[#666]">Version</span>
+          <span className="font-medium text-[#333]">v{String(doc.version).padStart(3, '0')}</span>
+        </div>
+        <div className="flex items-start justify-between text-[11px]">
+          <span className="text-[#666]">Updated</span>
+          <span className="font-medium text-[#333]">
+            {doc.updated ? new Date(doc.updated).toLocaleDateString() : 'N/A'}
+          </span>
+        </div>
+        <div className="flex items-start justify-between text-[11px]">
+          <span className="text-[#666]">By</span>
+          <span className="font-medium text-[#333]">
+            {latestVersion?.change_source ?? 'web-ui'} ({latestVersion?.change_source === 'agent' ? 'Agent' : 'Human'})
+          </span>
         </div>
 
-        <div className="rounded border border-border bg-muted p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Cabinet path
-          </div>
-          <div className="mt-2 font-mono text-xs leading-6 text-foreground">
-            {document.relative_path}
-          </div>
-        </div>
+        <div className={DIVIDER} />
 
+        {/* Table of Contents */}
         {headings.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-              <Hash className="size-3.5" />
-              Table of contents
-            </div>
-            <div className="space-y-1">
-              {headings.map((heading) => (
-                <a
-                  key={heading.id}
-                  href={`#${heading.id}`}
-                  className="block rounded-lg px-2 py-1 text-sm transition-colors hover:bg-accent/50"
-                  style={{ paddingLeft: `${0.5 + (heading.level - 1) * 0.5}rem` }}
-                >
-                  {heading.text}
-                </a>
-              ))}
-            </div>
-          </div>
+          <>
+            <p className={SECTION}>TABLE OF CONTENTS</p>
+            {headings.map((h) => (
+              <a
+                key={h.id}
+                href={`#${h.id}`}
+                className="text-[11px] text-[#22a5f1] hover:underline"
+                style={{ paddingLeft: h.level > 1 ? `${(h.level - 1) * 12}px` : undefined }}
+              >
+                {h.level <= 2 ? `${headings.filter((x) => x.level <= h.level).indexOf(h) + 1}. ` : ''}
+                {h.text}
+              </a>
+            ))}
+            <div className={DIVIDER} />
+          </>
         )}
 
-        {document.tags.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-              <Tags className="size-3.5" />
-              Tags
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {document.tags.map((tag) => (
-                <Badge key={tag} variant="outline">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          </div>
+        {/* Entity Mentions */}
+        {uniqueMentions.length > 0 && (
+          <>
+            <p className={SECTION}>ENTITY MENTIONS ({uniqueMentions.length})</p>
+            {uniqueMentions.map((m) => (
+              <div key={`${m.entity_type}:${m.canonical_name}`} className="flex items-center gap-[8px]">
+                <span className="text-[9px] font-semibold text-[#666]">
+                  {m.entity_type.toUpperCase()}
+                </span>
+                <Link
+                  to="/projects/$slug/entities/$entityId"
+                  params={{ slug: projectSlug, entityId: m.entity_id }}
+                  className="text-[11px] text-[#22a5f1] hover:underline"
+                >
+                  {m.canonical_name}
+                </Link>
+              </div>
+            ))}
+            <div className={DIVIDER} />
+          </>
         )}
 
-        <Separator />
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-              <History className="size-3.5" />
-              Recent versions
+        {/* Recent Versions */}
+        {recentVersions.length > 0 && (
+          <>
+            <div className="flex items-center justify-between">
+              <p className={SECTION}>RECENT VERSIONS</p>
+              <Link
+                to="/projects/$slug/docs/$"
+                params={{ slug: projectSlug, _splat: `${doc.relative_path}/history` }}
+                className="text-[10px] text-[#22a5f1] hover:underline"
+              >
+                Full history
+              </Link>
             </div>
-            <Link
-              to="/projects/$slug/docs/$"
-              params={{ slug: projectSlug, _splat: `${document.relative_path}/history` }}
-              className="inline-flex h-6 items-center rounded border border-border bg-white px-2 text-xs font-medium transition-colors hover:bg-muted"
-            >
-              Full history
-            </Link>
-          </div>
-          <div className="space-y-2">
-            {recentVersions.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No version history yet.</div>
-            ) : (
-              recentVersions.map((version) => (
-                <div
-                  key={`${version.branch}:${version.version_number}`}
-                  className="rounded border border-border bg-muted px-3 py-2"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-mono text-sm">
-                      v{version.version_number.toString().padStart(3, '0')}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {version.branch}
-                    </div>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                    <Clock3 className="size-3" />
-                    {new Date(version.created_at).toLocaleString()}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {version.label && <Badge variant="secondary">{version.label}</Badge>}
-                    {version.created_by && <Badge variant="outline">{version.created_by}</Badge>}
-                    {version.indexing_status && (
-                      <Badge variant="outline">{version.indexing_status}</Badge>
-                    )}
-                  </div>
+            {recentVersions.map((v) => (
+              <div key={v.version_number} className="rounded-[4px] border border-[#e1e8ed] bg-[#f7f9fa] px-[12px] py-[8px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-[#333]">
+                    v{String(v.version_number).padStart(3, '0')}
+                  </span>
+                  <span className="text-[10px] text-[#999]">{v.change_source}</span>
                 </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <Separator />
-
-        <details className="rounded border border-border bg-muted p-4 text-xs">
-          <summary className="cursor-pointer font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Technical details
-          </summary>
-          <div className="mt-3 space-y-2 font-mono text-[11px] leading-5 text-muted-foreground">
-            <div>hash: {document.content_hash}</div>
-            <div>uid: {document.document_uid}</div>
-            <div>created: {document.created ?? 'unknown'}</div>
-            <div>updated: {document.updated ?? 'unknown'}</div>
-          </div>
-        </details>
+                <div className="mt-1 text-[10px] text-[#999]">
+                  {new Date(v.created).toLocaleString()}
+                </div>
+                <div className="mt-1 flex gap-[6px]">
+                  <span className="rounded-[3px] bg-[#e1e8ed] px-[6px] py-[2px] text-[9px] font-semibold text-[#333]">
+                    {v.change_source}
+                  </span>
+                  <span className="rounded-[3px] bg-[#e1e8ed] px-[6px] py-[2px] text-[9px] font-semibold text-[#333]">
+                    indexed
+                  </span>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </ScrollArea>
   )

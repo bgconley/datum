@@ -461,85 +461,94 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
     )
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
-      <div className="rounded border border-border bg-white p-8 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="min-w-0">
-            <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-              {breadcrumbs.map((crumb, index) => (
-                <div key={`${crumb.label}:${crumb.path ?? 'project'}`} className="flex items-center gap-1">
-                  {index > 0 && <span className="text-muted-foreground">/</span>}
-                  <Link
-                    to={index === 0 ? '/projects/$slug' : '/projects/$slug/docs/$'}
-                    params={
-                      index === 0
-                        ? { slug: projectSlug }
-                        : { slug: projectSlug, _splat: crumb.path ?? metadata.relative_path }
-                    }
-                    className="truncate px-1 py-0.5 transition-colors hover:text-foreground"
-                  >
-                    {crumb.label}
-                  </Link>
-                </div>
-              ))}
-            </nav>
-
-            <h1 className="mt-4 text-3xl font-semibold tracking-tight">{metadata.title}</h1>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{metadata.doc_type}</Badge>
-              {metadata.status === 'approved' ? (
-                <Badge className="border-green-200 bg-green-50 text-green-700">{metadata.status}</Badge>
-              ) : (
-                <Badge variant="outline">{metadata.status}</Badge>
-              )}
-              <Badge variant="outline">v{metadata.version}</Badge>
-              {metadata.tags.map((tag) => (
-                <Badge key={tag} className="border-border bg-muted text-foreground">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded border border-border">
-              {availableViewModes
-                .filter((mode) => mode !== 'edit')
-                .map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wide transition-colors ${
-                      viewMode === mode
-                        ? 'bg-primary text-white'
-                        : 'bg-muted text-foreground hover:bg-muted/80'
-                    }`}
-                    onClick={() => setViewMode(mode)}
-                  >
-                    {mode}
-                  </button>
-                ))}
-            </div>
+    <div className="flex flex-col gap-[12px] overflow-auto px-[24px] py-[20px]">
+      {/* Breadcrumbs — Figma: text-[11px], folders #666, sep #999, file #333 medium */}
+      <nav className="flex items-center gap-[4px] text-[11px]">
+        {breadcrumbs.map((crumb, index) => (
+          <div key={`${crumb.label}:${crumb.path ?? 'project'}`} className="flex items-center gap-[4px]">
+            {index > 0 && <span className="text-[#999]">/</span>}
             <Link
-              to="/projects/$slug/docs/$"
-              params={{ slug: projectSlug, _splat: historySplat }}
-              className="inline-flex h-8 items-center rounded border border-border bg-white px-3 text-sm font-medium transition-colors hover:bg-muted"
+              to={index === 0 ? '/projects/$slug' : '/projects/$slug/docs/$'}
+              params={
+                index === 0
+                  ? { slug: projectSlug }
+                  : { slug: projectSlug, _splat: crumb.path ?? metadata.relative_path }
+              }
+              className={index === breadcrumbs.length - 1 ? 'font-medium text-[#333]' : 'text-[#666] hover:text-[#333]'}
             >
-              <History className="mr-1 size-4" />
-              History
+              {crumb.label}
             </Link>
-            {mediaKind === 'text' && (
-              <Button type="button" size="sm" onClick={() => setViewMode('edit')}>
-                <PenSquare className="mr-1 size-4" />
-                Edit
-              </Button>
-            )}
-            {mediaKind === 'text' && (viewMode === 'edit' || viewMode === 'split') && (
-              <Button type="button" size="sm" onClick={handleSave} disabled={saveMutation.isPending}>
-                {saveMutation.isPending ? 'Saving…' : 'Save'}
-              </Button>
-            )}
           </div>
+        ))}
+      </nav>
+
+      {/* Title row + controls */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-[12px]">
+          <h1 className="text-[18px] font-semibold text-[#1b2431]">{metadata.title}</h1>
+          {metadata.status === 'approved' ? (
+            <span className="rounded-[3px] bg-[#5cb85c] px-[8px] py-[3px] text-[10px] font-semibold text-white">
+              Approved
+            </span>
+          ) : (
+            <span className="rounded-[3px] bg-[#e1e8ed] px-[8px] py-[3px] text-[10px] font-semibold text-[#333]">
+              {metadata.status}
+            </span>
+          )}
+          {metadata.tags.map((tag) => (
+            <span key={tag} className="rounded-[3px] bg-[#e1e8ed] px-[8px] py-[3px] text-[10px] font-semibold text-[#333]">
+              {tag}
+            </span>
+          ))}
+          <span className="rounded-[3px] bg-[#e1e8ed] px-[8px] py-[3px] text-[10px] font-semibold text-[#333]">
+            v{metadata.version}
+          </span>
+        </div>
+
+        {/* View mode controls — Figma: individual buttons, active=bg-[#333], EDIT=bg-[#22a5f1] */}
+        <div className="flex items-center gap-[8px]">
+          {availableViewModes
+            .filter((mode) => mode !== 'edit')
+            .map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`rounded-[4px] border border-[#e1e8ed] px-[10px] py-[6px] text-[10px] font-semibold uppercase ${
+                  viewMode === mode
+                    ? 'bg-[#333] text-white'
+                    : 'bg-white text-[#333] hover:bg-[#f7f9fa]'
+                }`}
+                onClick={() => setViewMode(mode)}
+              >
+                {mode}
+              </button>
+            ))}
+          <Link
+            to="/projects/$slug/docs/$"
+            params={{ slug: projectSlug, _splat: historySplat }}
+            className="rounded-[4px] border border-[#e1e8ed] bg-white px-[10px] py-[6px] text-[10px] font-semibold uppercase text-[#333] hover:bg-[#f7f9fa]"
+          >
+            HISTORY
+          </Link>
+          {mediaKind === 'text' && (
+            <button
+              type="button"
+              className="rounded-[4px] bg-[#22a5f1] px-[16px] py-[6px] text-[10px] font-semibold uppercase text-white hover:bg-[#22a5f1]/90"
+              onClick={() => setViewMode('edit')}
+            >
+              EDIT
+            </button>
+          )}
+          {mediaKind === 'text' && (viewMode === 'edit' || viewMode === 'split') && (
+            <button
+              type="button"
+              className="rounded-[4px] bg-[#5cb85c] px-[16px] py-[6px] text-[10px] font-semibold uppercase text-white hover:bg-[#5cb85c]/90"
+              onClick={handleSave}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending ? 'Saving…' : 'Save'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -997,10 +1006,10 @@ function CardShell({
   title?: string
 }) {
   return (
-    <div className="rounded border border-border bg-white p-5 shadow-sm">
+    <div className="rounded-[4px] border border-[#e1e8ed] bg-white px-[32px] py-[28px]">
       {title && (
-        <div className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-          {title}
+        <div className="mb-4 text-[9px] font-semibold text-[#666]">
+          {title.toUpperCase()}
         </div>
       )}
       {children}
