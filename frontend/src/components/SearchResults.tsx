@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useContextPanel } from '@/lib/context-panel'
 import type { AnswerModeResponse, SearchEntityFacet, SearchResultItem } from '@/lib/api'
 import type { SearchMode } from '@/lib/search-route'
 
@@ -28,52 +26,33 @@ function buildCountFacets(values: string[]): Array<{ value: string; count: numbe
   for (const value of values) {
     counts.set(value, (counts.get(value) ?? 0) + 1)
   }
-
   return [...counts.entries()]
     .map(([value, count]) => ({ value, count }))
     .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value))
 }
 
-function describePhase(
-  loading: boolean,
-  streamPhase: 'idle' | 'lexical' | 'reranked' | 'answer_ready',
-  semanticEnabled: boolean | null,
-  rerankApplied: boolean | null,
-  answer: AnswerModeResponse | null,
-): string | null {
-  if (!loading && streamPhase === 'answer_ready') {
-    if (answer?.error) {
-      return 'Search results are ready, but grounded answer synthesis was unavailable for this query.'
-    }
-    if (answer?.citations.length) {
-      return 'Final results are ready and answer synthesis completed with citations.'
-    }
-    return 'Final results are ready and answer synthesis completed.'
+function rankBadge(result: SearchResultItem): { label: string; bg: string; text: string } {
+  if (result.match_signals.includes('vector')) {
+    const pct = Math.round(result.fused_score * 100)
+    return { label: `Vector Match (${pct}%)`, bg: 'bg-[#dff0d8]', text: 'text-[#3c763d]' }
   }
-
-  if (loading && streamPhase === 'lexical') {
-    return semanticEnabled === false
-      ? 'Lexical results are ready. Semantic search is unavailable, so the final pass will confirm exact-term and keyword ranking.'
-      : 'Lexical results are ready. Running semantic fusion and cross-encoder reranking now.'
+  if (result.match_signals.includes('entity')) {
+    const pct = Math.round(result.fused_score * 100)
+    return { label: `Entity Match (${pct}%)`, bg: 'bg-[#d9edf7]', text: 'text-[#22a5f1]' }
   }
+  return { label: 'Keyword Match (BM25)', bg: 'bg-[#f3f6f8]', text: 'text-[#666]' }
+}
 
-  if (loading) {
-    return 'Searching lexical, exact-term, semantic, and reranking stages.'
-  }
+function accentColor(result: SearchResultItem): string {
+  if (result.match_signals.includes('vector')) return 'bg-[#5cb85c]'
+  if (result.match_signals.includes('entity')) return 'bg-[#22a5f1]'
+  return 'bg-[#e1e8ed]'
+}
 
-  if (streamPhase === 'reranked' && semanticEnabled === false) {
-    return 'Final results were produced without semantic vectors because the embedding service was unavailable.'
-  }
-
-  if (streamPhase === 'reranked' && rerankApplied === false) {
-    return 'Results reflect lexical, exact-term, and semantic fusion. Reranking was unavailable, so fused order was preserved.'
-  }
-
-  if (streamPhase === 'reranked') {
-    return 'Final results combine lexical, exact-term, semantic, and reranking signals.'
-  }
-
-  return null
+function provenanceLabel(result: SearchResultItem): string {
+  if (result.match_signals.includes('vector')) return 'qwen3_embedder'
+  if (result.match_signals.includes('entity')) return 'gliner'
+  return 'ParadeDB'
 }
 
 export function SearchResults({
@@ -83,7 +62,6 @@ export function SearchResults({
   query,
   scopeSummary,
   projectScope,
-  searchMode,
   onProjectSelect,
   loading,
   streamPhase,
@@ -91,434 +69,228 @@ export function SearchResults({
   rerankApplied,
   entityFacets,
 }: SearchResultsProps) {
-  const [signalFacet, setSignalFacet] = useState<string | null>(null)
-  const [termFacet, setTermFacet] = useState<string | null>(null)
   const [entityFacet, setEntityFacet] = useState<string | null>(null)
+  const { setContent } = useContextPanel()
 
   useEffect(() => {
-    setSignalFacet(null)
-    setTermFacet(null)
     setEntityFacet(null)
-  }, [query, projectScope, searchMode])
+  }, [query, projectScope])
 
-  const modeFilteredResults = useMemo(() => results, [results])
-
-  const projectFacets = buildCountFacets(modeFilteredResults.map((result) => result.project_slug)).map(
-    ({ value, count }) => ({
-      value,
-      count,
-    }),
-  )
-  const signalFacets = buildCountFacets(modeFilteredResults.flatMap((result) => result.match_signals))
-  const termFacets = buildCountFacets(modeFilteredResults.flatMap((result) => result.matched_terms)).slice(0, 10)
-  const typeFacets = buildCountFacets(modeFilteredResults.map((result) => result.document_type))
-  const phaseDescription = describePhase(
-    loading,
-    streamPhase,
-    semanticEnabled,
-    rerankApplied,
-    answer,
+  const typeFacets = useMemo(
+    () => buildCountFacets(results.map((r) => r.document_type)),
+    [results],
   )
 
-  const filteredResults = modeFilteredResults.filter((result) => {
-    if (signalFacet && !result.match_signals.includes(signalFacet)) {
-      return false
-    }
-    if (termFacet && !result.matched_terms.includes(termFacet)) {
-      return false
-    }
-    if (
-      entityFacet &&
-      !result.entities.some((entity) => entity.canonical_name === entityFacet)
-    ) {
-      return false
-    }
-    return true
-  })
+  const filteredResults = useMemo(() => {
+    if (!entityFacet) return results
+    return results.filter((result) =>
+      result.entities.some((e) => e.canonical_name === entityFacet),
+    )
+  }, [results, entityFacet])
 
-  if (modeFilteredResults.length === 0) {
+  useEffect(() => {
+    setContent(
+      <div className="flex flex-col gap-[10px] p-[16px]">
+        <span className="text-[11px] font-semibold text-[#666]">CONTEXT: SEARCH</span>
+        <div className="h-px w-full bg-[#e1e8ed]" />
+
+        <span className="text-[11px] font-semibold text-[#666]">FILTERS</span>
+        <div className="flex items-start justify-between text-[10px]">
+          <span className="text-[#666]">Scope</span>
+          <span className="font-medium text-[#22a5f1]">{projectScope ?? 'All'}</span>
+        </div>
+        <div className="flex items-start justify-between text-[10px]">
+          <span className="text-[#666]">Time</span>
+          <span className="font-medium text-[#22a5f1]">All</span>
+        </div>
+        <div className="flex items-start justify-between text-[10px]">
+          <span className="text-[#666]">Doc Type</span>
+          <span className="font-medium text-[#22a5f1]">Any</span>
+        </div>
+        <div className="flex items-start justify-between text-[10px]">
+          <span className="text-[#666]">Status</span>
+          <span className="font-medium text-[#22a5f1]">Any</span>
+        </div>
+        <div className="h-px w-full bg-[#e1e8ed]" />
+
+        <span className="text-[11px] font-semibold text-[#666]">INTELLIGENCE FACETS</span>
+        {typeFacets.map((facet) => (
+          <div key={facet.value} className="flex items-center gap-[8px]">
+            <div className="size-[12px] rounded-[2px] border border-[#e1e8ed]" />
+            <span className="text-[10px] text-[#333]">
+              {facet.value.charAt(0).toUpperCase() + facet.value.slice(1).replace('_', ' ')}s (
+              {facet.count})
+            </span>
+          </div>
+        ))}
+        {entityFacets.length > 0 && <div className="h-px w-full bg-[#e1e8ed]" />}
+        {entityFacets.map((facet) => (
+          <div
+            key={`${facet.entity_type}:${facet.canonical_name}`}
+            className="flex items-center gap-[8px]"
+          >
+            <button
+              type="button"
+              onClick={() =>
+                setEntityFacet((cur) =>
+                  cur === facet.canonical_name ? null : facet.canonical_name,
+                )
+              }
+              className={`size-[12px] rounded-[2px] border ${
+                entityFacet === facet.canonical_name
+                  ? 'border-[#22a5f1] bg-[#22a5f1]'
+                  : 'border-[#e1e8ed]'
+              }`}
+            />
+            <span className="text-[10px] text-[#333]">
+              {facet.entity_type}: &lsquo;{facet.canonical_name}&rsquo; ({facet.count})
+            </span>
+          </div>
+        ))}
+        <div className="h-px w-full bg-[#e1e8ed]" />
+
+        <span className="text-[11px] font-semibold text-[#666]">SEARCH OBSERVABILITY</span>
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-[6px]">
+            <div
+              className={`size-[8px] rounded-full ${rerankApplied !== false ? 'bg-[#5cb85c]' : 'bg-[#999]'}`}
+            />
+            <span className="text-[10px] text-[#666]">Reranker</span>
+          </div>
+          <span className="text-[10px] font-medium text-[#22a5f1]">
+            {rerankApplied !== false ? 'Qwen3-0.6B' : 'Unavailable'}
+          </span>
+        </div>
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-[6px]">
+            <div className="size-[8px] rounded-full bg-[#5cb85c]" />
+            <span className="text-[10px] text-[#666]">Latency</span>
+          </div>
+          <span className="text-[10px] font-medium text-[#333]">
+            {latencyMs != null ? `${latencyMs}ms` : '\u2014'}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="rounded-[4px] border border-[#e1e8ed] bg-white px-[10px] py-[5px] text-[9px] font-semibold text-[#333]"
+        >
+          GOLD QUERIES: RUN EVAL
+        </button>
+      </div>,
+    )
+    return () => setContent(null)
+  }, [setContent, projectScope, typeFacets, entityFacets, entityFacet, latencyMs, rerankApplied])
+
+  if (results.length === 0) {
     return (
-      <div className="rounded border border-dashed border-border bg-white px-6 py-10 text-center text-sm text-muted-foreground">
-        No results found for "{query}" within {scopeSummary}.
+      <div className="rounded-[4px] border border-[#e1e8ed] bg-white px-[20px] py-[14px] text-[11px] text-[#666]">
+        No results found for &ldquo;{query}&rdquo; within {scopeSummary}.
       </div>
     )
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <aside className="space-y-4">
-        {answer && (answer.answer || answer.error) && (
-          <Card className="border-l-4 border-l-destructive bg-white">
-            <CardHeader>
-              <CardTitle className="text-base">
-                {answer.error ? 'Grounded answer unavailable' : 'AI Synthesis'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              {answer.error ? (
-                <div className="rounded border border-border bg-background px-3 py-3 text-muted-foreground">
-                  {answer.error}
-                </div>
-              ) : (
-                <>
-                  <div className="whitespace-pre-wrap leading-7">{answer.answer}</div>
-                  {answer.citations.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        Citations
-                      </div>
-                      <div className="space-y-2">
-                        {answer.citations.map((citation) => (
-                          <Link
-                            key={`${citation.index}:${citation.source_ref.chunk_id}`}
-                            to="/projects/$slug/docs/$"
-                            params={{
-                              slug: citation.source_ref.project_slug,
-                              _splat: citation.source_ref.canonical_path,
-                            }}
-                            search={{
-                              query: query,
-                              sourceQueryLabel: 'Answer',
-                              sourceSnippet: citation.human_readable,
-                              sourceVersion: citation.source_ref.version_number,
-                              sourceStart: citation.source_ref.line_start,
-                              sourceEnd: citation.source_ref.line_end,
-                              sourceChunkId: citation.source_ref.chunk_id,
-                            }}
-                            className="block rounded border border-border bg-background px-3 py-2 text-primary transition-colors hover:bg-muted"
-                          >
-                            [{citation.index}] {citation.human_readable}
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {answer.model && (
-                    <div className="text-xs text-muted-foreground">Model: {answer.model}</div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        )}
-        <Card className="bg-white">
-          <CardHeader>
-            <CardTitle className="text-base">Facets</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {!projectScope && projectFacets.length > 1 && (
-              <div className="space-y-2">
-                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Projects
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {projectFacets.map((facet) => (
-                    <Button
-                      key={facet.value}
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => onProjectSelect(facet.value)}
-                    >
-                      {facet.value} ({facet.count})
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
+    <div className="flex flex-col gap-[14px]">
+      <div className="flex items-center justify-between">
+        <h1 className="text-[18px] font-semibold text-[#1b2431]">
+          Search: &ldquo;{query}&rdquo;
+        </h1>
+        <span className="whitespace-pre text-[10px] text-[#666]">
+          Showing Top {results.length} Chunks {'  |  '}
+          {filteredResults.length > 0
+            ? `1 \u2013 ${filteredResults.length} of ${results.length}`
+            : `0 of ${results.length}`}
+        </span>
+      </div>
 
-            {typeFacets.length > 1 && (
-              <div className="space-y-2">
-                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Doc types
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {typeFacets.map((facet) => (
-                    <Badge key={facet.value} variant="outline">
-                      {facet.value} ({facet.count})
-                    </Badge>
-                  ))}
-                </div>
-              </div>
+      {answer && (answer.answer || answer.error) && (
+        <div className="flex h-[100px] items-start overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white">
+          <div className="h-full w-[4px] shrink-0 bg-[#d9534f]" />
+          <div className="flex min-w-0 flex-1 flex-col gap-[8px] px-[16px] py-[14px]">
+            <span className="text-[9px] font-semibold text-[#666]">AI SYNTHESIS</span>
+            {answer.error ? (
+              <p className="line-clamp-2 text-[12px] text-[#666]">{answer.error}</p>
+            ) : (
+              <p className="line-clamp-2 text-[12px] text-[#333]">{answer.answer}</p>
             )}
-
-            {signalFacets.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Signals
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {signalFacets.map((facet) => (
-                    <Button
-                      key={facet.value}
-                      type="button"
-                      variant={signalFacet === facet.value ? 'secondary' : 'outline'}
-                      size="xs"
-                      onClick={() => setSignalFacet(signalFacet === facet.value ? null : facet.value)}
-                    >
-                      {facet.value} ({facet.count})
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {termFacets.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Exact terms
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {termFacets.map((facet) => (
-                    <Button
-                      key={facet.value}
-                      type="button"
-                      variant={termFacet === facet.value ? 'secondary' : 'outline'}
-                      size="xs"
-                      onClick={() => setTermFacet(termFacet === facet.value ? null : facet.value)}
-                    >
-                      {facet.value}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {entityFacets.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                  Entities
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {entityFacets.map((facet) => (
-                    <Button
-                      key={`${facet.entity_type}:${facet.canonical_name}`}
-                      type="button"
-                      variant={entityFacet === facet.canonical_name ? 'secondary' : 'outline'}
-                      size="xs"
-                      onClick={() =>
-                        setEntityFacet(
-                          entityFacet === facet.canonical_name ? null : facet.canonical_name,
-                        )
-                      }
-                    >
-                      {facet.canonical_name} ({facet.count})
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(projectScope || signalFacet || termFacet || entityFacet) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={() => {
-                  if (projectScope) {
-                    onProjectSelect('')
-                  }
-                  setSignalFacet(null)
-                  setTermFacet(null)
-                  setEntityFacet(null)
-                }}
-              >
-                Clear facets
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      </aside>
-
-      <div className="space-y-4">
-        <div className="rounded border border-border bg-white p-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-1">
-              <div className="text-sm font-medium text-foreground">
-                {filteredResults.length} visible result{filteredResults.length === 1 ? '' : 's'} for "{query}"
-                {filteredResults.length !== modeFilteredResults.length ? ` (${modeFilteredResults.length} total)` : ''}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {loading ? 'Searching' : 'Across'} {scopeSummary}
-                {latencyMs != null ? ` in ${latencyMs}ms` : ''}
-              </div>
-            </div>
-            {phaseDescription && (
-              <div className="rounded border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-                {phaseDescription}
+            {!answer.error && answer.citations.length > 0 && (
+              <div className="flex items-start gap-[6px] text-[10px]">
+                <span className="text-[#666]">Citations:</span>
+                {answer.citations.map((citation) => (
+                  <Link
+                    key={`${citation.index}:${citation.source_ref.chunk_id}`}
+                    to="/projects/$slug/docs/$"
+                    params={{
+                      slug: citation.source_ref.project_slug,
+                      _splat: citation.source_ref.canonical_path,
+                    }}
+                    className="font-medium text-[#22a5f1] hover:underline"
+                  >
+                    [{citation.human_readable}]
+                  </Link>
+                ))}
               </div>
             )}
           </div>
         </div>
+      )}
 
-        {filteredResults.map((result) => {
-          const accentClass = result.match_signals.includes('vector')
-            ? 'border-l-4 border-l-green-500'
-            : result.match_signals.includes('entity')
-              ? 'border-l-4 border-l-primary'
-              : 'border-l-4 border-l-gray-400'
+      {loading && streamPhase === 'idle' && (
+        <div className="rounded-[4px] border border-[#e1e8ed] bg-white px-[20px] py-[14px] text-[11px] text-[#666]">
+          Searching&hellip;
+        </div>
+      )}
 
-          return (
-            <Card key={result.chunk_id || `${result.project_slug}:${result.document_path}:${result.version_number}`} className={`border border-border bg-white ${accentClass}`}>
-              <CardHeader>
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className="truncate">{result.document_title}</CardTitle>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {result.project_slug} / {result.document_path}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <Badge variant="outline">{result.document_type}</Badge>
-                    <Badge variant="outline">v{result.version_number}</Badge>
-                    {(result.line_start > 0 || result.line_end > 0) && (
-                      <Badge variant="outline">
-                        lines {result.line_start}-{result.line_end}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {result.match_signals.map((signal) => {
-                    const signalColor = signal === 'vector'
-                      ? 'bg-green-100 text-green-800'
-                      : signal === 'entity'
-                        ? 'bg-primary/10 text-primary'
-                        : 'bg-muted text-muted-foreground'
-                    return (
-                      <span key={signal} className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${signalColor}`}>
-                        {signal}
-                      </span>
-                    )
-                  })}
-                  {result.heading_path && (
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {result.heading_path}
-                    </span>
-                  )}
-                </div>
+      {filteredResults.map((result, index) => {
+        const badge = rankBadge(result)
+        const accent = accentColor(result)
+        const prov = provenanceLabel(result)
 
-                <p className="text-sm leading-6 text-foreground">{result.snippet}</p>
-
-                {result.matched_terms.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {result.matched_terms.map((term) => (
-                      <Badge key={term} variant="secondary" className="text-xs">
-                        {term}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-
-                {result.entities.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {result.entities.map((entity) => (
-                      <Badge
-                        key={`${entity.entity_type}:${entity.canonical_name}`}
-                        variant="outline"
-                        className="text-xs"
-                      >
-                        {entity.canonical_name}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <Link
-                    to="/projects/$slug/docs/$"
-                    params={{ slug: result.project_slug, _splat: result.document_path }}
-                    search={{
-                      sourceQuery: query,
-                      sourceSnippet: result.snippet,
-                      sourceHeading: result.heading_path,
-                      sourceSignals: result.match_signals.join(','),
-                    }}
-                    className="inline-flex h-8 items-center rounded border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
-                  >
-                    Open source
-                  </Link>
-
-                  <details className="text-sm">
-                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                      Why this result?
-                    </summary>
-                    <div className="mt-3 rounded border border-border bg-background p-4">
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                            Matched signals
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {result.match_signals.map((signal) => (
-                              <Badge key={signal} variant="secondary">
-                                {signal}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                            Exact terms
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {result.matched_terms.length > 0 ? (
-                              result.matched_terms.map((term) => (
-                                <Badge key={term} variant="outline">
-                                  {term}
-                                </Badge>
-                              ))
-                            ) : (
-                              <span className="text-sm text-muted-foreground">No exact-term matches surfaced.</span>
-                            )}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                            Entities
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {result.entities.length > 0 ? (
-                              result.entities.map((entity) => (
-                                <Badge
-                                  key={`${entity.entity_type}:${entity.canonical_name}`}
-                                  variant="outline"
-                                >
-                                  {entity.canonical_name}
-                                </Badge>
-                              ))
-                            ) : (
-                              <span className="text-sm text-muted-foreground">
-                                No entities surfaced from this chunk.
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-4 grid gap-3 md:grid-cols-3">
-                        <div className="rounded border border-border bg-white px-3 py-2 text-xs">
-                          <div className="text-muted-foreground">Heading path</div>
-                          <div className="mt-1">{result.heading_path || 'Top-level chunk'}</div>
-                        </div>
-                        <div className="rounded border border-border bg-white px-3 py-2 text-xs">
-                          <div className="text-muted-foreground">Document status</div>
-                          <div className="mt-1">{result.document_status}</div>
-                        </div>
-                        <div className="rounded border border-border bg-white px-3 py-2 text-xs">
-                          <div className="text-muted-foreground">Fused score</div>
-                          <div className="mt-1">{result.fused_score.toFixed(4)}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </details>
-                </div>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
+        return (
+          <div
+            key={
+              result.chunk_id ||
+              `${result.project_slug}:${result.document_path}:${result.version_number}`
+            }
+            className="flex h-[100px] items-start overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white"
+          >
+            <div className={`h-[80px] w-[4px] shrink-0 ${accent}`} />
+            <div className="flex min-w-0 flex-1 flex-col gap-[4px] px-[16px] py-[12px]">
+              <div className="flex items-center gap-[8px] text-[12px] font-semibold">
+                <span className="text-[#333]">{index + 1}.</span>
+                <Link
+                  to="/projects/$slug/docs/$"
+                  params={{ slug: result.project_slug, _splat: result.document_path }}
+                  search={{
+                    sourceQuery: query,
+                    sourceSnippet: result.snippet,
+                    sourceHeading: result.heading_path,
+                    sourceSignals: result.match_signals.join(','),
+                  }}
+                  className="truncate text-[#22a5f1] hover:underline"
+                >
+                  {result.document_title}
+                </Link>
+              </div>
+              {result.heading_path && (
+                <p className="text-[10px] text-[#666]">
+                  {'\u25b8'} {result.heading_path}
+                </p>
+              )}
+              <div className="flex items-start gap-[8px]">
+                <span className="text-[10px] text-[#666]">Rank:</span>
+                <span
+                  className={`rounded-[3px] px-[8px] py-[3px] text-[9px] font-semibold ${badge.bg} ${badge.text}`}
+                >
+                  {badge.label}
+                </span>
+                <span className="text-[10px] text-[#666]">Provenance:</span>
+                <span className="text-[10px] font-medium text-[#22a5f1]">{prov}</span>
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

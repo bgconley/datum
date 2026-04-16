@@ -393,19 +393,23 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
 
   const scopeSummary = describeScope(draft, projects)
 
+  const hasResults = searched && !error
+
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-      <div className="rounded border border-border bg-white p-8 shadow-sm">
-        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Search workspace
+    <div className={hasResults ? 'flex flex-col gap-[14px] px-[24px] py-[20px]' : 'mx-auto flex max-w-5xl flex-col gap-6 p-8'}>
+      {!hasResults && (
+        <div className="rounded border border-border bg-white p-8 shadow-sm">
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Search workspace
+          </div>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Search</h1>
+          <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground">
+            Streaming retrieval across indexed documents: lexical hits land first, then exact-term
+            and semantic signals are fused and reranked. Search state lives in the routed URL so
+            scoped queries remain durable and shareable.
+          </p>
         </div>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">Search</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground">
-          Streaming retrieval across indexed documents: lexical hits land first, then exact-term
-          and semantic signals are fused and reranked. Search state lives in the routed URL so
-          scoped queries remain durable and shareable.
-        </p>
-      </div>
+      )}
 
       <SearchBar
         value={draft}
@@ -416,7 +420,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         onReset={handleReset}
       />
 
-      {draft.project && (
+      {!hasResults && draft.project && (
         <div className="rounded border border-border bg-white p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
