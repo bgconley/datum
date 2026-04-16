@@ -395,8 +395,8 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-      <div className="rounded-[2rem] border border-border/80 bg-card/80 p-8 shadow-sm">
-        <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+      <div className="rounded border border-border bg-white p-8 shadow-sm">
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           Search workspace
         </div>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">Search</h1>
@@ -417,10 +417,10 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       />
 
       {draft.project && (
-        <div className="rounded-[1.5rem] border border-border/80 bg-card/70 p-5">
+        <div className="rounded border border-border bg-white p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                 Saved searches
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -438,7 +438,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
               savedSearches.map((savedSearch) => (
                 <div
                   key={savedSearch.id}
-                  className="flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-2 text-sm"
+                  className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-sm"
                 >
                   <button
                     type="button"
@@ -462,7 +462,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       )}
 
       {!searched && (
-        <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-10 text-sm text-muted-foreground">
+        <div className="rounded border border-dashed border-border bg-white px-6 py-10 text-sm text-muted-foreground">
           Press <kbd className="rounded border px-1 py-0.5 text-xs">/</kbd> anywhere in the app
           to jump here, then search by heading text, exact identifiers, env vars like
           <span className="mx-1 font-mono text-foreground">DATABASE_URL</span>, or routes like
@@ -471,7 +471,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
       )}
 
       {error && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}

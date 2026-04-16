@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import settings
 from datum.db import get_session
+from datum.schemas.dashboard import HookEventCreate, HookEventResponse
 from datum.schemas.lifecycle import (
     DeltaRequest,
     DeltaResponse,
@@ -17,6 +18,7 @@ from datum.schemas.lifecycle import (
     SessionStartResponse,
     SessionStatusResponse,
 )
+from datum.models.lifecycle import HookEvent
 from datum.services.delta_aggregator import flush_deltas, get_unflushed_deltas, record_delta
 from datum.services.preflight import record_preflight
 from datum.services.session_state import finalize_session, get_session_by_session_id, start_session
@@ -156,4 +158,33 @@ async def finalize_agent_session(
         session_id=finalized.session_id,
         status=finalized.status,
         ended_at=finalized.ended_at,
+    )
+
+
+@router.post(
+    "/{session_id}/hook-event",
+    response_model=HookEventResponse,
+    status_code=201,
+)
+async def create_hook_event(
+    session_id: str,
+    body: HookEventCreate,
+    db: AsyncSession = Depends(get_session),
+):
+    row = await get_session_by_session_id(session_id, db)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    event = HookEvent(
+        agent_session_id=row.id,
+        hook_type=body.hook_type,
+        detail=body.detail,
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return HookEventResponse(
+        id=event.id,
+        hook_type=event.hook_type,
+        detail=event.detail,
+        created_at=event.created_at,
     )

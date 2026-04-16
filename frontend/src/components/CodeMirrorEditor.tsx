@@ -6,7 +6,7 @@ import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
 import { sql } from '@codemirror/lang-sql'
 import { yaml } from '@codemirror/lang-yaml'
-import { oneDark } from '@codemirror/theme-one-dark'
+import { githubLight } from '@uiw/codemirror-theme-github'
 import type { Extension } from '@codemirror/state'
 
 type EditorLanguage =
@@ -64,7 +64,7 @@ export function CodeMirrorEditor({
       value={value}
       height="100%"
       minHeight="28rem"
-      theme={oneDark}
+      theme={githubLight}
       readOnly={readOnly}
       editable={!readOnly}
       className={className}

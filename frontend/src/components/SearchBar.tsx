@@ -62,7 +62,7 @@ export function SearchBar({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-[2rem] border border-border/80 bg-card/70 p-5 shadow-sm">
+    <form onSubmit={handleSubmit} className="rounded border border-border bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap gap-2">
           {SEARCH_MODES.map((mode) => (

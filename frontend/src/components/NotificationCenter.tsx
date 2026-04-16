@@ -37,9 +37,12 @@ export function NotificationCenter() {
       {messages.map((message) => (
         <div
           key={message.id}
-          className="rounded-2xl border border-border/80 bg-card/95 px-4 py-3 text-sm text-foreground shadow-lg backdrop-blur"
+          className="rounded-sm border border-border bg-white px-4 py-3 text-sm text-foreground shadow-lg"
         >
-          {message.message}
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 h-full w-0.5 shrink-0 self-stretch rounded-full bg-primary" />
+            <span>{message.message}</span>
+          </div>
         </div>
       ))}
     </div>

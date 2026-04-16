@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { X } from 'lucide-react'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
 import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
@@ -24,6 +25,8 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   const [title, setTitle] = useState('')
   const [templateId, setTemplateId] = useState('adr')
   const [folder, setFolder] = useState('docs/decisions')
+  const [tagInput, setTagInput] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const navigate = useNavigate()
   const templatesQuery = useQuery({
@@ -59,11 +62,36 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
     () => templates.find((item) => item.name === templateId) ?? templates[0] ?? null,
     [templateId, templates],
   )
-  const filename = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '') + '.md'
+  const filename =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') + '.md'
   const relativePath = `${folder.replace(/\/$/, '')}/${filename}`.replace(/^\/+/, '')
+
+  const close = () => {
+    setOpen(false)
+    setTitle('')
+    setTagInput('')
+    setTags([])
+  }
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
+      e.preventDefault()
+      const value = tagInput.trim().replace(/,$/g, '')
+      if (value && !tags.includes(value)) {
+        setTags((prev) => [...prev, value])
+      }
+      setTagInput('')
+    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      setTags((prev) => prev.slice(0, -1))
+    }
+  }
+
+  const removeTag = (tag: string) => {
+    setTags((prev) => prev.filter((t) => t !== tag))
+  }
 
   const handleSubmit = async () => {
     if (!template) {
@@ -78,8 +106,7 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
         doc_type: rendered.doc_type,
         content: rendered.content,
       })
-      setOpen(false)
-      setTitle('')
+      close()
       onCreated()
       navigate({
         to: '/projects/$slug/docs/$',
@@ -101,56 +128,135 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-border/80 bg-card/80 p-4">
-      <label className="space-y-1 text-sm">
-        <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Template
-        </span>
-        <select
-          value={templateId}
-          onChange={(event) => setTemplateId(event.target.value)}
-          className="w-full rounded-lg border border-input bg-background px-2 py-2 text-sm outline-none"
+    <>
+      {/* Trigger button stays in the sidebar */}
+      <Button size="sm" variant="outline" className="w-full" onClick={() => setOpen(true)}>
+        + New Document
+      </Button>
+
+      {/* Modal overlay rendered via portal-like fixed positioning */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={close}>
+        <div
+          className="w-full max-w-lg rounded bg-white shadow-lg"
+          onClick={(e) => e.stopPropagation()}
         >
-          {templates.map((item) => (
-            <option key={item.name} value={item.name}>
-              {item.title}
-            </option>
-          ))}
-        </select>
-      </label>
+          {/* Header */}
+          <div className="flex items-center justify-between rounded-t bg-primary px-6 py-3">
+            <span className="text-sm font-semibold text-white">Create Document</span>
+            <button type="button" onClick={close} className="text-white/80 hover:text-white">
+              <X className="size-4" />
+            </button>
+          </div>
 
-      <Input
-        placeholder="Document title"
-        value={title}
-        onChange={(event) => setTitle(event.target.value)}
-      />
+          {/* Body */}
+          <div className="space-y-5 p-6">
+            {/* Template selector */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Template
+              </label>
+              <select
+                value={templateId}
+                onChange={(event) => setTemplateId(event.target.value)}
+                className="w-full rounded border border-border bg-white px-3 py-2 text-sm outline-none"
+              >
+                {templates.map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+              {/* Template chip grid */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {templates.map((item) => (
+                  <Badge
+                    key={item.name}
+                    variant={item.name === templateId ? 'default' : 'secondary'}
+                    className="cursor-pointer text-xs"
+                    onClick={() => setTemplateId(item.name)}
+                  >
+                    {item.title}
+                  </Badge>
+                ))}
+              </div>
+            </div>
 
-      <label className="space-y-1 text-sm">
-        <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Folder path
-        </span>
-        <Input
-          placeholder="Folder path"
-          value={folder}
-          onChange={(event) => setFolder(event.target.value)}
-          className="text-xs font-mono"
-        />
-      </label>
+            {/* Title */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Title
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Document title"
+                className="w-full rounded border border-border bg-white px-3 py-2 text-sm"
+              />
+            </div>
 
-      <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-        <div className="font-medium text-foreground">{template?.title ?? 'Template'}</div>
-        <div className="mt-1 font-mono">{relativePath}</div>
-        {template && <div className="mt-1">{template.description}</div>}
+            {/* Folder path */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Folder path
+              </label>
+              <input
+                type="text"
+                value={folder}
+                onChange={(event) => setFolder(event.target.value)}
+                placeholder="docs/decisions/"
+                className="w-full rounded border border-border bg-white px-3 py-2 font-mono text-sm"
+              />
+            </div>
+
+            {/* Tags */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Tags
+              </label>
+              <div className="flex flex-wrap items-center gap-1.5 rounded border border-border bg-white px-3 py-2">
+                {tags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="gap-1 text-xs">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      className="ml-0.5 hover:text-destructive"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </Badge>
+                ))}
+                <input
+                  type="text"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={handleTagKeyDown}
+                  placeholder={tags.length === 0 ? 'Add tags...' : ''}
+                  className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Preview path */}
+            <div className="rounded border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground">{template?.title ?? 'Template'}</div>
+              <div className="mt-1 font-mono">{relativePath}</div>
+              {template && <div className="mt-1">{template.description}</div>}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
+            <Button variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} disabled={!title || saving || !template}>
+              {saving ? 'Creating...' : 'Create & Edit'}
+            </Button>
+          </div>
+        </div>
       </div>
-
-      <div className="flex gap-2">
-        <Button size="sm" onClick={handleSubmit} disabled={!title || saving || !template}>
-          {saving ? 'Creating…' : 'Create'}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
-          Cancel
-        </Button>
-      </div>
-    </div>
+    </>
   )
 }

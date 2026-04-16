@@ -41,6 +41,11 @@ const EntityExplorer = lazy(() =>
     default: module.EntityExplorer,
   })),
 )
+const SessionsView = lazy(() =>
+  import('@/components/SessionsView').then((module) => ({
+    default: module.SessionsView,
+  })),
+)
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,8 +69,8 @@ function RootComponent() {
 function HomeRouteComponent() {
   return (
     <div className="flex h-full items-center justify-center p-8">
-      <div className="max-w-2xl rounded-[2rem] border border-border/80 bg-card/70 p-10 shadow-sm">
-        <div className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+      <div className="max-w-2xl rounded border border-border bg-white p-10 shadow-sm">
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           Current build
         </div>
         <h1 className="mt-3 text-4xl font-semibold tracking-tight">
@@ -73,9 +78,9 @@ function HomeRouteComponent() {
         </h1>
         <p className="mt-4 max-w-xl text-sm leading-7 text-muted-foreground">
           Open a project from the cabinet, jump straight to search with
-          <kbd className="mx-1 rounded border px-1.5 py-0.5 text-[11px]">/</kbd>
+          <kbd className="mx-1 rounded border border-border bg-muted px-1.5 py-0.5 text-[11px]">/</kbd>
           , or use
-          <kbd className="mx-1 rounded border px-1.5 py-0.5 text-[11px]">Ctrl+K</kbd>
+          <kbd className="mx-1 rounded border border-border bg-muted px-1.5 py-0.5 text-[11px]">Ctrl+K</kbd>
           to navigate documents, dashboards, and search from anywhere.
         </p>
       </div>
@@ -188,6 +193,15 @@ function EntityDetailRouteComponent() {
   return (
     <Suspense fallback={<div className="p-8 text-muted-foreground">Loading entity…</div>}>
       <EntityExplorer projectSlug={slug} entityId={entityId} />
+    </Suspense>
+  )
+}
+
+function SessionsRouteComponent() {
+  const { slug } = sessionsRoute.useParams()
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading sessions…</div>}>
+      <SessionsView projectSlug={slug} />
     </Suspense>
   )
 }
@@ -334,6 +348,12 @@ const entityDetailRoute = createRoute({
   component: EntityDetailRouteComponent,
 })
 
+const sessionsRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'sessions',
+  component: SessionsRouteComponent,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   searchRoute,
@@ -341,6 +361,7 @@ const routeTree = rootRoute.addChildren([
     projectIndexRoute,
     inboxRoute,
     reviewAliasRoute,
+    sessionsRoute,
     entitiesRoute.addChildren([entityDetailRoute]),
     projectDocsRoute.addChildren([
       documentRoute,

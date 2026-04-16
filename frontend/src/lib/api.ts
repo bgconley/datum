@@ -338,6 +338,78 @@ export interface VersionInfo {
   indexing_status?: string
 }
 
+// Dashboard types
+export interface HealthSubsystem {
+  name: string
+  healthy: boolean
+  latency_ms: number | null
+  error: string | null
+}
+
+export interface HealthResponse {
+  subsystems: HealthSubsystem[]
+  healthy: boolean
+  checked_at: string
+}
+
+export interface IngestionStats {
+  queued: number
+  processing: number
+  completed: number
+  failed: number
+  total: number
+}
+
+export interface AgentActivityStats {
+  sessions_active: number
+  sessions_total: number
+  hook_event_counts: Record<string, number>
+  mcp_op_counts: Record<string, number>
+}
+
+export interface ActivityEvent {
+  id: string
+  actor_type: string
+  operation: string
+  target_path: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface SessionSummary {
+  id: string
+  session_id: string
+  client_type: string
+  status: string
+  enforcement_mode: string
+  is_dirty: boolean
+  delta_count: number
+  started_at: string
+  ended_at: string | null
+}
+
+export interface HookEventItem {
+  id: string
+  hook_type: string
+  detail: Record<string, unknown>
+  created_at: string
+}
+
+export interface SessionDeltaItem {
+  id: string
+  delta_type: string
+  detail: Record<string, unknown>
+  summary_text: string | null
+  flushed: boolean
+  created_at: string
+}
+
+export interface SessionDetail extends SessionSummary {
+  deltas: SessionDeltaItem[]
+  hook_events: HookEventItem[]
+  audit_events: ActivityEvent[]
+}
+
 export interface VersionContent {
   version_number: number
   content: string
@@ -715,6 +787,37 @@ export const api = {
         `${API_BASE}/projects/${slug}/collections/${id}/members/${encodeURIComponent(documentUid)}`,
         { method: 'DELETE' },
       ),
+  },
+  dashboard: {
+    health: () => fetchJSON<HealthResponse>(`${API_BASE}/dashboard/health`),
+    ingestion: (slug: string) =>
+      fetchJSON<IngestionStats>(`${API_BASE}/projects/${slug}/dashboard/ingestion`),
+    agentActivity: (slug: string, hours = 24) =>
+      fetchJSON<AgentActivityStats>(`${API_BASE}/projects/${slug}/dashboard/agent-activity?hours=${hours}`),
+    activity: (slug: string, limit = 20) =>
+      fetchJSON<ActivityEvent[]>(`${API_BASE}/projects/${slug}/dashboard/activity?limit=${limit}`),
+    sessions: (slug: string, hours = 24, limit = 50) =>
+      fetchJSON<SessionSummary[]>(`${API_BASE}/projects/${slug}/dashboard/sessions?hours=${hours}&limit=${limit}`),
+    sessionDetail: (slug: string, sessionId: string) =>
+      fetchJSON<SessionDetail>(`${API_BASE}/projects/${slug}/dashboard/sessions/${sessionId}`),
+  },
+  ingest: {
+    upload: async (projectSlug: string, file: File, folder: string, docType?: string, tags?: string) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('folder', folder)
+      if (docType) formData.append('doc_type', docType)
+      if (tags) formData.append('tags', tags)
+      const response = await fetch(`${API_BASE}/projects/${projectSlug}/docs/ingest`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!response.ok) {
+        const body = await response.text()
+        throw new Error(`${response.status}: ${body}`)
+      }
+      return response.json() as Promise<DocumentMeta>
+    },
   },
   annotations: {
     list: (versionId: string) =>

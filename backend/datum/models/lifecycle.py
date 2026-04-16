@@ -35,6 +35,10 @@ class AgentSession(Base):
         back_populates="session",
         cascade="all, delete-orphan",
     )
+    hook_events: Mapped[list[HookEvent]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
 
 
 class SessionDelta(Base):
@@ -54,3 +58,20 @@ class SessionDelta(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     session: Mapped[AgentSession] = relationship(back_populates="deltas")
+
+
+class HookEvent(Base):
+    __tablename__ = "hook_events"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    agent_session_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    hook_type: Mapped[str] = mapped_column(String, nullable=False)
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    session: Mapped[AgentSession] = relationship(back_populates="hook_events")

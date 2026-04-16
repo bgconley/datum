@@ -462,13 +462,13 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
-      <div className="rounded-[2rem] border border-border/80 bg-card/80 p-8 shadow-sm">
+      <div className="rounded border border-border bg-white p-8 shadow-sm">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
-            <nav className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
               {breadcrumbs.map((crumb, index) => (
-                <div key={`${crumb.label}:${crumb.path ?? 'project'}`} className="flex items-center gap-2">
-                  {index > 0 && <ChevronRight className="size-3 text-muted-foreground/60" />}
+                <div key={`${crumb.label}:${crumb.path ?? 'project'}`} className="flex items-center gap-1">
+                  {index > 0 && <span className="text-muted-foreground">/</span>}
                   <Link
                     to={index === 0 ? '/projects/$slug' : '/projects/$slug/docs/$'}
                     params={
@@ -476,7 +476,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
                         ? { slug: projectSlug }
                         : { slug: projectSlug, _splat: crumb.path ?? metadata.relative_path }
                     }
-                    className="truncate rounded-full px-2 py-0.5 transition-colors hover:bg-accent"
+                    className="truncate px-1 py-0.5 transition-colors hover:text-foreground"
                   >
                     {crumb.label}
                   </Link>
@@ -487,10 +487,14 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
             <h1 className="mt-4 text-3xl font-semibold tracking-tight">{metadata.title}</h1>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Badge variant="secondary">{metadata.doc_type}</Badge>
-              <Badge variant="outline">{metadata.status}</Badge>
+              {metadata.status === 'approved' ? (
+                <Badge className="border-green-200 bg-green-50 text-green-700">{metadata.status}</Badge>
+              ) : (
+                <Badge variant="outline">{metadata.status}</Badge>
+              )}
               <Badge variant="outline">v{metadata.version}</Badge>
               {metadata.tags.map((tag) => (
-                <Badge key={tag} variant="outline">
+                <Badge key={tag} className="border-border bg-muted text-foreground">
                   {tag}
                 </Badge>
               ))}
@@ -498,32 +502,36 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {availableViewModes.map((mode) => (
-              <Button
-                key={mode}
-                type="button"
-                variant={viewMode === mode ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode(mode)}
-              >
-                {mode}
-              </Button>
-            ))}
+            <div className="inline-flex rounded border border-border">
+              {availableViewModes
+                .filter((mode) => mode !== 'edit')
+                .map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wide transition-colors ${
+                      viewMode === mode
+                        ? 'bg-primary text-white'
+                        : 'bg-muted text-foreground hover:bg-muted/80'
+                    }`}
+                    onClick={() => setViewMode(mode)}
+                  >
+                    {mode}
+                  </button>
+                ))}
+            </div>
             <Link
               to="/projects/$slug/docs/$"
               params={{ slug: projectSlug, _splat: historySplat }}
-              className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+              className="inline-flex h-8 items-center rounded border border-border bg-white px-3 text-sm font-medium transition-colors hover:bg-muted"
             >
               <History className="mr-1 size-4" />
               History
             </Link>
             {mediaKind === 'text' && (
-              <Button type="button" variant="outline" size="sm" onClick={() => setViewMode('edit')}>
+              <Button type="button" size="sm" onClick={() => setViewMode('edit')}>
                 <PenSquare className="mr-1 size-4" />
                 Edit
-                <kbd className="ml-1 rounded border px-1 py-0.5 text-[10px] text-muted-foreground">
-                  E
-                </kbd>
               </Button>
             )}
             {mediaKind === 'text' && (viewMode === 'edit' || viewMode === 'split') && (
@@ -587,14 +595,14 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
                   onLoadError={(error) => console.error('PDF render failed', error)}
                 >
                   {Array.from({ length: pdfPageCount || 1 }, (_value, index) => (
-                    <div key={`page-${index + 1}`} className="overflow-auto rounded-2xl border border-border/70 bg-background/60 p-3">
+                    <div key={`page-${index + 1}`} className="overflow-auto rounded border border-border bg-muted p-3">
                       <PdfPage pageNumber={index + 1} width={900} renderTextLayer renderAnnotationLayer />
                     </div>
                   ))}
                 </PdfDocument>
               </div>
             ) : mediaKind === 'image' ? (
-              <div className="overflow-hidden rounded-2xl border border-border/70 bg-background/40 p-4">
+              <div className="overflow-hidden rounded border border-border bg-muted p-4">
                 <img src={assetUrl} alt={metadata.title} className="max-h-[70vh] w-full object-contain" />
               </div>
             ) : language === 'markdown' ? (
@@ -634,7 +642,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
               </pre>
             ) : (
               <div className="space-y-3 text-sm">
-                <div className="rounded-xl border border-border/70 bg-background/60 p-4">
+                <div className="rounded border border-border bg-muted p-4">
                   <div><span className="font-medium">Asset:</span> {metadata.relative_path}</div>
                   <div><span className="font-medium">MIME type:</span> {document.mime_type ?? 'unknown'}</div>
                   <div><span className="font-medium">Version:</span> v{metadata.version}</div>
@@ -643,7 +651,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
                   href={assetUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-9 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+                  className="inline-flex h-9 items-center rounded border border-border bg-white px-3 text-sm font-medium transition-colors hover:bg-muted"
                 >
                   Open asset
                 </a>
@@ -670,7 +678,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
         <CardShell title="Annotations">
           <div className="space-y-4">
             {!document.metadata.version_id && (
-              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm text-muted-foreground">
+              <div className="rounded border border-border bg-muted px-3 py-3 text-sm text-muted-foreground">
                 Version-aware annotations become available after the document has been synced into the operational database.
               </div>
             )}
@@ -735,14 +743,14 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
             )}
             <div className="space-y-3">
               {annotations.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border/70 bg-background/60 px-3 py-4 text-sm text-muted-foreground">
+                <div className="rounded border border-dashed border-border bg-muted px-3 py-4 text-sm text-muted-foreground">
                   No annotations yet for this version.
                 </div>
               ) : (
                 annotations.map((annotation: AnnotationItem) => (
                   <div
                     key={annotation.id}
-                    className="rounded-2xl border border-border/70 bg-background/70 px-4 py-4"
+                    className="rounded border border-border bg-white px-4 py-4"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
@@ -769,7 +777,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
                       </Button>
                     </div>
                     {annotation.content && (
-                      <p className="mt-3 text-sm leading-6 text-foreground/85">{annotation.content}</p>
+                      <p className="mt-3 text-sm leading-6 text-foreground">{annotation.content}</p>
                     )}
                   </div>
                 ))
@@ -833,14 +841,14 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
 
             <div className="space-y-3">
               {documentCollections.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border/70 bg-background/60 px-3 py-4 text-sm text-muted-foreground">
+                <div className="rounded border border-dashed border-border bg-muted px-3 py-4 text-sm text-muted-foreground">
                   This document is not in any collection yet.
                 </div>
               ) : (
                 documentCollections.map((collection: CollectionItem) => (
                   <div
                     key={collection.id}
-                    className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/70 px-4 py-3"
+                    className="flex items-center justify-between gap-3 rounded border border-border bg-white px-4 py-3"
                   >
                     <div>
                       <div className="font-medium">{collection.name}</div>
@@ -866,8 +874,8 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
       </div>
 
       {headings.length > 0 && (
-        <div className="rounded-[2rem] border border-border/80 bg-card/60 p-5 shadow-sm">
-          <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+        <div className="rounded border border-border bg-white p-5 shadow-sm">
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
             Outline
           </div>
           <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -875,7 +883,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
               <a
                 key={heading.id}
                 href={`#${heading.id}`}
-                className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-sm transition-colors hover:bg-accent/50"
+                className="rounded border border-border bg-muted px-3 py-2 text-sm transition-colors hover:bg-accent/50"
                 style={{ paddingLeft: `${0.75 + (heading.level - 1) * 0.5}rem` }}
               >
                 {heading.text}
@@ -917,7 +925,7 @@ function SearchSourceCard({
             <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               {queryLabel ?? 'Query'}
             </div>
-            <div className="mt-2 rounded-xl border border-border/70 bg-background/70 px-3 py-2 font-mono text-xs">
+            <div className="mt-2 rounded border border-border bg-muted px-3 py-2 font-mono text-xs">
               {query}
             </div>
           </div>
@@ -927,35 +935,35 @@ function SearchSourceCard({
             <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Heading
             </div>
-            <div className="mt-2 text-sm text-foreground/85">{heading}</div>
+            <div className="mt-2 text-sm text-foreground">{heading}</div>
           </div>
         )}
         {(versionNumber != null || startChar != null || endChar != null || chunkId) && (
           <div className="grid gap-3 md:grid-cols-3">
             {versionNumber != null && (
-              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3">
+              <div className="rounded border border-border bg-muted px-3 py-3">
                 <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
                   Version
                 </div>
-                <div className="mt-2 text-sm text-foreground/85">v{versionNumber}</div>
+                <div className="mt-2 text-sm text-foreground">v{versionNumber}</div>
               </div>
             )}
             {(startChar != null || endChar != null) && (
-              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3">
+              <div className="rounded border border-border bg-muted px-3 py-3">
                 <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
                   Characters
                 </div>
-                <div className="mt-2 text-sm text-foreground/85">
+                <div className="mt-2 text-sm text-foreground">
                   {startChar ?? '?'}-{endChar ?? '?'}
                 </div>
               </div>
             )}
             {chunkId && (
-              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3">
+              <div className="rounded border border-border bg-muted px-3 py-3">
                 <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
                   Chunk
                 </div>
-                <div className="mt-2 break-all font-mono text-xs text-foreground/85">
+                <div className="mt-2 break-all font-mono text-xs text-foreground">
                   {chunkId}
                 </div>
               </div>
@@ -972,7 +980,7 @@ function SearchSourceCard({
           </div>
         )}
         {snippet && (
-          <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-4 leading-6 text-foreground/85">
+          <div className="rounded border border-border bg-muted px-4 py-4 leading-6 text-foreground">
             {snippet}
           </div>
         )}
@@ -989,9 +997,9 @@ function CardShell({
   title?: string
 }) {
   return (
-    <div className="rounded-[2rem] border border-border/80 bg-card/80 p-5 shadow-sm">
+    <div className="rounded border border-border bg-white p-5 shadow-sm">
       {title && (
-        <div className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+        <div className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           {title}
         </div>
       )}

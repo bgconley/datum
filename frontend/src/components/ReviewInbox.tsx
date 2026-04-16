@@ -6,7 +6,6 @@ import {
   FilePenLine,
   Inbox,
   ShieldAlert,
-  SlidersHorizontal,
   X,
 } from 'lucide-react'
 
@@ -120,8 +119,8 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
     setContent(
       <div className="space-y-5 p-5">
         <div>
-          <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
-            Candidate review inbox
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Context: Inbox
           </div>
           <h2 className="mt-2 text-xl font-semibold tracking-tight">
             {project?.name ?? projectSlug}
@@ -133,8 +132,8 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
         </div>
 
         <div className="grid gap-3">
-          <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-            <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="rounded border border-border bg-muted p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
               Review policy
             </div>
             <div className="mt-3 space-y-2 text-sm text-muted-foreground">
@@ -143,8 +142,8 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
               <div>Reject keeps the item out of the curated record set.</div>
             </div>
           </div>
-          <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-            <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="rounded border border-border bg-muted p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
               Queue state
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -216,14 +215,14 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
-      <div className="rounded-[2rem] border border-border/80 bg-card/80 p-8 shadow-sm">
+      <div className="rounded border border-border bg-white p-8 shadow-sm">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
               Candidate review
             </div>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-              Review inbox for {project?.name ?? projectSlug}
+              Inbox: <span className="text-primary">{project?.name ?? projectSlug}</span>
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
               Promote decisions, requirements, and open questions into curated records only after a
@@ -232,17 +231,21 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-              <SlidersHorizontal className="size-3.5" />
-              <span>Sort</span>
-              <select
-                value={sortMode}
-                onChange={(event) => setSortMode(event.target.value as 'confidence' | 'severity')}
-                className="bg-transparent text-foreground outline-none"
+            <div className="inline-flex overflow-hidden rounded border border-border text-xs">
+              <button
+                type="button"
+                onClick={() => setSortMode('confidence')}
+                className={`px-3 py-1.5 font-medium transition-colors ${sortMode === 'confidence' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
               >
-                <option value="confidence">Confidence</option>
-                <option value="severity">Severity</option>
-              </select>
+                CONF.
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortMode('severity')}
+                className={`px-3 py-1.5 font-medium transition-colors ${sortMode === 'severity' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
+              >
+                SEVERITY
+              </button>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -271,7 +274,7 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.95fr)]">
-        <Card className="bg-card/80">
+        <Card className="bg-white">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Inbox className="size-4" />
@@ -280,16 +283,16 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Pending</div>
+              <div className="rounded border border-border bg-muted p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Pending</div>
                 <div className="mt-3 text-3xl font-semibold tracking-tight">{pendingCount}</div>
               </div>
-              <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Sort mode</div>
+              <div className="rounded border border-border bg-muted p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Sort mode</div>
                 <div className="mt-3 text-lg font-medium capitalize">{sortMode}</div>
               </div>
-              <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Filter</div>
+              <div className="rounded border border-border bg-muted p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Filter</div>
                 <div className="mt-3 text-lg font-medium capitalize">
                   {kindFilter === 'all' ? 'All candidates' : kindLabel(kindFilter)}
                 </div>
@@ -297,13 +300,13 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
             </div>
 
             {inboxQuery.isLoading ? (
-              <div className="rounded-[1.75rem] border border-dashed border-border/80 bg-background/60 p-6 text-sm text-muted-foreground">
+              <div className="rounded border border-dashed border-border bg-muted p-6 text-sm text-muted-foreground">
                 Loading candidate inbox…
               </div>
             ) : filteredCandidates.length === 0 ? (
-              <div className="rounded-[1.75rem] border border-dashed border-border/80 bg-background/60 p-6">
+              <div className="rounded border border-dashed border-border bg-muted p-6">
                 <div className="flex items-start gap-4">
-                  <div className="rounded-2xl border border-border/70 bg-card/80 p-3">
+                  <div className="rounded border border-border bg-white p-3">
                     <ShieldAlert className="size-5 text-muted-foreground" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -326,22 +329,52 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
                 const isEditing = editingId === candidate.id
                 const isActing = actingId === candidate.id
 
+                const cardAccent = candidate.candidate_type === 'decision'
+                  ? 'border-l-4 border-l-destructive'
+                  : candidate.candidate_type === 'requirement'
+                    ? 'border-l-4 border-l-amber-500'
+                    : 'border-l-4 border-l-primary'
+
+                const isStructuredAdr = candidate.extraction_method === 'structured_adr'
+                const isGliner = candidate.extraction_method === 'gliner'
+
+                const confidenceDotColor = candidate.confidence != null
+                  ? candidate.confidence >= 0.7
+                    ? 'bg-green-500'
+                    : candidate.confidence >= 0.4
+                      ? 'bg-amber-500'
+                      : 'bg-gray-400'
+                  : null
+
                 return (
-                  <Card key={candidate.id} className="bg-background/70">
+                  <Card key={candidate.id} className={`bg-white ${cardAccent}`}>
                     <CardContent className="space-y-4 p-5">
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="secondary">{kindLabel(candidate.candidate_type)}</Badge>
+                            <span className="inline-flex items-center rounded bg-muted px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                              {kindLabel(candidate.candidate_type)}
+                            </span>
                             <Badge variant={severityBadgeVariant(candidate.severity)}>
                               {candidate.severity} severity
                             </Badge>
-                            {methodInfo && (
+                            {isStructuredAdr && (
+                              <span className="inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                Parsed ADR
+                              </span>
+                            )}
+                            {isGliner && (
+                              <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                                AI Candidate
+                              </span>
+                            )}
+                            {!isStructuredAdr && !isGliner && methodInfo && (
                               <Badge variant={methodInfo.variant}>{methodInfo.label}</Badge>
                             )}
-                            {candidate.confidence != null && (
-                              <span className="text-xs text-muted-foreground">
-                                confidence {(candidate.confidence * 100).toFixed(0)}%
+                            {candidate.confidence != null && confidenceDotColor && (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <span className={`size-2 rounded-full ${confidenceDotColor}`} />
+                                {(candidate.confidence * 100).toFixed(0)}%
                               </span>
                             )}
                           </div>
@@ -365,7 +398,7 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
                           <Link
                             to="/projects/$slug/docs/$"
                             params={{ slug: projectSlug, _splat: candidate.source_doc_path }}
-                            className="inline-flex h-9 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+                            className="inline-flex h-9 items-center rounded border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
                           >
                             View source
                           </Link>
@@ -375,40 +408,40 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
                       {(candidate.decision || candidate.consequences || candidate.description || candidate.priority || candidate.resolution) && (
                         <div className="grid gap-3 md:grid-cols-2">
                           {candidate.decision && (
-                            <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-3 text-sm">
-                              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                                 Decision
                               </div>
                               <div className="mt-2 whitespace-pre-wrap">{candidate.decision}</div>
                             </div>
                           )}
                           {candidate.consequences && (
-                            <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-3 text-sm">
-                              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                                 Consequences
                               </div>
                               <div className="mt-2 whitespace-pre-wrap">{candidate.consequences}</div>
                             </div>
                           )}
                           {candidate.description && (
-                            <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-3 text-sm">
-                              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                                 Description
                               </div>
                               <div className="mt-2 whitespace-pre-wrap">{candidate.description}</div>
                             </div>
                           )}
                           {candidate.priority && (
-                            <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-3 text-sm">
-                              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                                 Priority
                               </div>
                               <div className="mt-2">{candidate.priority}</div>
                             </div>
                           )}
                           {candidate.resolution && (
-                            <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-3 text-sm md:col-span-2">
-                              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm md:col-span-2">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                                 Resolution
                               </div>
                               <div className="mt-2 whitespace-pre-wrap">{candidate.resolution}</div>
@@ -418,8 +451,8 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
                       )}
 
                       {isEditing && (
-                        <div className="space-y-3 rounded-2xl border border-border/70 bg-card/70 p-4">
-                          <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                        <div className="space-y-3 rounded border border-border bg-white p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                             Edit before promotion
                           </div>
                           <Input
@@ -489,11 +522,12 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
                       <div className="flex flex-wrap items-center gap-2">
                         <Button
                           type="button"
+                          className="bg-green-600 text-white hover:bg-green-700"
                           onClick={() => handleAccept(candidate, false)}
                           disabled={isActing}
                         >
                           <Check className="mr-2 size-4" />
-                          {isActing ? 'Working…' : 'Promote to curated record'}
+                          {isActing ? 'Working…' : 'Accept'}
                         </Button>
                         {isEditing ? (
                           <>
@@ -518,12 +552,12 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
                             disabled={isActing}
                           >
                             <FilePenLine className="mr-2 size-4" />
-                            Edit &amp; Accept
+                            Edit
                           </Button>
                         )}
                         <Button
                           type="button"
-                          variant="outline"
+                          className="border-destructive bg-destructive text-white hover:bg-destructive/90"
                           onClick={() => handleReject(candidate)}
                           disabled={isActing}
                         >
@@ -539,12 +573,12 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80">
+        <Card className="bg-white">
           <CardHeader>
             <CardTitle>Promotion model</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4">
+            <div className="space-y-3 rounded border border-border bg-muted p-4">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary">candidate</Badge>
                 <Badge variant="outline">human-reviewed</Badge>

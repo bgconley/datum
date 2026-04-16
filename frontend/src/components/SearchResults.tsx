@@ -138,7 +138,7 @@ export function SearchResults({
 
   if (modeFilteredResults.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-10 text-center text-sm text-muted-foreground">
+      <div className="rounded border border-dashed border-border bg-white px-6 py-10 text-center text-sm text-muted-foreground">
         No results found for "{query}" within {scopeSummary}.
       </div>
     )
@@ -148,15 +148,15 @@ export function SearchResults({
     <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
       <aside className="space-y-4">
         {answer && (answer.answer || answer.error) && (
-          <Card className="bg-card/70">
+          <Card className="border-l-4 border-l-destructive bg-white">
             <CardHeader>
               <CardTitle className="text-base">
-                {answer.error ? 'Grounded answer unavailable' : 'Grounded answer'}
+                {answer.error ? 'Grounded answer unavailable' : 'AI Synthesis'}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               {answer.error ? (
-                <div className="rounded-xl border border-border/70 bg-background/60 px-3 py-3 text-muted-foreground">
+                <div className="rounded border border-border bg-background px-3 py-3 text-muted-foreground">
                   {answer.error}
                 </div>
               ) : (
@@ -164,7 +164,7 @@ export function SearchResults({
                   <div className="whitespace-pre-wrap leading-7">{answer.answer}</div>
                   {answer.citations.length > 0 && (
                     <div className="space-y-2">
-                      <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                      <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                         Citations
                       </div>
                       <div className="space-y-2">
@@ -185,7 +185,7 @@ export function SearchResults({
                               sourceEnd: citation.source_ref.line_end,
                               sourceChunkId: citation.source_ref.chunk_id,
                             }}
-                            className="block rounded-xl border border-border/70 bg-background/60 px-3 py-2 transition-colors hover:bg-accent/40"
+                            className="block rounded border border-border bg-background px-3 py-2 text-primary transition-colors hover:bg-muted"
                           >
                             [{citation.index}] {citation.human_readable}
                           </Link>
@@ -201,7 +201,7 @@ export function SearchResults({
             </CardContent>
           </Card>
         )}
-        <Card className="bg-card/60">
+        <Card className="bg-white">
           <CardHeader>
             <CardTitle className="text-base">Facets</CardTitle>
           </CardHeader>
@@ -331,7 +331,7 @@ export function SearchResults({
       </aside>
 
       <div className="space-y-4">
-        <div className="rounded-xl border border-border/70 bg-card/50 p-4">
+        <div className="rounded border border-border bg-white p-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-1">
               <div className="text-sm font-medium text-foreground">
@@ -344,165 +344,180 @@ export function SearchResults({
               </div>
             </div>
             {phaseDescription && (
-              <div className="rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+              <div className="rounded border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
                 {phaseDescription}
               </div>
             )}
           </div>
         </div>
 
-        {filteredResults.map((result) => (
-          <Card key={result.chunk_id || `${result.project_slug}:${result.document_path}:${result.version_number}`} className="border border-border/80 bg-card/70">
-            <CardHeader>
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <CardTitle className="truncate">{result.document_title}</CardTitle>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {result.project_slug} / {result.document_path}
+        {filteredResults.map((result) => {
+          const accentClass = result.match_signals.includes('vector')
+            ? 'border-l-4 border-l-green-500'
+            : result.match_signals.includes('entity')
+              ? 'border-l-4 border-l-primary'
+              : 'border-l-4 border-l-gray-400'
+
+          return (
+            <Card key={result.chunk_id || `${result.project_slug}:${result.document_path}:${result.version_number}`} className={`border border-border bg-white ${accentClass}`}>
+              <CardHeader>
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <CardTitle className="truncate">{result.document_title}</CardTitle>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {result.project_slug} / {result.document_path}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <Badge variant="outline">{result.document_type}</Badge>
+                    <Badge variant="outline">v{result.version_number}</Badge>
+                    {(result.line_start > 0 || result.line_end > 0) && (
+                      <Badge variant="outline">
+                        lines {result.line_start}-{result.line_end}
+                      </Badge>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <Badge variant="outline">{result.document_type}</Badge>
-                  <Badge variant="outline">v{result.version_number}</Badge>
-                  {(result.line_start > 0 || result.line_end > 0) && (
-                    <Badge variant="outline">
-                      lines {result.line_start}-{result.line_end}
-                    </Badge>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {result.match_signals.map((signal) => {
+                    const signalColor = signal === 'vector'
+                      ? 'bg-green-100 text-green-800'
+                      : signal === 'entity'
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-muted text-muted-foreground'
+                    return (
+                      <span key={signal} className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${signalColor}`}>
+                        {signal}
+                      </span>
+                    )
+                  })}
+                  {result.heading_path && (
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {result.heading_path}
+                    </span>
                   )}
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {result.match_signals.map((signal) => (
-                  <Badge key={signal} variant="secondary" className="text-xs">
-                    {signal}
-                  </Badge>
-                ))}
-                {result.heading_path && (
-                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {result.heading_path}
-                  </span>
-                )}
-              </div>
 
-              <p className="text-sm leading-6 text-foreground/85">{result.snippet}</p>
+                <p className="text-sm leading-6 text-foreground">{result.snippet}</p>
 
-              {result.matched_terms.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {result.matched_terms.map((term) => (
-                    <Badge key={term} variant="secondary" className="text-xs">
-                      {term}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              {result.entities.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {result.entities.map((entity) => (
-                    <Badge
-                      key={`${entity.entity_type}:${entity.canonical_name}`}
-                      variant="outline"
-                      className="text-xs"
-                    >
-                      {entity.canonical_name}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  to="/projects/$slug/docs/$"
-                  params={{ slug: result.project_slug, _splat: result.document_path }}
-                  search={{
-                    sourceQuery: query,
-                    sourceSnippet: result.snippet,
-                    sourceHeading: result.heading_path,
-                    sourceSignals: result.match_signals.join(','),
-                  }}
-                  className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
-                >
-                  Open source
-                </Link>
-
-                <details className="text-sm">
-                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                    Why this result?
-                  </summary>
-                  <div className="mt-3 rounded-2xl border border-border/70 bg-background/70 p-4">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div>
-                        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                          Matched signals
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {result.match_signals.map((signal) => (
-                            <Badge key={signal} variant="secondary">
-                              {signal}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                          Exact terms
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {result.matched_terms.length > 0 ? (
-                            result.matched_terms.map((term) => (
-                              <Badge key={term} variant="outline">
-                                {term}
-                              </Badge>
-                            ))
-                          ) : (
-                            <span className="text-sm text-muted-foreground">No exact-term matches surfaced.</span>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                          Entities
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {result.entities.length > 0 ? (
-                            result.entities.map((entity) => (
-                              <Badge
-                                key={`${entity.entity_type}:${entity.canonical_name}`}
-                                variant="outline"
-                              >
-                                {entity.canonical_name}
-                              </Badge>
-                            ))
-                          ) : (
-                            <span className="text-sm text-muted-foreground">
-                              No entities surfaced from this chunk.
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
-                      <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-xs">
-                        <div className="text-muted-foreground">Heading path</div>
-                        <div className="mt-1">{result.heading_path || 'Top-level chunk'}</div>
-                      </div>
-                      <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-xs">
-                        <div className="text-muted-foreground">Document status</div>
-                        <div className="mt-1">{result.document_status}</div>
-                      </div>
-                      <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-xs">
-                        <div className="text-muted-foreground">Fused score</div>
-                        <div className="mt-1">{result.fused_score.toFixed(4)}</div>
-                      </div>
-                    </div>
+                {result.matched_terms.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.matched_terms.map((term) => (
+                      <Badge key={term} variant="secondary" className="text-xs">
+                        {term}
+                      </Badge>
+                    ))}
                   </div>
-                </details>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                )}
+
+                {result.entities.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.entities.map((entity) => (
+                      <Badge
+                        key={`${entity.entity_type}:${entity.canonical_name}`}
+                        variant="outline"
+                        className="text-xs"
+                      >
+                        {entity.canonical_name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link
+                    to="/projects/$slug/docs/$"
+                    params={{ slug: result.project_slug, _splat: result.document_path }}
+                    search={{
+                      sourceQuery: query,
+                      sourceSnippet: result.snippet,
+                      sourceHeading: result.heading_path,
+                      sourceSignals: result.match_signals.join(','),
+                    }}
+                    className="inline-flex h-8 items-center rounded border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+                  >
+                    Open source
+                  </Link>
+
+                  <details className="text-sm">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                      Why this result?
+                    </summary>
+                    <div className="mt-3 rounded border border-border bg-background p-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                            Matched signals
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {result.match_signals.map((signal) => (
+                              <Badge key={signal} variant="secondary">
+                                {signal}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                            Exact terms
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {result.matched_terms.length > 0 ? (
+                              result.matched_terms.map((term) => (
+                                <Badge key={term} variant="outline">
+                                  {term}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-sm text-muted-foreground">No exact-term matches surfaced.</span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                            Entities
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {result.entities.length > 0 ? (
+                              result.entities.map((entity) => (
+                                <Badge
+                                  key={`${entity.entity_type}:${entity.canonical_name}`}
+                                  variant="outline"
+                                >
+                                  {entity.canonical_name}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                No entities surfaced from this chunk.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <div className="rounded border border-border bg-white px-3 py-2 text-xs">
+                          <div className="text-muted-foreground">Heading path</div>
+                          <div className="mt-1">{result.heading_path || 'Top-level chunk'}</div>
+                        </div>
+                        <div className="rounded border border-border bg-white px-3 py-2 text-xs">
+                          <div className="text-muted-foreground">Document status</div>
+                          <div className="mt-1">{result.document_status}</div>
+                        </div>
+                        <div className="rounded border border-border bg-white px-3 py-2 text-xs">
+                          <div className="text-muted-foreground">Fused score</div>
+                          <div className="mt-1">{result.fused_score.toFixed(4)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
     </div>
   )

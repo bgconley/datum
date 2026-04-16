@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from datum.api.admin import router as admin_router
 from datum.api.annotations import router as annotations_router
+from datum.api.dashboard import router as dashboard_router
 from datum.api.attachments import router as attachments_router
 from datum.api.citations import router as citations_router
 from datum.api.collections import router as collections_router
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(annotations_router)
     app.include_router(upload_router)
     app.include_router(attachments_router)
+    app.include_router(dashboard_router)
 
     mcp = create_mcp_server(settings.projects_root)
     mcp.settings.mount_path = "/mcp"

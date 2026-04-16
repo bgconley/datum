@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +46,8 @@ from datum.services.document_manager import (
     save_document,
 )
 from datum.services.filesystem import ManifestLayoutConflictError
+from datum.services.blob_store import store_blob
+from datum.services.extraction import extract_text
 from datum.services.project_manager import get_project
 from datum.services.versioning import StalePendingCommitError
 
@@ -108,6 +110,26 @@ def _guess_mime_type(relative_path: str) -> str | None:
 def _asset_url(slug: str, relative_path: str) -> str:
     encoded_path = "/".join(quote(segment, safe="") for segment in relative_path.split("/"))
     return f"/api/v1/projects/{slug}/docs/{encoded_path}/asset"
+
+
+_INGEST_DOC_TYPE_MAP: dict[str, str] = {
+    ".pdf": "reference",
+    ".docx": "reference",
+    ".md": "note",
+    ".txt": "note",
+    ".sql": "schema",
+    ".yaml": "config",
+    ".yml": "config",
+}
+
+_BINARY_INGEST_EXTENSIONS = {".pdf", ".docx"}
+_TEXT_INGEST_EXTENSIONS = {".md", ".sql", ".yaml", ".yml", ".txt"}
+
+
+def detect_ingest_doc_type(original_filename: str) -> str:
+    """Detect doc_type from original filename extension."""
+    ext = Path(original_filename).suffix.lower()
+    return _INGEST_DOC_TYPE_MAP.get(ext, "note")
 
 
 async def _get_project_db_id(slug: str, session: AsyncSession):
@@ -237,6 +259,218 @@ async def api_create_document(
         await session.rollback()
         _log_db_sync_skip(
             operation="create_document",
+            project_slug=slug,
+            canonical_path=doc_info.relative_path,
+            exc=exc,
+        )
+
+    return DocumentResponse(**doc_info.__dict__)
+
+
+@router.post("/ingest", response_model=DocumentResponse, status_code=201)
+async def api_ingest_document(
+    slug: str,
+    file: UploadFile,
+    folder: str = Form(...),
+    doc_type: str | None = Form(default=None),
+    tags: str | None = Form(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    """Ingest a document via multipart upload.
+
+    - Text files (.md, .sql, .yaml, .yml, .txt): stored directly as docs/{folder}/{filename}
+    - Binary files (.pdf, .docx): extracted to markdown, original stored as blob attachment
+    """
+    project_path = _get_project_path(slug)
+    filename = file.filename or "upload.txt"
+    original_ext = Path(filename).suffix.lower()
+    stem = Path(filename).stem
+
+    # Normalize folder under docs/
+    folder_clean = folder.strip().strip("/")
+    if not folder_clean:
+        folder_clean = ""
+    # Ensure folder is under docs/
+    if folder_clean.startswith("docs/"):
+        folder_prefix = folder_clean
+    elif folder_clean == "docs":
+        folder_prefix = "docs"
+    else:
+        folder_prefix = f"docs/{folder_clean}" if folder_clean else "docs"
+
+    # Validate the folder stays under docs/
+    try:
+        from datum.services.filesystem import validate_canonical_path
+
+        resolved_folder = validate_canonical_path(folder_prefix)
+        if not resolved_folder.as_posix().startswith("docs"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Folder must normalize under docs/, got: {folder_prefix}",
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # Determine relative path
+    is_binary = original_ext in _BINARY_INGEST_EXTENSIONS
+    if is_binary:
+        relative_path = f"{folder_prefix}/{stem}.md"
+    else:
+        relative_path = f"{folder_prefix}/{filename}"
+
+    # Detect doc_type from original extension if not provided
+    resolved_doc_type = doc_type if doc_type else detect_ingest_doc_type(filename)
+
+    # Parse tags
+    tag_list: list[str] | None = None
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+    # Check for collision
+    canonical_full = project_path / relative_path
+    if canonical_full.exists():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Document already exists at '{relative_path}'",
+        )
+
+    # Read file content
+    content_bytes = await file.read()
+    if not content_bytes:
+        raise HTTPException(status_code=400, detail="Empty upload")
+    if len(content_bytes) > settings.max_upload_bytes:
+        raise HTTPException(status_code=413, detail="Upload exceeds max_upload_bytes")
+
+    title = stem.replace("-", " ").replace("_", " ").title()
+
+    if is_binary:
+        # Store original binary as attachment via blob store
+        blob = store_blob(content_bytes, original_ext, settings.blobs_root)
+
+        # Extract text content
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=original_ext, delete=False) as tmp:
+            tmp.write(content_bytes)
+            tmp.flush()
+            extraction = extract_text(Path(tmp.name))
+        Path(tmp.name).unlink(missing_ok=True)
+
+        if extraction and extraction.content.strip():
+            document_content = extraction.content
+        else:
+            document_content = f"# {title}\n\n_Extracted from {filename}_\n"
+
+        # Create document with extraction content
+        try:
+            doc_info = create_document(
+                project_path=project_path,
+                relative_path=relative_path,
+                title=title,
+                doc_type=resolved_doc_type,
+                content=document_content,
+                tags=tag_list,
+                status="active",
+            )
+        except FileExistsError:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Document already exists at '{relative_path}'",
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        # DB sync for blob attachment (best-effort)
+        try:
+            from datum.services.db_sync import upsert_attachment_to_db
+            from datum.services.filesystem import generate_uid
+
+            project_db_id = await _get_project_db_id(slug, session)
+            if project_db_id:
+                attachment_uid = generate_uid("att")
+                await upsert_attachment_to_db(
+                    session=session,
+                    project_id=project_db_id,
+                    attachment_uid=str(attachment_uid),
+                    filename=filename,
+                    content_type=file.content_type or "application/octet-stream",
+                    byte_size=int(blob["size_bytes"]),
+                    content_hash=str(blob["content_hash"]),
+                    blob_path=str(blob["blob_path"]),
+                    filesystem_path=f"attachments/{stem}/metadata.yaml",
+                    metadata={
+                        "source_document_path": relative_path,
+                        "original_filename": filename,
+                    },
+                )
+                await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            logger.warning(
+                "DB sync skipped for ingest attachment (project=%s, path=%s): %s",
+                slug,
+                relative_path,
+                exc,
+                exc_info=True,
+            )
+    else:
+        # Text file: store directly
+        text_content = content_bytes.decode("utf-8", errors="replace")
+        try:
+            doc_info = create_document(
+                project_path=project_path,
+                relative_path=relative_path,
+                title=title,
+                doc_type=resolved_doc_type,
+                content=text_content,
+                tags=tag_list,
+                status="active",
+            )
+        except FileExistsError:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Document already exists at '{relative_path}'",
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    # DB sync for document (best-effort)
+    try:
+        project_db_id = await _get_project_db_id(slug, session)
+        if project_db_id:
+            canonical_path = doc_info.relative_path
+            from datum.services.versioning import get_current_version
+
+            ver = get_current_version(project_path, canonical_path)
+            if ver:
+                file_bytes = (project_path / canonical_path).read_bytes()
+                await sync_document_version_to_db(
+                    session=session,
+                    project_id=project_db_id,
+                    version_info=ver,
+                    canonical_path=canonical_path,
+                    title=doc_info.title,
+                    doc_type=doc_info.doc_type,
+                    status=doc_info.status,
+                    tags=doc_info.tags,
+                    change_source="ingest",
+                    content_hash=doc_info.content_hash,
+                    byte_size=len(file_bytes),
+                    filesystem_path=ver.version_file,
+                )
+                await log_audit_event(
+                    session,
+                    "web",
+                    "ingest_document",
+                    project_db_id,
+                    canonical_path,
+                    new_hash=doc_info.content_hash,
+                )
+                await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        _log_db_sync_skip(
+            operation="ingest_document",
             project_slug=slug,
             canonical_path=doc_info.relative_path,
             exc=exc,

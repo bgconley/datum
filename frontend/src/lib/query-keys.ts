@@ -27,4 +27,10 @@ export const queryKeys = {
     ['projects', slug, 'entities', entityId] as const,
   commandPaletteEntities: (projectSlug: string | null, seed: string) =>
     ['command-palette', 'entities', projectSlug ?? 'all', seed] as const,
+  dashboardHealth: ['dashboard', 'health'] as const,
+  dashboardIngestion: (slug: string) => ['dashboard', slug, 'ingestion'] as const,
+  agentActivity: (slug: string) => ['dashboard', slug, 'agent-activity'] as const,
+  dashboardActivity: (slug: string) => ['dashboard', slug, 'activity'] as const,
+  dashboardSessions: (slug: string) => ['dashboard', slug, 'sessions'] as const,
+  sessionDetail: (slug: string, id: string) => ['dashboard', slug, 'sessions', id] as const,
 }

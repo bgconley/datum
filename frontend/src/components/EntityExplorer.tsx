@@ -23,6 +23,21 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   schema: 'Schema',
 }
 
+const ENTITY_TYPE_DOT_COLORS: Record<string, string> = {
+  person: 'bg-green-500',
+  technology: 'bg-blue-500',
+  service: 'bg-blue-400',
+  api: 'bg-indigo-500',
+  endpoint: 'bg-indigo-400',
+  table: 'bg-amber-500',
+  column: 'bg-amber-400',
+  model: 'bg-purple-500',
+  field: 'bg-purple-400',
+  schema: 'bg-teal-500',
+  tool: 'bg-blue-600',
+  term: 'bg-amber-600',
+}
+
 function EntityContextPanel({
   canonicalName,
   entityType,
@@ -37,7 +52,7 @@ function EntityContextPanel({
   return (
     <div className="space-y-5 p-5">
       <div>
-        <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           Entity focus
         </div>
         <h2 className="mt-2 text-xl font-semibold tracking-tight">{canonicalName}</h2>
@@ -48,8 +63,8 @@ function EntityContextPanel({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+      <div className="rounded border border-border bg-muted p-4">
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           Interpretation
         </div>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
@@ -113,8 +128,8 @@ export function EntityExplorer({
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
-      <div className="rounded-[2rem] border border-border/80 bg-card/80 p-8 shadow-sm">
-        <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+      <div className="rounded border border-border bg-white p-8 shadow-sm">
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
           Intelligence graph
         </div>
         <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -138,7 +153,7 @@ export function EntityExplorer({
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
-        <Card className="bg-card/80">
+        <Card className="bg-white">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Network className="size-4" />
@@ -157,7 +172,8 @@ export function EntityExplorer({
                   All
                 </Button>
                 {entityTypes.map((type) => (
-                  <Badge key={type} variant="outline">
+                  <Badge key={type} variant="outline" className="inline-flex items-center gap-1.5">
+                    <span className={`inline-block size-2 rounded-full ${ENTITY_TYPE_DOT_COLORS[type] ?? 'bg-gray-400'}`} />
                     {ENTITY_TYPE_LABELS[type] ?? type}
                   </Badge>
                 ))}
@@ -167,7 +183,7 @@ export function EntityExplorer({
             <ScrollArea className="h-[34rem] pr-3">
               <div className="space-y-2">
                 {entities.length === 0 ? (
-                  <div className="rounded-2xl border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                  <div className="rounded border border-border bg-muted p-4 text-sm text-muted-foreground">
                     No entities have been extracted yet.
                   </div>
                 ) : (
@@ -178,16 +194,17 @@ export function EntityExplorer({
                         key={entity.id}
                         to="/projects/$slug/entities/$entityId"
                         params={{ slug: projectSlug, entityId: entity.id }}
-                        className={`block rounded-2xl border px-4 py-3 transition-colors ${
+                        className={`block rounded border px-4 py-3 transition-colors ${
                           active
-                            ? 'border-foreground/25 bg-foreground text-background'
-                            : 'border-border/70 bg-background/70 hover:bg-accent/50'
+                            ? 'border-l-[3px] border-l-primary border-t-border border-r-border border-b-border bg-blue-50'
+                            : 'border-border bg-muted hover:bg-accent/50'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="truncate font-medium">{entity.canonical_name}</div>
-                            <div className="mt-1 text-xs text-current/70">
+                            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <span className={`inline-block size-2 rounded-full ${ENTITY_TYPE_DOT_COLORS[entity.entity_type] ?? 'bg-gray-400'}`} />
                               {ENTITY_TYPE_LABELS[entity.entity_type] ?? entity.entity_type}
                             </div>
                           </div>
@@ -205,7 +222,7 @@ export function EntityExplorer({
         </Card>
 
         <div className="grid gap-6">
-          <Card className="bg-card/80">
+          <Card className="bg-white">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Radar className="size-4" />
@@ -214,14 +231,14 @@ export function EntityExplorer({
             </CardHeader>
             <CardContent>
               {!entityId ? (
-                <div className="rounded-2xl border border-dashed border-border/70 bg-background/70 p-6 text-sm text-muted-foreground">
+                <div className="rounded border border-dashed border-border bg-muted p-6 text-sm text-muted-foreground">
                   Pick an entity from the navigator to inspect its evidence trail and graph
                   relationships.
                 </div>
               ) : detailQuery.isLoading ? (
                 <div className="text-sm text-muted-foreground">Loading entity detail…</div>
               ) : !selected ? (
-                <div className="rounded-2xl border border-border/70 bg-background/70 p-6 text-sm text-muted-foreground">
+                <div className="rounded border border-border bg-muted p-6 text-sm text-muted-foreground">
                   Entity not found.
                 </div>
               ) : (
@@ -238,18 +255,18 @@ export function EntityExplorer({
 
                   <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
                     <div className="space-y-4">
-                      <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+                      <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                         Evidence ledger
                       </div>
                       {selected.mentions.length === 0 ? (
-                        <div className="rounded-2xl border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                        <div className="rounded border border-border bg-muted p-4 text-sm text-muted-foreground">
                           No mentions captured for this entity.
                         </div>
                       ) : (
                         selected.mentions.map((mention, index) => (
                           <div
                             key={`${mention.document_path}-${mention.version_number ?? 'current'}-${index}`}
-                            className="rounded-2xl border border-border/70 bg-background/70 p-4"
+                            className="rounded border border-border bg-muted p-4"
                           >
                             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <Database className="size-3.5" />
@@ -258,7 +275,7 @@ export function EntityExplorer({
                                 <Badge variant="outline">v{mention.version_number}</Badge>
                               )}
                             </div>
-                            <p className="mt-3 text-sm leading-7 text-foreground/90">
+                            <p className="mt-3 text-sm leading-7 text-foreground">
                               {mention.chunk_content_snippet}
                             </p>
                             <div className="mt-4 flex items-center justify-between gap-3">
@@ -281,7 +298,7 @@ export function EntityExplorer({
                                   sourceStart: String(mention.start_char),
                                   sourceEnd: String(mention.end_char),
                                 }}
-                                className="inline-flex items-center gap-2 text-sm text-foreground/80 transition-colors hover:text-foreground"
+                                className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
                               >
                                 Open source
                                 <ArrowRightLeft className="size-3.5" />
@@ -293,18 +310,18 @@ export function EntityExplorer({
                     </div>
 
                     <div className="space-y-4">
-                      <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+                      <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                         Relationship ledger
                       </div>
                       {selected.relationships.length === 0 ? (
-                        <div className="rounded-2xl border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                        <div className="rounded border border-border bg-muted p-4 text-sm text-muted-foreground">
                           No graph relationships recorded yet.
                         </div>
                       ) : (
                         selected.relationships.map((relationship, index) => (
                           <div
                             key={`${relationship.direction}-${relationship.related_entity}-${index}`}
-                            className="rounded-2xl border border-border/70 bg-background/70 p-4"
+                            className="rounded border border-border bg-muted p-4"
                           >
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge variant="secondary">{relationship.direction}</Badge>
@@ -378,7 +395,7 @@ export function EntityExplorer({
                                       sourceChunkId:
                                         relationship.evidence_chunk_id ?? undefined,
                                     }}
-                                    className="inline-flex items-center gap-2 text-sm text-foreground/80 transition-colors hover:text-foreground"
+                                    className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
                                   >
                                     Open source
                                     <ArrowRightLeft className="size-3.5" />

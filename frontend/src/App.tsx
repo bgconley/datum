@@ -35,7 +35,7 @@ class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundary
 
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-8">
-        <div className="max-w-lg rounded-[2rem] border border-destructive/30 bg-card/90 p-8 shadow-sm">
+        <div className="max-w-lg rounded border border-destructive/30 bg-white p-8 shadow-sm">
           <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-destructive">
             Application error
           </div>
@@ -63,7 +63,7 @@ class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundary
               Try again
             </Button>
           </div>
-          <pre className="mt-6 overflow-x-auto rounded-xl border border-border/70 bg-background/70 p-3 text-xs text-muted-foreground">
+          <pre className="mt-6 overflow-x-auto rounded border border-border bg-muted p-3 text-xs text-muted-foreground">
             {this.state.error.message}
           </pre>
         </div>

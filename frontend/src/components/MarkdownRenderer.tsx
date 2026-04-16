@@ -73,7 +73,7 @@ function renderHighlightedText(
         key={`${matchedTerm.key}:${index}`}
         to="/projects/$slug/entities/$entityId"
         params={{ slug: projectSlug, entityId: matchedTerm.entityId }}
-        className="datum-entity rounded-sm border-b border-dashed border-amber-400/60 bg-amber-400/10 px-0.5 text-inherit transition-colors hover:bg-amber-400/20"
+        className="datum-entity rounded-sm border-b border-dashed border-primary/40 bg-primary/10 px-0.5 text-primary transition-colors hover:bg-primary/20"
         title={matchedTerm.title}
       >
         {part}
@@ -133,7 +133,7 @@ function MermaidBlock({ chart }: { chart: string }) {
         const mermaid = (await import('mermaid')).default
         mermaid.initialize({
           startOnLoad: false,
-          theme: 'dark',
+          theme: 'default',
           securityLevel: 'strict',
         })
         const { svg: nextSvg } = await mermaid.render(`datum-mermaid-${id}`, chart)
@@ -156,7 +156,7 @@ function MermaidBlock({ chart }: { chart: string }) {
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+      <div className="rounded border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
         Mermaid render failed: {error}
       </div>
     )
@@ -164,7 +164,7 @@ function MermaidBlock({ chart }: { chart: string }) {
 
   if (!svg) {
     return (
-      <div className="rounded-2xl border border-border/70 bg-card/60 px-4 py-6 text-sm text-muted-foreground">
+      <div className="rounded border border-border bg-muted px-4 py-6 text-sm text-muted-foreground">
         Rendering Mermaid diagram…
       </div>
     )
@@ -172,7 +172,7 @@ function MermaidBlock({ chart }: { chart: string }) {
 
   return (
     <div
-      className="overflow-auto rounded-2xl border border-border/70 bg-slate-950/90 p-4"
+      className="overflow-auto rounded border border-border bg-muted p-4"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
@@ -265,7 +265,7 @@ export function MarkdownRenderer({
             }
             if (href.startsWith('#')) {
               return (
-                <a href={href} className="text-amber-300 underline decoration-amber-400/40 underline-offset-4">
+                <a href={href} className="text-primary underline decoration-primary/40 underline-offset-4">
                   {children}
                 </a>
               )
@@ -275,7 +275,7 @@ export function MarkdownRenderer({
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="text-amber-300 underline decoration-amber-400/40 underline-offset-4"
+                className="text-primary underline decoration-primary/40 underline-offset-4"
               >
                 {children}
               </a>
@@ -287,7 +287,7 @@ export function MarkdownRenderer({
       </ReactMarkdown>
 
       {highlightTerms.length > 0 && (
-        <div className="mt-8 rounded-[1.5rem] border border-border/80 bg-card/50 p-4">
+        <div className="mt-8 rounded border border-border bg-white p-4">
           <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
             Linked entities
           </div>
@@ -297,7 +297,7 @@ export function MarkdownRenderer({
                 key={mention.key}
                 to="/projects/$slug/entities/$entityId"
                 params={{ slug: projectSlug, entityId: mention.entityId }}
-                className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs text-foreground transition-colors hover:bg-accent"
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1 text-xs text-foreground transition-colors hover:bg-accent"
                 title={mention.title}
               >
                 <span>{mention.canonicalName}</span>
