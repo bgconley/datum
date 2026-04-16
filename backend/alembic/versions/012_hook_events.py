@@ -51,8 +51,8 @@ def upgrade() -> None:
     op.create_index(
         "ix_audit_events_session_id",
         "audit_events",
-        [sa.text("(metadata_ ->> 'session_id')")],
-        postgresql_where=sa.text("metadata_ ->> 'session_id' IS NOT NULL"),
+        [sa.text("(metadata ->> 'session_id')")],
+        postgresql_where=sa.text("metadata ->> 'session_id' IS NOT NULL"),
     )
 
 
