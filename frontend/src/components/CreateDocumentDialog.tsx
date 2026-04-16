@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { X } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
@@ -94,9 +91,7 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   }
 
   const handleSubmit = async () => {
-    if (!template) {
-      return
-    }
+    if (!template) return
     setSaving(true)
     try {
       const rendered = await api.templates.render(templateId, title)
@@ -119,54 +114,52 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
     }
   }
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-[#22a5f1] hover:text-[#22a5f1]/80"
-        onClick={() => setOpen(true)}
-      >
-        + New Document
-      </button>
-    )
-  }
+  // Sidebar trigger button (always rendered)
+  const triggerButton = (
+    <button
+      type="button"
+      className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-[#22a5f1] hover:text-[#22a5f1]/80"
+      onClick={() => setOpen(true)}
+    >
+      + New Document
+    </button>
+  )
+
+  if (!open) return triggerButton
 
   return (
     <>
-      {/* Trigger button stays in the sidebar */}
-      <button
-        type="button"
-        className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-[#22a5f1] hover:text-[#22a5f1]/80"
-        onClick={() => setOpen(true)}
-      >
-        + New Document
-      </button>
+      {triggerButton}
 
-      {/* Modal overlay rendered via portal-like fixed positioning */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={close}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(27,36,49,0.5)]"
+        onClick={close}
+      >
         <div
-          className="w-full max-w-lg rounded bg-white shadow-lg"
+          className="flex w-[520px] flex-col overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white shadow-[0px_8px_24px_0px_rgba(0,0,0,0.2)]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between rounded-t bg-primary px-6 py-3">
-            <span className="text-sm font-semibold text-white">Create Document</span>
-            <button type="button" onClick={close} className="text-white/80 hover:text-white">
-              <X className="size-4" />
+          <div className="flex items-center justify-between bg-[#22a5f1] px-[20px] py-[14px]">
+            <span className="text-[14px] font-semibold text-white">Create Document</span>
+            <button
+              type="button"
+              onClick={close}
+              className="text-[16px] text-white/80 hover:text-white"
+            >
+              {'\u2715'}
             </button>
           </div>
 
           {/* Body */}
-          <div className="space-y-5 p-6">
-            {/* Template selector */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Template
-              </label>
+          <div className="flex flex-col gap-[20px] overflow-auto px-[28px] py-[24px]">
+            {/* Template */}
+            <div className="flex flex-col gap-[8px]">
+              <span className="text-[10px] font-semibold text-[#666]">TEMPLATE</span>
               <select
                 value={templateId}
-                onChange={(event) => setTemplateId(event.target.value)}
-                className="w-full rounded border border-border bg-white px-3 py-2 text-sm outline-none"
+                onChange={(e) => setTemplateId(e.target.value)}
+                className="rounded-[4px] border border-[#22a5f1] bg-white px-[12px] py-[10px] text-[12px] font-medium text-[#333] outline-none"
               >
                 {templates.map((item) => (
                   <option key={item.name} value={item.name}>
@@ -174,94 +167,120 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
                   </option>
                 ))}
               </select>
-              {/* Template chip grid */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
+              <div className="flex flex-wrap gap-x-[8px] gap-y-[0px]">
                 {templates.map((item) => (
-                  <Badge
+                  <button
                     key={item.name}
-                    variant={item.name === templateId ? 'default' : 'secondary'}
-                    className="cursor-pointer text-xs"
+                    type="button"
                     onClick={() => setTemplateId(item.name)}
+                    className={`rounded-[4px] border px-[12px] py-[6px] text-[11px] ${
+                      item.name === templateId
+                        ? 'border-[#22a5f1] bg-[#22a5f1] font-semibold text-white'
+                        : 'border-[#e1e8ed] bg-white text-[#333]'
+                    }`}
                   >
                     {item.title}
-                  </Badge>
+                  </button>
                 ))}
               </div>
             </div>
 
+            <div className="h-px w-full bg-[#e1e8ed]" />
+
             {/* Title */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Title
-              </label>
+            <div className="flex flex-col gap-[8px]">
+              <span className="text-[10px] font-semibold text-[#666]">TITLE</span>
               <input
                 type="text"
                 value={title}
-                onChange={(event) => setTitle(event.target.value)}
+                onChange={(e) => setTitle(e.target.value)}
                 placeholder="Document title"
-                className="w-full rounded border border-border bg-white px-3 py-2 text-sm"
+                className="rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px] text-[12px] text-[#333] outline-none"
               />
             </div>
 
             {/* Folder path */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Folder path
-              </label>
-              <input
-                type="text"
-                value={folder}
-                onChange={(event) => setFolder(event.target.value)}
-                placeholder="docs/decisions/"
-                className="w-full rounded border border-border bg-white px-3 py-2 font-mono text-sm"
-              />
+            <div className="flex flex-col gap-[8px]">
+              <span className="text-[10px] font-semibold text-[#666]">FOLDER PATH</span>
+              <div className="flex items-center justify-between rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px]">
+                <input
+                  type="text"
+                  value={folder}
+                  onChange={(e) => setFolder(e.target.value)}
+                  placeholder="docs/decisions/"
+                  className="min-w-0 flex-1 border-none bg-transparent text-[12px] text-[#333] outline-none"
+                />
+                <span className="shrink-0 rounded-[3px] border border-[#e1e8ed] bg-[#f3f6f8] px-[8px] py-[4px] text-[10px] font-medium text-[#333]">
+                  Browse {'\u25be'}
+                </span>
+              </div>
             </div>
 
+            {/* Preview */}
+            <div className="flex items-center gap-[8px]">
+              <span className="text-[10px] text-[#666]">Preview:</span>
+              <span className="font-mono text-[11px] text-[#22a5f1]">{relativePath}</span>
+            </div>
+
+            <div className="h-px w-full bg-[#e1e8ed]" />
+
             {/* Tags */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Tags
-              </label>
-              <div className="flex flex-wrap items-center gap-1.5 rounded border border-border bg-white px-3 py-2">
+            <div className="flex flex-col gap-[8px]">
+              <span className="text-[10px] font-semibold text-[#666]">TAGS</span>
+              <div className="flex flex-wrap items-center gap-[8px] rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[8px]">
                 {tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="gap-1 text-xs">
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    className="rounded-[3px] bg-[rgba(34,165,241,0.1)] px-[8px] py-[3px] text-[10px] font-medium text-[#22a5f1] hover:bg-[rgba(34,165,241,0.2)]"
+                  >
                     {tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      className="ml-0.5 hover:text-destructive"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </Badge>
+                  </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const value = window.prompt('Add tag')
+                    if (value?.trim() && !tags.includes(value.trim())) {
+                      setTags((prev) => [...prev, value.trim()])
+                    }
+                  }}
+                  className="rounded-[3px] border border-[#e1e8ed] px-[6px] py-[3px] text-[10px] font-medium text-[#666]"
+                >
+                  +
+                </button>
                 <input
                   type="text"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}
                   onKeyDown={handleTagKeyDown}
-                  placeholder={tags.length === 0 ? 'Add tags...' : ''}
-                  className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none"
+                  placeholder={tags.length === 0 ? 'Type and press Enter...' : ''}
+                  className="min-w-[80px] flex-1 border-none bg-transparent text-[10px] outline-none"
                 />
               </div>
             </div>
 
-            {/* Preview path */}
-            <div className="rounded border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-              <div className="font-medium text-foreground">{template?.title ?? 'Template'}</div>
-              <div className="mt-1 font-mono">{relativePath}</div>
-              {template && <div className="mt-1">{template.description}</div>}
-            </div>
-          </div>
+            <div className="h-px w-full bg-[#e1e8ed]" />
 
-          {/* Footer */}
-          <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
-            <Button variant="outline" onClick={close}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={!title || saving || !template}>
-              {saving ? 'Creating...' : 'Create & Edit'}
-            </Button>
+            {/* Footer */}
+            <div className="flex items-start justify-end gap-[12px]">
+              <button
+                type="button"
+                onClick={close}
+                className="rounded-[4px] border border-[#e1e8ed] bg-white px-[20px] py-[10px] text-[11px] font-semibold text-[#333]"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!title || saving || !template}
+                className="rounded-[4px] bg-[#22a5f1] px-[24px] py-[10px] text-[11px] font-semibold text-white disabled:opacity-40"
+              >
+                {saving ? 'CREATING...' : 'CREATE & EDIT'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
