@@ -486,6 +486,9 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-[12px]">
           <h1 className="text-[18px] font-semibold text-[#1b2431]">{metadata.title}</h1>
+          {(viewMode === 'edit' || viewMode === 'split') && (
+            <span className="text-[13px] text-[#999]">(Editing)</span>
+          )}
           {metadata.status === 'approved' ? (
             <span className="rounded-[3px] bg-[#5cb85c] px-[8px] py-[3px] text-[10px] font-semibold text-white">
               Approved
@@ -520,7 +523,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
                 }`}
                 onClick={() => setViewMode(mode)}
               >
-                {mode}
+                {mode === 'raw' ? 'SOURCE' : mode}
               </button>
             ))}
           <Link
@@ -542,7 +545,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           {mediaKind === 'text' && (viewMode === 'edit' || viewMode === 'split') && (
             <button
               type="button"
-              className="rounded-[4px] bg-[#5cb85c] px-[16px] py-[6px] text-[10px] font-semibold uppercase text-white hover:bg-[#5cb85c]/90"
+              className="rounded-[4px] bg-[#22a5f1] px-[16px] py-[6px] text-[10px] font-semibold uppercase text-white hover:bg-[#22a5f1]/90"
               onClick={handleSave}
               disabled={saveMutation.isPending}
             >
