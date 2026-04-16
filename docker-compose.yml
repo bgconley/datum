@@ -46,6 +46,8 @@ services:
       DATUM_NER_ENDPOINT: ${DATUM_NER_ENDPOINT:-http://host.docker.internal:8012}
       DATUM_NER_MODEL: ${DATUM_NER_MODEL:-knowledgator/gliner-bi-large-v2.0}
       DATUM_NER_PROTOCOL: ${DATUM_NER_PROTOCOL:-gliner_http}
+      DATUM_LLM_ENDPOINT: ${DATUM_LLM_ENDPOINT:-http://host.docker.internal:8000}
+      DATUM_LLM_MODEL: ${DATUM_LLM_MODEL:-gpt-oss-20b}
     depends_on:
       paradedb:
         condition: service_healthy
@@ -122,6 +124,8 @@ services:
       DATUM_NER_ENDPOINT: ${DATUM_NER_ENDPOINT:-http://host.docker.internal:8012}
       DATUM_NER_MODEL: ${DATUM_NER_MODEL:-knowledgator/gliner-bi-large-v2.0}
       DATUM_NER_PROTOCOL: ${DATUM_NER_PROTOCOL:-gliner_http}
+      DATUM_LLM_ENDPOINT: ${DATUM_LLM_ENDPOINT:-http://host.docker.internal:8000}
+      DATUM_LLM_MODEL: ${DATUM_LLM_MODEL:-gpt-oss-20b}
     depends_on:
       paradedb:
         condition: service_healthy

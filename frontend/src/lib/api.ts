@@ -344,6 +344,7 @@ export interface HealthSubsystem {
   healthy: boolean
   latency_ms: number | null
   error: string | null
+  endpoint: string | null
 }
 
 export interface HealthResponse {

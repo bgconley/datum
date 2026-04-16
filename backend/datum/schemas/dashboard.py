@@ -14,6 +14,7 @@ class HealthStatus(BaseModel):
     healthy: bool
     latency_ms: float | None = None
     error: str | None = None
+    endpoint: str | None = None
 
 
 class HealthResponse(BaseModel):

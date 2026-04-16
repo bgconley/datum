@@ -122,15 +122,25 @@ async def _check_worker_queue_health(db: AsyncSession) -> HealthStatus:
 async def _check_model_health(model_type: str, display_name: str) -> HealthStatus:
     """Check a model service health endpoint with latency timing."""
     gateway = build_model_gateway()
+    config = getattr(gateway, model_type, None)
     start = time.monotonic()
     try:
         healthy = await gateway.check_health(model_type)
         latency = (time.monotonic() - start) * 1000
-        return HealthStatus(name=display_name, healthy=healthy, latency_ms=latency)
+        return HealthStatus(
+            name=display_name,
+            healthy=healthy,
+            latency_ms=latency,
+            endpoint=getattr(config, "endpoint", None),
+        )
     except Exception as exc:
         latency = (time.monotonic() - start) * 1000
         return HealthStatus(
-            name=display_name, healthy=False, latency_ms=latency, error=str(exc)
+            name=display_name,
+            healthy=False,
+            latency_ms=latency,
+            error=str(exc),
+            endpoint=getattr(config, "endpoint", None),
         )
     finally:
         await gateway.close()

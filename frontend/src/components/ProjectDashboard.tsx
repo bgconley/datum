@@ -45,11 +45,23 @@ const LABELS: Record<string, string> = {
   llm: 'LLM (GPT-OSS-20B)',
 }
 
-const PORTS: Record<string, string> = {
+const FALLBACK_PORTS: Record<string, string> = {
   embedder: ':8010',
   reranker: ':8011',
   gliner_ner: ':8012',
   llm: ':8000',
+}
+
+function endpointPort(endpoint: string | null | undefined, name: string) {
+  if (!endpoint) {
+    return FALLBACK_PORTS[name] ?? ''
+  }
+  try {
+    const parsed = new URL(endpoint)
+    return parsed.port ? `:${parsed.port}` : FALLBACK_PORTS[name] ?? ''
+  } catch {
+    return FALLBACK_PORTS[name] ?? ''
+  }
 }
 
 function dot(healthy: boolean) {
@@ -69,8 +81,9 @@ function infraStatus(s: HealthSubsystem) {
 }
 
 function modelStatus(s: HealthSubsystem) {
-  if (!s.healthy) return `Idle  ${PORTS[s.name] ?? ''}`
-  return `OK  ${PORTS[s.name] ?? ''}`
+  const port = endpointPort(s.endpoint, s.name)
+  if (!s.healthy) return `Idle  ${port}`
+  return `OK  ${port}`
 }
 
 function formatTime(iso: string) {
