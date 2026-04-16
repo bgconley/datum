@@ -310,478 +310,175 @@ export function Sidebar({ style }: SidebarProps) {
     }
   }
 
+  // Build folder tree from document paths
+  const folderTree = useMemo(() => {
+    const folders = new Set<string>()
+    for (const doc of docs) {
+      const parts = doc.relative_path.split('/')
+      for (let i = 1; i < parts.length; i++) {
+        folders.add(parts.slice(0, i).join('/'))
+      }
+    }
+    return [...folders].sort()
+  }, [docs])
+
+  const isActiveNav = (path: string) => {
+    if (path === '/' && selectedProject) {
+      return location.pathname === `/projects/${selectedProject}`
+    }
+    return location.pathname === path || location.pathname.startsWith(path + '/')
+  }
+
+  const dashboardPath = selectedProject ? `/projects/${selectedProject}` : '/'
+
   return (
-    <aside className="flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" style={style}>
-      <div className="border-b border-sidebar-border px-3 py-4">
-        <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-          Datum
-        </div>
-        <h1 className="mt-1 text-base font-semibold tracking-tight text-sidebar-foreground">Project cabinet</h1>
-      </div>
+    <aside className="flex shrink-0 flex-col bg-sidebar text-sidebar-foreground" style={style}>
       <ScrollArea className="flex-1">
-        {/* -- Navigation links -- */}
-        <div className="p-2">
+        {/* Nav links — Figma: text only, blue left border on active, 13px, py-[10px] px-[16px] */}
+        <div className="flex flex-col gap-[2px] py-4">
           <Link
-            to="/"
-            className={`flex items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
-              location.pathname === '/' ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
+            to={selectedProject ? '/projects/$slug' : '/'}
+            params={selectedProject ? { slug: selectedProject } : undefined}
+            className={`flex items-center py-[10px] pl-3 pr-4 text-[13px] ${
+              isActiveNav(dashboardPath)
+                ? 'border-l-4 border-primary bg-sidebar-accent text-white'
+                : 'border-l-4 border-transparent text-[#999] hover:text-white'
             }`}
           >
-            <LayoutGrid className="size-4" />
-            <span>Dashboard</span>
+            Dashboard
           </Link>
           <Link
             to="/search"
-            className={`mt-0.5 flex items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
-              location.pathname === '/search' ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
+            className={`flex items-center py-[10px] pl-3 pr-4 text-[13px] ${
+              isActiveNav('/search')
+                ? 'border-l-4 border-primary bg-sidebar-accent text-white'
+                : 'border-l-4 border-transparent text-[#999] hover:text-white'
             }`}
           >
-            <Search className="size-4" />
-            <span>Search</span>
-            <kbd className="ml-auto rounded border border-sidebar-border px-1.5 py-0.5 text-[10px] text-sidebar-foreground/50">
-              /
-            </kbd>
+            Search
           </Link>
-
           {selectedProject && (
             <>
               <Link
                 to="/projects/$slug/inbox"
                 params={{ slug: selectedProject }}
-                className={`mt-0.5 flex items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
-                  location.pathname === `/projects/${selectedProject}/inbox` ||
-                  location.pathname === `/projects/${selectedProject}/review`
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
+                className={`flex items-center py-[10px] pl-3 pr-4 text-[13px] ${
+                  isActiveNav(`/projects/${selectedProject}/inbox`) || isActiveNav(`/projects/${selectedProject}/review`)
+                    ? 'border-l-4 border-primary bg-sidebar-accent text-white'
+                    : 'border-l-4 border-transparent text-[#999] hover:text-white'
                 }`}
               >
-                <Inbox className="size-4" />
                 Inbox
-                {pendingCandidateCount > 0 && (
-                  <span className="ml-auto rounded-full bg-sidebar-primary px-1.5 py-0.5 text-[10px] font-medium text-sidebar-primary-foreground">
-                    {pendingCandidateCount}
-                  </span>
-                )}
-              </Link>
-              <Link
-                to="/projects/$slug/entities"
-                params={{ slug: selectedProject }}
-                className={`mt-0.5 flex items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
-                  location.pathname === `/projects/${selectedProject}/entities` ||
-                  location.pathname.startsWith(`/projects/${selectedProject}/entities/`)
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
-                }`}
-              >
-                <Network className="size-4" />
-                Entity graph
               </Link>
               <Link
                 to="/projects/$slug/sessions"
                 params={{ slug: selectedProject }}
-                className={`mt-0.5 flex items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
-                  location.pathname === `/projects/${selectedProject}/sessions`
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
+                className={`flex items-center py-[10px] pl-3 pr-4 text-[13px] ${
+                  isActiveNav(`/projects/${selectedProject}/sessions`)
+                    ? 'border-l-4 border-primary bg-sidebar-accent text-white'
+                    : 'border-l-4 border-transparent text-[#999] hover:text-white'
                 }`}
               >
-                <BookOpen className="size-4" />
                 Sessions
               </Link>
             </>
           )}
         </div>
 
-        {/* -- Separator -- */}
-        <div className="mx-2 border-t border-sidebar-border" />
+        {/* Separator */}
+        <div className="h-px w-full bg-white/10" />
 
-        {/* -- Quick actions -- */}
+        {/* Quick Actions — Figma: 9px semibold #666 label, 11px medium #22A5F1 text */}
         {selectedProject && (
-          <div className="p-2">
-            <div className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-              Quick actions
+          <div className="py-2">
+            <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
+              QUICK ACTIONS
             </div>
-            <div className="mt-1 space-y-0.5">
-              <CreateDocumentDialog
-                projectSlug={selectedProject}
-                onCreated={() => refreshProjectState().catch(console.error)}
-              />
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/60"
-                onClick={() => {
-                  const input = document.createElement('input')
-                  input.type = 'file'
-                  input.onchange = (event) => {
-                    handleUploadFile(event as unknown as ChangeEvent<HTMLInputElement>)
-                  }
-                  input.click()
-                }}
-              >
-                <Plus className="size-3.5" />
-                Upload File
-              </button>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/60"
-                onClick={() => openTemplateDialog('session-note')}
-              >
-                <Plus className="size-3.5" />
-                New Session
-              </button>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/60"
-                onClick={() => openTemplateDialog('adr')}
-              >
-                <Plus className="size-3.5" />
-                New ADR
-              </button>
-            </div>
+            <CreateDocumentDialog
+              projectSlug={selectedProject}
+              onCreated={() => refreshProjectState().catch(console.error)}
+            />
+            <button
+              type="button"
+              className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
+              onClick={() => {
+                const input = document.createElement('input')
+                input.type = 'file'
+                input.onchange = (event) => {
+                  handleUploadFile(event as unknown as ChangeEvent<HTMLInputElement>)
+                }
+                input.click()
+              }}
+            >
+              + Upload File
+            </button>
+            <button
+              type="button"
+              className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
+              onClick={() => openTemplateDialog('session-note')}
+            >
+              + New Session
+            </button>
+            <button
+              type="button"
+              className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
+              onClick={() => openTemplateDialog('adr')}
+            >
+              + New ADR
+            </button>
           </div>
         )}
 
-        {/* -- Separator -- */}
-        <div className="mx-2 border-t border-sidebar-border" />
+        {/* Separator */}
+        <div className="h-px w-full bg-white/10" />
 
-        {/* -- Projects list -- */}
-        <div className="p-2">
-          <div className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-            Projects
-          </div>
-          <div className="mt-1 space-y-0.5">
-            {projects.map((item) => (
-              <Link
-                key={item.slug}
-                to="/projects/$slug"
-                params={{ slug: item.slug }}
-                className={`flex items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
-                  selectedProject === item.slug ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
-                }`}
-              >
-                <LayoutGrid className="size-4" />
-                <span className="truncate">{item.name}</span>
-              </Link>
-            ))}
-          </div>
-          <div className="mt-2">
-            <CreateProjectDialog
-              onCreated={() =>
-                queryClient.invalidateQueries({ queryKey: queryKeys.projects }).catch(console.error)
-              }
-            />
-          </div>
-        </div>
-
-        {/* -- File cabinet (documents) -- */}
+        {/* File Cabinet — Figma: indented folder tree, 11px #999 text */}
         {selectedProject && (
-          <div className="border-t border-sidebar-border p-2">
-            <div className="flex items-center justify-between gap-2 px-2.5">
-              <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                File cabinet
-              </div>
-              <span className="text-[10px] text-sidebar-foreground/50">{docs.length}</span>
+          <div className="py-2">
+            <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
+              FILE CABINET
             </div>
-
-            <div className="mt-1 space-y-0.5">
-              {docs.map((document) => (
-                <Link
-                  key={document.relative_path}
-                  to="/projects/$slug/docs/$"
-                  params={{ slug: selectedProject, _splat: document.relative_path }}
-                  className={`block rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
-                    selectedDocument === document.relative_path
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                      : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
-                  }`}
-                >
-                  <div className="min-w-0 flex items-center gap-2">
-                    <FileText className="size-3.5 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="truncate font-medium">{document.title}</div>
-                      <div className="mt-0.5 truncate text-[10px] text-sidebar-foreground/50">{document.relative_path}</div>
-                    </div>
+            <div className="mt-1">
+              {folderTree.map((folder) => {
+                const depth = folder.split('/').length - 1
+                return (
+                  <div
+                    key={folder}
+                    className="py-[3px] pr-3 text-[11px] text-[#999]"
+                    style={{ paddingLeft: `${16 + depth * 12}px` }}
+                  >
+                    ▸ {folder.split('/').pop()}/
                   </div>
-                </Link>
-              ))}
+                )
+              })}
+              {docs.map((document) => {
+                const parts = document.relative_path.split('/')
+                const depth = parts.length - 1
+                const filename = parts[parts.length - 1]
+                return (
+                  <Link
+                    key={document.relative_path}
+                    to="/projects/$slug/docs/$"
+                    params={{ slug: selectedProject, _splat: document.relative_path }}
+                    className={`block py-[3px] pr-3 text-[11px] transition-colors ${
+                      selectedDocument === document.relative_path
+                        ? 'bg-sidebar-accent text-white'
+                        : 'text-[#999] hover:text-white'
+                    }`}
+                    style={{ paddingLeft: `${16 + depth * 12}px` }}
+                  >
+                    {filename}
+                  </Link>
+                )
+              })}
             </div>
 
-            {operationError && (
-              <div className="mt-2 rounded-sm border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
-                {operationError}
+            {/* Attachments folder */}
+            {attachments.length > 0 && (
+              <div className="py-[3px] pl-4 pr-3 text-[11px] text-[#999]">
+                ▸ attachments/
               </div>
             )}
-
-            <div className="mt-2 rounded-sm border border-sidebar-border bg-sidebar-accent/40 p-2.5">
-              <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                <FolderPlus className="size-3.5" />
-                Create folder
-              </div>
-              <div className="mt-2 flex gap-2">
-                <Input
-                  value={folderPath}
-                  onChange={(event) => setFolderPath(event.target.value)}
-                  className="h-7 border-sidebar-border bg-sidebar text-xs font-mono text-sidebar-foreground"
-                />
-                <Button size="sm" variant="outline" className="h-7 border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80" onClick={handleCreateFolder} disabled={creatingFolder}>
-                  {creatingFolder ? 'Creating...' : 'Create'}
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-2 rounded-sm border border-sidebar-border bg-sidebar-accent/40 p-2.5">
-              <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                Folder actions
-              </div>
-              <div className="mt-2 space-y-1.5">
-                <Input
-                  value={folderActionPath}
-                  onChange={(event) => setFolderActionPath(event.target.value)}
-                  className="h-7 border-sidebar-border bg-sidebar text-xs font-mono text-sidebar-foreground"
-                  placeholder="docs/specs"
-                />
-                <Input
-                  value={folderRenamePath}
-                  onChange={(event) => setFolderRenamePath(event.target.value)}
-                  className="h-7 border-sidebar-border bg-sidebar text-xs font-mono text-sidebar-foreground"
-                  placeholder="docs/specs-renamed"
-                />
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="h-7 border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80" onClick={handleRenameFolder} disabled={renamingFolder}>
-                    <MoveRight className="size-3.5" />
-                    {renamingFolder ? 'Renaming...' : 'Rename'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 border-red-500/30 text-red-400 hover:bg-red-500/10"
-                    onClick={handleDeleteFolder}
-                    disabled={deletingFolder}
-                  >
-                    <Trash2 className="size-3.5" />
-                    {deletingFolder ? 'Deleting...' : 'Delete'}
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-2 rounded-sm border border-sidebar-border bg-sidebar-accent/40 p-2.5">
-              <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                <Upload className="size-3.5" />
-                Upload attachment
-              </div>
-              <label className="mt-2 flex cursor-pointer items-center justify-center rounded-sm border border-dashed border-sidebar-border bg-sidebar px-2.5 py-3 text-xs text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60">
-                <input type="file" className="hidden" onChange={handleUploadFile} disabled={uploading} />
-                {uploading ? 'Uploading...' : 'Choose file'}
-              </label>
-            </div>
-
-            <div className="mt-2 rounded-sm border border-sidebar-border bg-sidebar-accent/40 p-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                  Attachments
-                </div>
-                <span className="text-[10px] text-sidebar-foreground/50">{attachments.length}</span>
-              </div>
-              <div className="mt-2 space-y-0.5">
-                {attachments.length === 0 ? (
-                  <div className="text-xs text-sidebar-foreground/50">No attachments uploaded yet.</div>
-                ) : (
-                  attachments.map((attachment) => (
-                    <button
-                      key={attachment.relative_path}
-                      type="button"
-                      className={`block w-full rounded-sm px-2.5 py-1.5 text-left text-sm transition-colors ${
-                        selectedAttachmentMeta?.relative_path === attachment.relative_path
-                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                          : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60'
-                      }`}
-                      onClick={() => setSelectedAttachmentPath(attachment.relative_path)}
-                    >
-                      <div className="truncate font-medium">{attachment.filename}</div>
-                      <div className="mt-0.5 truncate text-[10px] text-sidebar-foreground/50">{attachment.relative_path}</div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {selectedAttachmentMeta && (
-              <div className="mt-2 rounded-sm border border-sidebar-border bg-sidebar-accent/40 p-2.5">
-                <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                  Attachment actions
-                </div>
-                <div className="mt-2 space-y-2">
-                  <div className="rounded-sm border border-sidebar-border bg-sidebar px-2.5 py-1.5 text-xs">
-                    <div className="font-medium text-sidebar-foreground">{selectedAttachmentMeta.filename}</div>
-                    <div className="mt-0.5 font-mono text-sidebar-foreground/50">
-                      {selectedAttachmentMeta.relative_path}
-                    </div>
-                    <div className="mt-1 text-sidebar-foreground/50">
-                      {selectedAttachmentMeta.byte_size} bytes · {selectedAttachmentMeta.content_type}
-                    </div>
-                    {absoluteAttachmentPath && (
-                      <div className="mt-1 break-all font-mono text-[11px] text-sidebar-foreground/50">
-                        {absoluteAttachmentPath}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                      onClick={() => copyText(selectedAttachmentMeta.relative_path, 'attachment-relative')}
-                    >
-                      <Copy className="size-3" />
-                      {copied === 'attachment-relative' ? 'Copied path' : 'Copy relative path'}
-                    </Button>
-                    {absoluteAttachmentPath && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                        onClick={() => copyText(absoluteAttachmentPath, 'attachment-absolute')}
-                      >
-                        <Files className="size-3" />
-                        {copied === 'attachment-absolute' ? 'Copied absolute path' : 'Copy absolute path'}
-                      </Button>
-                    )}
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                      Rename / move
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        value={attachmentMovePath}
-                        onChange={(event) => setAttachmentMovePath(event.target.value)}
-                        className="h-7 border-sidebar-border bg-sidebar text-xs font-mono text-sidebar-foreground"
-                      />
-                      <Button size="sm" variant="outline" className="h-7 border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80" onClick={handleMoveAttachment} disabled={movingAttachment}>
-                        <MoveRight className="size-3.5" />
-                        {movingAttachment ? 'Moving...' : 'Move'}
-                      </Button>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 border-red-500/30 text-red-400 hover:bg-red-500/10"
-                    onClick={handleDeleteAttachment}
-                    disabled={deletingAttachment}
-                  >
-                    <Trash2 className="size-3.5" />
-                    {deletingAttachment ? 'Deleting...' : 'Delete'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {selectedDocMeta && (
-              <div className="mt-2 rounded-sm border border-sidebar-border bg-sidebar-accent/40 p-2.5">
-                <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                  Document actions
-                </div>
-                <div className="mt-2 space-y-2">
-                  <div className="rounded-sm border border-sidebar-border bg-sidebar px-2.5 py-1.5 text-xs">
-                    <div className="font-medium text-sidebar-foreground">{selectedDocMeta.title}</div>
-                    <div className="mt-0.5 font-mono text-sidebar-foreground/50">{selectedDocMeta.relative_path}</div>
-                    {absoluteDocumentPath && (
-                      <div className="mt-1 break-all font-mono text-[11px] text-sidebar-foreground/50">
-                        {absoluteDocumentPath}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                      onClick={() => copyText(selectedDocMeta.relative_path, 'relative')}
-                    >
-                      <Copy className="size-3" />
-                      {copied === 'relative' ? 'Copied path' : 'Copy relative path'}
-                    </Button>
-                    {absoluteDocumentPath && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                        onClick={() => copyText(absoluteDocumentPath, 'absolute')}
-                      >
-                        <Files className="size-3" />
-                        {copied === 'absolute' ? 'Copied absolute path' : 'Copy absolute path'}
-                      </Button>
-                    )}
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                      Rename / move
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        value={movePath}
-                        onChange={(event) => setMovePath(event.target.value)}
-                        className="h-7 border-sidebar-border bg-sidebar text-xs font-mono text-sidebar-foreground"
-                      />
-                      <Button size="sm" variant="outline" className="h-7 border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80" onClick={handleMoveDocument} disabled={moving}>
-                        <MoveRight className="size-3.5" />
-                        {moving ? 'Moving...' : 'Move'}
-                      </Button>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 border-red-500/30 text-red-400 hover:bg-red-500/10"
-                    onClick={handleDeleteDocument}
-                    disabled={deleting}
-                  >
-                    <Trash2 className="size-3.5" />
-                    {deleting ? 'Deleting...' : 'Delete'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-2 rounded-sm border border-sidebar-border bg-sidebar-accent/40 p-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest text-sidebar-foreground/60">
-                  Generated files
-                </div>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                  onClick={() => setShowGenerated((current) => !current)}
-                >
-                  {showGenerated ? 'Hide .piq/' : 'Show .piq/'}
-                </Button>
-              </div>
-              {showGenerated && (
-                <div className="mt-2 space-y-1">
-                  {generatedFiles.length === 0 ? (
-                    <div className="text-xs text-sidebar-foreground/50">No generated files yet.</div>
-                  ) : (
-                    generatedFiles.map((file) => (
-                      <div
-                        key={file.relative_path}
-                        className="rounded-sm border border-sidebar-border bg-sidebar px-2.5 py-1.5 text-xs"
-                      >
-                        <div className="truncate font-mono text-sidebar-foreground">{file.relative_path}</div>
-                        <div className="mt-0.5 text-sidebar-foreground/50">{file.size_bytes} bytes</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </ScrollArea>

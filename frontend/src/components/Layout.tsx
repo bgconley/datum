@@ -1,8 +1,7 @@
 import { createContext, useContext, useEffect, type ReactNode } from 'react'
-import { Command, PanelRight, Search } from 'lucide-react'
-import { useLocation, useNavigate } from '@tanstack/react-router'
+import { PanelRight, Search, Settings } from 'lucide-react'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 
-import { Button } from '@/components/ui/button'
 import { useContextPanel } from '@/lib/context-panel'
 import { toggleCommandPalette } from '@/components/CommandPalette'
 import { Sidebar } from './Sidebar'
@@ -96,91 +95,78 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [content, location.pathname, navigate, open, setOpen])
 
-  const pathLabel =
-    location.pathname === '/'
-      ? 'Workspace'
-      : location.pathname === '/search'
-        ? 'Search'
-        : location.pathname.startsWith('/projects/')
-          ? 'Project'
-          : 'Datum'
+  const selectedProject = location.pathname.startsWith('/projects/')
+    ? decodeURIComponent(location.pathname.split('/')[2] ?? '')
+    : null
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-foreground">
-      <Sidebar style={{ width: layoutConfig.sidebarWidth }} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-sidebar-border bg-sidebar px-6 py-3 text-sidebar-foreground">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-sidebar-foreground/60">
-                {pathLabel}
-              </div>
-              <div className="mt-1 text-sm text-sidebar-foreground/60">
-                Filesystem-canonical workspace with routed dashboards, source-first editing,
-                and durable search state.
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                onClick={() => {
-                  if (location.pathname === '/search') {
-                    window.dispatchEvent(new CustomEvent('datum:focus-search'))
-                    return
-                  }
-                  navigate({ to: '/search' })
-                  window.setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('datum:focus-search'))
-                  }, 0)
-                }}
-              >
-                <Search />
-                Search
-                <kbd className="ml-1 rounded border border-sidebar-border px-1 py-0.5 text-[10px] text-sidebar-foreground/60">
-                  /
-                </kbd>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                onClick={toggleCommandPalette}
-              >
-                <Command />
-                Palette
-                <kbd className="ml-1 rounded border border-sidebar-border px-1 py-0.5 text-[10px] text-sidebar-foreground/60">
-                  Ctrl+K
-                </kbd>
-              </Button>
-              {content && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="border-sidebar-border bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/80"
-                  onClick={toggleOpen}
-                >
-                  <PanelRight />
-                  {open ? 'Hide panel' : 'Show panel'}
-                </Button>
-              )}
-            </div>
-          </div>
-        </header>
-        <main className="min-h-0 flex-1 overflow-auto">{children}</main>
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      {/* Header — 48px dark bar matching Figma NX 01 */}
+      <header className="flex h-[48px] shrink-0 items-center justify-between bg-sidebar px-4">
+        <div className="flex items-center gap-4">
+          <span className="text-[14px] font-bold text-white">DATUM</span>
+          <div className="h-6 w-px bg-white/20" />
+          {selectedProject ? (
+            <Link
+              to="/projects/$slug"
+              params={{ slug: selectedProject }}
+              className="text-[13px] text-primary"
+            >
+              {selectedProject} ▾
+            </Link>
+          ) : (
+            <span className="text-[13px] text-white/60">No project</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-white">
+          <button
+            type="button"
+            className="text-[14px] hover:text-white/80"
+            onClick={() => {
+              if (location.pathname === '/search') {
+                window.dispatchEvent(new CustomEvent('datum:focus-search'))
+                return
+              }
+              navigate({ to: '/search' })
+              window.setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('datum:focus-search'))
+              }, 0)
+            }}
+          >
+            <Search className="size-4" />
+          </button>
+          <button
+            type="button"
+            className="text-[14px] hover:text-white/80"
+            onClick={toggleCommandPalette}
+          >
+            <Settings className="size-4" />
+          </button>
+          {content && (
+            <button
+              type="button"
+              className="text-[14px] hover:text-white/80"
+              onClick={toggleOpen}
+            >
+              <PanelRight className="size-4" />
+            </button>
+          )}
+          <span className="text-[12px]">admin ▾</span>
+        </div>
+      </header>
+      {/* Body — sidebar + main + context panel */}
+      <div className="flex min-h-0 flex-1">
+        <Sidebar style={{ width: layoutConfig.sidebarWidth }} />
+        <main className="min-w-0 flex-1 overflow-auto">{children}</main>
+        {content && open && (
+          <aside
+            className="shrink-0 overflow-auto border-l border-border bg-white"
+            style={{ width: layoutConfig.contextPanelWidth }}
+          >
+            {content}
+          </aside>
+        )}
       </div>
-      {content && open && (
-        <aside
-          className="shrink-0 border-l border-border bg-white"
-          style={{ width: layoutConfig.contextPanelWidth }}
-        >
-          {content}
-        </aside>
-      )}
     </div>
   )
 }
