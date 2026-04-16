@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useContextPanel } from '@/lib/context-panel'
 import { api, type SessionSummary, type SessionDetail } from '@/lib/api'
+import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
 
 // ---------------------------------------------------------------------------
@@ -64,7 +65,15 @@ function statusColor(status: string): string {
 // Context panel
 // ---------------------------------------------------------------------------
 
-function SessionContextPanel({ detail }: { detail: SessionDetail }) {
+function SessionContextPanel({
+  detail,
+  isFinalizing,
+  onFinalize,
+}: {
+  detail: SessionDetail
+  isFinalizing: boolean
+  onFinalize: () => void
+}) {
   const hookEvents = detail.hook_events
   const auditEvents = detail.audit_events
   const deltas = detail.deltas
@@ -179,9 +188,11 @@ function SessionContextPanel({ detail }: { detail: SessionDetail }) {
       {detail.status === 'active' && (
         <button
           type="button"
+          onClick={onFinalize}
+          disabled={isFinalizing}
           className="rounded-[4px] bg-[#5cb85c] px-[12px] py-[8px] text-[10px] font-semibold text-white"
         >
-          FINALIZE SESSION
+          {isFinalizing ? 'FINALIZING...' : 'FINALIZE SESSION'}
         </button>
       )}
     </div>
@@ -200,7 +211,9 @@ const EMPTY_SESSIONS: SessionSummary[] = []
 
 export function SessionsView({ projectSlug }: SessionsViewProps) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [finalizingSessionId, setFinalizingSessionId] = useState<string | null>(null)
   const { setContent } = useContextPanel()
+  const queryClient = useQueryClient()
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.dashboardSessions(projectSlug),
@@ -225,14 +238,50 @@ export function SessionsView({ projectSlug }: SessionsViewProps) {
     refetchInterval: 5_000,
   })
 
+  const invalidateSessions = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardSessions(projectSlug) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardActivity(projectSlug) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.agentActivity(projectSlug) }),
+      selectedSessionId
+        ? queryClient.invalidateQueries({
+            queryKey: queryKeys.sessionDetail(projectSlug, selectedSessionId),
+          })
+        : Promise.resolve(),
+    ])
+  }
+
+  const handleFinalize = async (detail: SessionDetail) => {
+    setFinalizingSessionId(detail.session_id)
+    try {
+      if (detail.is_dirty) {
+        await api.lifecycle.flush(detail.session_id)
+      }
+      await api.lifecycle.finalize(detail.session_id)
+      await invalidateSessions()
+    } catch (error) {
+      notify(String(error))
+    } finally {
+      setFinalizingSessionId(null)
+    }
+  }
+
   useEffect(() => {
     if (detailQuery.data) {
-      setContent(<SessionContextPanel detail={detailQuery.data} />)
+      setContent(
+        <SessionContextPanel
+          detail={detailQuery.data}
+          isFinalizing={finalizingSessionId === detailQuery.data.session_id}
+          onFinalize={() => {
+            void handleFinalize(detailQuery.data)
+          }}
+        />,
+      )
     } else if (!selectedSessionId) {
       setContent(null)
     }
     return () => setContent(null)
-  }, [detailQuery.data, selectedSessionId, setContent])
+  }, [detailQuery.data, finalizingSessionId, selectedSessionId, setContent])
 
   if (sessionsQuery.isLoading) {
     return (

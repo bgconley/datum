@@ -411,6 +411,42 @@ export interface SessionDetail extends SessionSummary {
   audit_events: ActivityEvent[]
 }
 
+export interface LifecycleSessionStartResponse {
+  id: string
+  session_id: string
+  project_id: string | null
+  client_type: string
+  status: string
+  enforcement_mode: string
+  is_dirty: boolean
+  started_at: string
+}
+
+export interface LifecyclePreflightResponse {
+  recorded: boolean
+  action: string
+  session_id: string
+}
+
+export interface LifecycleFlushSummary {
+  counts: Record<string, number>
+  recent_paths: string[]
+  recent_commands: string[]
+}
+
+export interface LifecycleFlushResponse {
+  flushed_count: number
+  session_id: string
+  summary: LifecycleFlushSummary | null
+  session_note_path: string | null
+}
+
+export interface LifecycleFinalizeResponse {
+  session_id: string
+  status: string
+  ended_at: string | null
+}
+
 export interface VersionContent {
   version_number: number
   content: string
@@ -706,15 +742,25 @@ export const api = {
       type: Candidate['candidate_type'],
       id: string,
       edits?: Record<string, string>,
+      sessionId?: string,
     ) =>
       fetchJSON<CandidateAction>(`${API_BASE}/projects/${slug}/inbox/${type}/${id}/accept`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionId ? { 'X-Session-ID': sessionId } : {}),
+        },
         body: JSON.stringify(edits ?? {}),
       }),
-    reject: (slug: string, type: Candidate['candidate_type'], id: string) =>
+    reject: (
+      slug: string,
+      type: Candidate['candidate_type'],
+      id: string,
+      sessionId?: string,
+    ) =>
       fetchJSON<CandidateAction>(`${API_BASE}/projects/${slug}/inbox/${type}/${id}/reject`, {
         method: 'POST',
+        headers: sessionId ? { 'X-Session-ID': sessionId } : undefined,
       }),
   },
   intelligence: {
@@ -801,6 +847,40 @@ export const api = {
       fetchJSON<SessionSummary[]>(`${API_BASE}/projects/${slug}/dashboard/sessions?hours=${hours}&limit=${limit}`),
     sessionDetail: (slug: string, sessionId: string) =>
       fetchJSON<SessionDetail>(`${API_BASE}/projects/${slug}/dashboard/sessions/${sessionId}`),
+  },
+  lifecycle: {
+    start: (sessionId: string, projectSlug: string, clientType = 'web') =>
+      fetchJSON<LifecycleSessionStartResponse>(`${API_BASE}/agent/sessions/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          project_slug: projectSlug,
+          client_type: clientType,
+        }),
+      }),
+    preflight: (
+      sessionId: string,
+      action: 'get_project_context' | 'search_project_memory' | 'list_candidates',
+    ) =>
+      fetchJSON<LifecyclePreflightResponse>(
+        `${API_BASE}/agent/sessions/${encodeURIComponent(sessionId)}/preflight`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        },
+      ),
+    flush: (sessionId: string) =>
+      fetchJSON<LifecycleFlushResponse>(
+        `${API_BASE}/agent/sessions/${encodeURIComponent(sessionId)}/flush`,
+        { method: 'POST' },
+      ),
+    finalize: (sessionId: string) =>
+      fetchJSON<LifecycleFinalizeResponse>(
+        `${API_BASE}/agent/sessions/${encodeURIComponent(sessionId)}/finalize`,
+        { method: 'POST' },
+      ),
   },
   ingest: {
     upload: async (projectSlug: string, file: File, folder: string, docType?: string, tags?: string) => {

@@ -8,6 +8,7 @@ import { useContextPanel } from '@/lib/context-panel'
 import { api, type Candidate } from '@/lib/api'
 import { notify } from '@/lib/notifications'
 import { queryKeys } from '@/lib/query-keys'
+import { ensureProjectWriteSession } from '@/lib/web-lifecycle'
 import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
 interface ReviewInboxProps {
@@ -118,11 +119,13 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
   const handleAccept = async (candidate: Candidate, withEdits: boolean) => {
     setActingId(candidate.id)
     try {
+      const sessionId = await ensureProjectWriteSession(projectSlug)
       await api.inbox.accept(
         projectSlug,
         candidate.candidate_type,
         candidate.id,
         withEdits ? edits : undefined,
+        sessionId,
       )
       stopEditing()
       await invalidateIntelligence()
@@ -136,7 +139,8 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
   const handleReject = async (candidate: Candidate) => {
     setActingId(candidate.id)
     try {
-      await api.inbox.reject(projectSlug, candidate.candidate_type, candidate.id)
+      const sessionId = await ensureProjectWriteSession(projectSlug)
+      await api.inbox.reject(projectSlug, candidate.candidate_type, candidate.id, sessionId)
       if (editingId === candidate.id) stopEditing()
       await invalidateIntelligence()
     } catch (error) {
