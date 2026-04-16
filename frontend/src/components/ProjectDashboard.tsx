@@ -259,7 +259,7 @@ export function ProjectDashboard({ projectSlug }: Props) {
         <p className={SECTION_LABEL}>SYSTEM HEALTH</p>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-[6px]">
-            <span className={health?.healthy !== false ? DOT_GREEN : DOT_RED} />
+            <span className={infra.find((s) => s.name === 'zfs_pool')?.healthy ? DOT_GREEN : DOT_RED} />
             <span className="text-[11px] text-[#666]">ZFS Snapshots</span>
           </div>
           <span className="text-[11px] font-medium text-[#333]">

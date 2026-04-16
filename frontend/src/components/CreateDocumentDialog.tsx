@@ -121,18 +121,26 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
 
   if (!open) {
     return (
-      <Button size="sm" variant="outline" className="w-full" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-[#22a5f1] hover:text-[#22a5f1]/80"
+        onClick={() => setOpen(true)}
+      >
         + New Document
-      </Button>
+      </button>
     )
   }
 
   return (
     <>
       {/* Trigger button stays in the sidebar */}
-      <Button size="sm" variant="outline" className="w-full" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-[#22a5f1] hover:text-[#22a5f1]/80"
+        onClick={() => setOpen(true)}
+      >
         + New Document
-      </Button>
+      </button>
 
       {/* Modal overlay rendered via portal-like fixed positioning */}
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={close}>
