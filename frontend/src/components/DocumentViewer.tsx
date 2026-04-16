@@ -1,24 +1,21 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ChevronRight, FolderPlus, History, PenSquare, Trash2 } from 'lucide-react'
+import { ChevronRight, History, PenSquare } from 'lucide-react'
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { ContextPanel } from '@/components/ContextPanel'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useContextPanel } from '@/lib/context-panel'
 import {
   api,
-  type AnnotationItem,
-  type CollectionItem,
   type DocumentContent,
+  type DocumentEntityMention,
+  type DocumentMeta,
   type VersionInfo,
 } from '@/lib/api'
 import { notify } from '@/lib/notifications'
@@ -117,12 +114,8 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
   const [viewMode, setViewMode] = useState<ViewMode>('rendered')
   const [pdfPageCount, setPdfPageCount] = useState(0)
   const [editContent, setEditContent] = useState('')
-  const [annotationType, setAnnotationType] = useState<'comment' | 'highlight' | 'pin'>('comment')
-  const [annotationContent, setAnnotationContent] = useState('')
-  const [annotationStart, setAnnotationStart] = useState('')
-  const [annotationEnd, setAnnotationEnd] = useState('')
-  const [selectedCollectionId, setSelectedCollectionId] = useState('')
-  const [newCollectionName, setNewCollectionName] = useState('')
+  const [draftTouchedAt, setDraftTouchedAt] = useState<number | null>(null)
+  const [draftNow, setDraftNow] = useState(() => Date.now())
   const queryClient = useQueryClient()
   const { setContent } = useContextPanel()
 
@@ -136,36 +129,17 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
   })
   const document = documentQuery.data ?? null
   const versions = versionsQuery.data ?? EMPTY_VERSIONS
-  const annotationsQuery = useQuery({
-    queryKey: document?.metadata.version_id
-      ? queryKeys.annotations(document.metadata.version_id)
-      : ['annotations', 'idle'],
-    queryFn: () => api.annotations.list(document!.metadata.version_id!),
-    enabled: Boolean(document?.metadata.version_id),
-  })
-  const collectionsQuery = useQuery({
-    queryKey: queryKeys.collections(projectSlug),
-    queryFn: () => api.collections.list(projectSlug),
-    enabled: Boolean(projectSlug),
-  })
-  const membershipsQuery = useQuery({
-    queryKey: queryKeys.documentCollections(projectSlug, document?.metadata.document_uid ?? 'idle'),
-    queryFn: () => api.collections.forDocument(projectSlug, document!.metadata.document_uid),
-    enabled: Boolean(projectSlug && document?.metadata.document_uid),
-  })
   const documentEntitiesQuery = useQuery({
     queryKey: queryKeys.documentEntities(projectSlug, docPath),
     queryFn: () => api.documents.entities(projectSlug, docPath),
     enabled: Boolean(projectSlug && docPath),
   })
-  const annotations = annotationsQuery.data ?? []
-  const collections = collectionsQuery.data ?? []
-  const documentCollections = membershipsQuery.data ?? []
   const documentEntities = documentEntitiesQuery.data ?? []
 
   useEffect(() => {
     if (documentQuery.data) {
       setEditContent(documentQuery.data.content)
+      setDraftTouchedAt(null)
     }
   }, [documentQuery.data?.content, docPath, projectSlug])
 
@@ -183,12 +157,6 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
   }, [documentQuery.data, viewMode])
 
   useEffect(() => {
-    if (!selectedCollectionId && collections.length > 0) {
-      setSelectedCollectionId(collections[0].id)
-    }
-  }, [collections, selectedCollectionId])
-
-  useEffect(() => {
     const handleEnterEdit = () => setViewMode('edit')
     const handleExitEdit = () =>
       setViewMode((current) => (current === 'edit' || current === 'split' ? 'rendered' : current))
@@ -204,20 +172,18 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
   const displayContent =
     viewMode === 'split' || viewMode === 'edit' ? editContent : document?.content ?? ''
   const headings = useMemo(() => extractHeadings(displayContent), [displayContent])
+  const lintState = useMemo(() => evaluateDocumentLint(editContent, languageFromPath(docPath)), [docPath, editContent])
 
   useEffect(() => {
-    if (document) {
-      setContent(
-        <ContextPanel
-          projectSlug={projectSlug}
-          document={document.metadata}
-          versions={versions}
-          headings={headings}
-        />,
-      )
+    if (viewMode !== 'edit' && viewMode !== 'split') {
+      return
     }
-    return () => setContent(null)
-  }, [document, headings, projectSlug, setContent, versions])
+    const interval = window.setInterval(() => setDraftNow(Date.now()), 1000)
+    return () => window.clearInterval(interval)
+  }, [viewMode])
+
+  const draftAgeSeconds =
+    draftTouchedAt == null ? 0 : Math.max(0, Math.floor((draftNow - draftTouchedAt) / 1000))
 
   const saveMutation = useMutation({
     mutationFn: async (nextContent: string) => {
@@ -277,121 +243,6 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
     },
   })
 
-  const createAnnotationMutation = useMutation({
-    mutationFn: async () => {
-      if (!document?.metadata.version_id) {
-        throw new Error('Document version is unavailable for annotations.')
-      }
-
-      const parseNumber = (value: string) => {
-        const trimmed = value.trim()
-        return trimmed ? Number(trimmed) : null
-      }
-
-      return api.annotations.create({
-        version_id: document.metadata.version_id,
-        annotation_type: annotationType,
-        content: annotationContent.trim() || null,
-        start_char: parseNumber(annotationStart),
-        end_char: parseNumber(annotationEnd),
-      })
-    },
-    onSuccess: async () => {
-      if (!document?.metadata.version_id) {
-        return
-      }
-      setAnnotationContent('')
-      setAnnotationStart('')
-      setAnnotationEnd('')
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.annotations(document.metadata.version_id),
-      })
-    },
-  })
-
-  const deleteAnnotationMutation = useMutation({
-    mutationFn: async (annotationId: string) => api.annotations.delete(annotationId),
-    onSuccess: async () => {
-      if (!document?.metadata.version_id) {
-        return
-      }
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.annotations(document.metadata.version_id),
-      })
-    },
-  })
-
-  const addToCollectionMutation = useMutation({
-    mutationFn: async (collectionId: string) => {
-      if (!document) {
-        throw new Error('Document missing')
-      }
-      return api.collections.addMember(projectSlug, collectionId, {
-        document_uid: document.metadata.document_uid,
-      })
-    },
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.collections(projectSlug) }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.documentCollections(
-            projectSlug,
-            document?.metadata.document_uid ?? 'idle',
-          ),
-        }),
-      ])
-    },
-  })
-
-  const removeFromCollectionMutation = useMutation({
-    mutationFn: async (collectionId: string) => {
-      if (!document) {
-        throw new Error('Document missing')
-      }
-      return api.collections.removeMember(projectSlug, collectionId, document.metadata.document_uid)
-    },
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.collections(projectSlug) }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.documentCollections(
-            projectSlug,
-            document?.metadata.document_uid ?? 'idle',
-          ),
-        }),
-      ])
-    },
-  })
-
-  const createCollectionMutation = useMutation({
-    mutationFn: async () => {
-      const name = newCollectionName.trim()
-      if (!name) {
-        throw new Error('Collection name is required.')
-      }
-      const created = await api.collections.create(projectSlug, { name })
-      if (document) {
-        await api.collections.addMember(projectSlug, created.id, {
-          document_uid: document.metadata.document_uid,
-        })
-      }
-      return created
-    },
-    onSuccess: async (collection) => {
-      setNewCollectionName('')
-      setSelectedCollectionId(collection.id)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.collections(projectSlug) }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.documentCollections(
-            projectSlug,
-            document?.metadata.document_uid ?? 'idle',
-          ),
-        }),
-      ])
-    },
-  })
-
   const handleSave = async () => {
     if (!document) {
       return
@@ -399,33 +250,47 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
     await saveMutation.mutateAsync(editContent)
   }
 
-  const handleCreateAnnotation = async () => {
-    try {
-      await createAnnotationMutation.mutateAsync()
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error))
-    }
+  const handleEditContentChange = (nextContent: string) => {
+    setEditContent(nextContent)
+    setDraftTouchedAt(nextContent === document?.content ? null : Date.now())
   }
 
-  const handleAddToCollection = async () => {
-    if (!selectedCollectionId) {
-      notify('Choose a collection first.')
-      return
+  useEffect(() => {
+    if (document) {
+      const panelContent =
+        viewMode === 'edit' || viewMode === 'split' ? (
+          <DocumentEditContextPanel
+            projectSlug={projectSlug}
+            document={document.metadata}
+            entityMentions={documentEntities}
+            draftAgeSeconds={draftAgeSeconds}
+            isSaving={saveMutation.isPending}
+            lintState={lintState}
+          />
+        ) : (
+          <ContextPanel
+            projectSlug={projectSlug}
+            document={document.metadata}
+            versions={versions}
+            headings={headings}
+            entityMentions={documentEntities}
+          />
+        )
+      setContent(panelContent)
     }
-    try {
-      await addToCollectionMutation.mutateAsync(selectedCollectionId)
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  const handleCreateCollection = async () => {
-    try {
-      await createCollectionMutation.mutateAsync()
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error))
-    }
-  }
+    return () => setContent(null)
+  }, [
+    document,
+    documentEntities,
+    draftAgeSeconds,
+    headings,
+    lintState,
+    projectSlug,
+    saveMutation.isPending,
+    setContent,
+    versions,
+    viewMode,
+  ])
 
   if (documentQuery.isLoading) {
     return <div className="p-8 text-muted-foreground">Loading document…</div>
@@ -512,12 +377,14 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
         <div className="flex items-center gap-[8px]">
           {availableViewModes
             .filter((mode) => mode !== 'edit')
-            .map((mode) => (
+            .map((mode) => {
+              const isActive = viewMode === mode || (viewMode === 'edit' && mode === 'raw')
+              return (
               <button
                 key={mode}
                 type="button"
                 className={`rounded-[4px] border border-[#e1e8ed] px-[10px] py-[6px] text-[10px] font-semibold uppercase ${
-                  viewMode === mode
+                  isActive
                     ? 'bg-[#333] text-white'
                     : 'bg-white text-[#333] hover:bg-[#f7f9fa]'
                 }`}
@@ -525,7 +392,8 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
               >
                 {mode === 'raw' ? 'SOURCE' : mode}
               </button>
-            ))}
+              )
+            })}
           <Link
             to="/projects/$slug/docs/$"
             params={{ slug: projectSlug, _splat: historySplat }}
@@ -533,7 +401,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           >
             HISTORY
           </Link>
-          {mediaKind === 'text' && (
+          {mediaKind === 'text' && viewMode !== 'edit' && viewMode !== 'split' && (
             <button
               type="button"
               className="rounded-[4px] bg-[#22a5f1] px-[16px] py-[6px] text-[10px] font-semibold uppercase text-white hover:bg-[#22a5f1]/90"
@@ -549,7 +417,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
               onClick={handleSave}
               disabled={saveMutation.isPending}
             >
-              {saveMutation.isPending ? 'Saving…' : 'Save'}
+              {saveMutation.isPending ? 'SAVING…' : 'SAVE'}
             </button>
           )}
         </div>
@@ -560,7 +428,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading editor…</div>}>
             <CodeMirrorEditor
               value={editContent}
-              onChange={setEditContent}
+              onChange={handleEditContentChange}
               onSave={handleSave}
               language={language}
             />
@@ -574,7 +442,7 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
             <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading editor…</div>}>
               <CodeMirrorEditor
                 value={editContent}
-                onChange={setEditContent}
+                onChange={handleEditContentChange}
                 onSave={handleSave}
                 language={language}
               />
@@ -685,225 +553,155 @@ export function DocumentViewer({ projectSlug, docPath, sourceContext }: Document
           )}
         </div>
       )}
+    </div>
+  )
+}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
-        <CardShell title="Annotations">
-          <div className="space-y-4">
-            {!document.metadata.version_id && (
-              <div className="rounded border border-border bg-muted px-3 py-3 text-sm text-muted-foreground">
-                Version-aware annotations become available after the document has been synced into the operational database.
-              </div>
-            )}
-            {document.metadata.version_id && (
-              <div className="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
-                <label className="space-y-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  Type
-                  <select
-                    value={annotationType}
-                    onChange={(event) =>
-                      setAnnotationType(event.target.value as 'comment' | 'highlight' | 'pin')
-                    }
-                    className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  >
-                    <option value="comment">Comment</option>
-                    <option value="highlight">Highlight</option>
-                    <option value="pin">Pin</option>
-                  </select>
-                </label>
-                <label className="space-y-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  Note
-                  <Textarea
-                    value={annotationContent}
-                    onChange={(event) => setAnnotationContent(event.target.value)}
-                    placeholder="Capture a comment, pin rationale, or highlight context."
-                    className="min-h-24"
-                  />
-                </label>
-              </div>
-            )}
-            {document.metadata.version_id && (
-              <div className="grid gap-3 md:grid-cols-3">
-                <label className="space-y-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  Start char
-                  <Input
-                    value={annotationStart}
-                    onChange={(event) => setAnnotationStart(event.target.value)}
-                    inputMode="numeric"
-                    placeholder="optional"
-                  />
-                </label>
-                <label className="space-y-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  End char
-                  <Input
-                    value={annotationEnd}
-                    onChange={(event) => setAnnotationEnd(event.target.value)}
-                    inputMode="numeric"
-                    placeholder="optional"
-                  />
-                </label>
-                <div className="flex items-end">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={handleCreateAnnotation}
-                    disabled={createAnnotationMutation.isPending || !document.metadata.version_id}
-                  >
-                    {createAnnotationMutation.isPending ? 'Saving…' : 'Add annotation'}
-                  </Button>
-                </div>
-              </div>
-            )}
-            <div className="space-y-3">
-              {annotations.length === 0 ? (
-                <div className="rounded border border-dashed border-border bg-muted px-3 py-4 text-sm text-muted-foreground">
-                  No annotations yet for this version.
-                </div>
-              ) : (
-                annotations.map((annotation: AnnotationItem) => (
-                  <div
-                    key={annotation.id}
-                    className="rounded border border-border bg-white px-4 py-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary">{annotation.annotation_type}</Badge>
-                        {annotation.start_char != null && annotation.end_char != null && (
-                          <Badge variant="outline">
-                            {annotation.start_char}-{annotation.end_char}
-                          </Badge>
-                        )}
-                        {annotation.created_at && (
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(annotation.created_at).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        onClick={() => void deleteAnnotationMutation.mutateAsync(annotation.id)}
-                      >
-                        <Trash2 className="size-3.5" />
-                        Remove
-                      </Button>
-                    </div>
-                    {annotation.content && (
-                      <p className="mt-3 text-sm leading-6 text-foreground">{annotation.content}</p>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </CardShell>
+function languageFromPath(path: string) {
+  return detectLanguage(path)
+}
 
-        <CardShell title="Collections">
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-              <label className="space-y-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                Add to existing collection
-                <select
-                  value={selectedCollectionId}
-                  onChange={(event) => setSelectedCollectionId(event.target.value)}
-                  className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+function formatVersionNumber(version: number) {
+  return `v${String(version).padStart(3, '0')}`
+}
+
+function formatCurrentHash(hash: string) {
+  if (!hash) {
+    return 'N/A'
+  }
+  return hash.length > 18 ? `${hash.slice(0, 18)}...` : hash
+}
+
+function dedupeEntityMentions(entityMentions: DocumentEntityMention[]) {
+  const seen = new Set<string>()
+  return entityMentions.filter((mention) => {
+    const key = `${mention.entity_type}:${mention.canonical_name}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+function evaluateDocumentLint(
+  content: string,
+  language: ReturnType<typeof detectLanguage>,
+) {
+  if (language !== 'markdown') {
+    return { ok: true, label: 'PASS (syntax)' }
+  }
+
+  const trimmed = content.trimStart()
+  const hasFrontmatter = trimmed.startsWith('---')
+  if (!hasFrontmatter) {
+    return { ok: false, label: 'WARN (missing frontmatter)' }
+  }
+
+  const requiredFields = ['title:', 'type:', 'status:']
+  const missingField = requiredFields.find((field) => !trimmed.includes(field))
+  if (missingField) {
+    return { ok: false, label: `WARN (${missingField.slice(0, -1)})` }
+  }
+
+  return { ok: true, label: 'PASS (frontmatter)' }
+}
+
+function DocumentEditContextPanel({
+  projectSlug,
+  document,
+  entityMentions,
+  draftAgeSeconds,
+  isSaving,
+  lintState,
+}: {
+  projectSlug: string
+  document: DocumentMeta
+  entityMentions: DocumentEntityMention[]
+  draftAgeSeconds: number
+  isSaving: boolean
+  lintState: { ok: boolean; label: string }
+}) {
+  const uniqueMentions = dedupeEntityMentions(entityMentions)
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="flex flex-col gap-[10px] p-[16px]">
+        <p className="text-[11px] font-semibold text-[#666]">CONTEXT: DOCUMENT</p>
+        <div className="h-px w-full bg-[#e1e8ed]" />
+
+        <p className="text-[11px] font-semibold text-[#666]">DOCUMENT METADATA</p>
+        <EditMetadataRow label="Current Hash" value={formatCurrentHash(document.content_hash)} monospace />
+        <EditMetadataRow label="Optimistic Locking" value="ON" statusTone="success" />
+        <EditMetadataRow label="Version" value={formatVersionNumber(document.version)} />
+
+        <div className="h-px w-full bg-[#e1e8ed]" />
+
+        <p className="text-[11px] font-semibold text-[#666]">WORKSPACE DRAFT</p>
+        <EditMetadataRow label="Autosave" value={isSaving ? 'Saving…' : 'Idle'} />
+        <EditMetadataRow label="Draft age" value={`${draftAgeSeconds}s`} />
+
+        <div className="h-px w-full bg-[#e1e8ed]" />
+
+        <p className="text-[11px] font-semibold text-[#666]">ENTITIES IN SOURCE</p>
+        {uniqueMentions.length === 0 ? (
+          <p className="text-[11px] text-[#666]">No entities detected yet.</p>
+        ) : (
+          <div className="flex flex-col gap-[8px]">
+            {uniqueMentions.map((mention) => (
+              <div key={`${mention.entity_type}:${mention.canonical_name}`} className="flex items-center gap-[8px]">
+                <span className="inline-block size-[6px] rounded-full bg-[#22a5f1]" />
+                <Link
+                  to="/projects/$slug/entities/$entityId"
+                  params={{ slug: projectSlug, entityId: mention.entity_id }}
+                  className="text-[11px] text-[#22a5f1] hover:underline"
                 >
-                  <option value="">Choose collection</option>
-                  {collections.map((collection: CollectionItem) => (
-                    <option key={collection.id} value={collection.id}>
-                      {collection.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="flex items-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleAddToCollection}
-                  disabled={addToCollectionMutation.isPending || !selectedCollectionId}
-                >
-                  {addToCollectionMutation.isPending ? 'Adding…' : 'Add'}
-                </Button>
+                  {mention.canonical_name}
+                </Link>
               </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-              <label className="space-y-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                Create collection
-                <Input
-                  value={newCollectionName}
-                  onChange={(event) => setNewCollectionName(event.target.value)}
-                  placeholder="Architecture decisions"
-                />
-              </label>
-              <div className="flex items-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleCreateCollection}
-                  disabled={createCollectionMutation.isPending || !newCollectionName.trim()}
-                >
-                  <FolderPlus className="size-3.5" />
-                  {createCollectionMutation.isPending ? 'Creating…' : 'Create + add'}
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {documentCollections.length === 0 ? (
-                <div className="rounded border border-dashed border-border bg-muted px-3 py-4 text-sm text-muted-foreground">
-                  This document is not in any collection yet.
-                </div>
-              ) : (
-                documentCollections.map((collection: CollectionItem) => (
-                  <div
-                    key={collection.id}
-                    className="flex items-center justify-between gap-3 rounded border border-border bg-white px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-medium">{collection.name}</div>
-                      {collection.description && (
-                        <div className="mt-1 text-sm text-muted-foreground">{collection.description}</div>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      onClick={() => void removeFromCollectionMutation.mutateAsync(collection.id)}
-                    >
-                      <Trash2 className="size-3.5" />
-                      Remove
-                    </Button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </CardShell>
-      </div>
-
-      {headings.length > 0 && (
-        <div className="rounded border border-border bg-white p-5 shadow-sm">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Outline
-          </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {headings.map((heading) => (
-              <a
-                key={heading.id}
-                href={`#${heading.id}`}
-                className="rounded border border-border bg-muted px-3 py-2 text-sm transition-colors hover:bg-accent/50"
-                style={{ paddingLeft: `${0.75 + (heading.level - 1) * 0.5}rem` }}
-              >
-                {heading.text}
-              </a>
             ))}
           </div>
+        )}
+
+        <div className="h-px w-full bg-[#e1e8ed]" />
+
+        <div className="flex items-center gap-[8px] text-[11px]">
+          <span
+            className={`inline-block size-[6px] rounded-full ${
+              lintState.ok ? 'bg-[#5cb85c]' : 'bg-[#f0ad4e]'
+            }`}
+          />
+          <span className={lintState.ok ? 'text-[#5cb85c]' : 'text-[#a86f00]'}>
+            Linter: {lintState.label}
+          </span>
         </div>
-      )}
+      </div>
+    </ScrollArea>
+  )
+}
+
+function EditMetadataRow({
+  label,
+  value,
+  monospace = false,
+  statusTone = 'default',
+}: {
+  label: string
+  value: string
+  monospace?: boolean
+  statusTone?: 'default' | 'success'
+}) {
+  return (
+    <div className="flex items-start justify-between gap-[12px] text-[11px]">
+      <span className="text-[#666]">{label}</span>
+      <span
+        className={[
+          monospace ? 'font-mono' : 'font-medium',
+          statusTone === 'success' ? 'text-[#5cb85c]' : 'text-[#333]',
+        ].join(' ')}
+      >
+        {value}
+      </span>
     </div>
   )
 }

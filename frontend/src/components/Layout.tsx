@@ -1,8 +1,23 @@
-import { createContext, useContext, useEffect, type ReactNode } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import { PanelRight, Search, Settings } from 'lucide-react'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 
-import { useContextPanel } from '@/lib/context-panel'
+import { useContextPanel, useContextPanelState } from '@/lib/context-panel'
+import { resolveSelectedProject } from '@/lib/route-project'
+import {
+  draftFromRouteSearch,
+  parseSearchRouteState,
+  routeSearchFromDraft,
+} from '@/lib/search-route'
 import { toggleCommandPalette } from '@/components/CommandPalette'
 import { Sidebar } from './Sidebar'
 
@@ -38,8 +53,20 @@ export function LayoutConfigProvider({
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const { content, open, setOpen, toggleOpen } = useContextPanel()
+  const { content, open } = useContextPanelState()
+  const { setOpen, toggleOpen } = useContextPanel()
   const layoutConfig = useLayoutConfig()
+  const headerSearchRef = useRef<HTMLInputElement | null>(null)
+  const routeSearch = useMemo(() => parseSearchRouteState(location.searchStr), [location.searchStr])
+  const searchDraft = useMemo(() => draftFromRouteSearch(routeSearch), [routeSearch])
+  const showHeaderSearch = location.pathname === '/search' && Boolean(searchDraft.query.trim())
+  const [headerSearchQuery, setHeaderSearchQuery] = useState(searchDraft.query)
+
+  useEffect(() => {
+    if (showHeaderSearch) {
+      setHeaderSearchQuery(searchDraft.query)
+    }
+  }, [searchDraft.query, showHeaderSearch])
 
   useEffect(() => {
     const focusSearch = () => {
@@ -62,6 +89,11 @@ export function Layout({ children }: { children: ReactNode }) {
       ) {
         event.preventDefault()
         if (location.pathname === '/search') {
+          if (showHeaderSearch) {
+            headerSearchRef.current?.focus()
+            headerSearchRef.current?.select()
+            return
+          }
           focusSearch()
           return
         }
@@ -93,11 +125,15 @@ export function Layout({ children }: { children: ReactNode }) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [content, location.pathname, navigate, open, setOpen])
+  }, [content, location.pathname, navigate, open, setOpen, showHeaderSearch])
 
-  const selectedProject = location.pathname.startsWith('/projects/')
-    ? decodeURIComponent(location.pathname.split('/')[2] ?? '')
-    : null
+  const selectedProject = resolveSelectedProject(location.pathname, location.searchStr)
+
+  const handleHeaderSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const nextDraft = { ...searchDraft, query: headerSearchQuery }
+    navigate({ to: '/search', search: routeSearchFromDraft(nextDraft) })
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -118,41 +154,54 @@ export function Layout({ children }: { children: ReactNode }) {
             <span className="text-[13px] text-white/60">No project</span>
           )}
         </div>
-        <div className="flex items-center gap-3 text-white">
-          <button
-            type="button"
-            className="text-[14px] hover:text-white/80"
-            onClick={() => {
-              if (location.pathname === '/search') {
-                window.dispatchEvent(new CustomEvent('datum:focus-search'))
-                return
-              }
-              navigate({ to: '/search' })
-              window.setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('datum:focus-search'))
-              }, 0)
-            }}
-          >
-            <Search className="size-4" />
-          </button>
-          <button
-            type="button"
-            className="text-[14px] hover:text-white/80"
-            onClick={toggleCommandPalette}
-          >
-            <Settings className="size-4" />
-          </button>
-          {content && (
+        {showHeaderSearch ? (
+          <form onSubmit={handleHeaderSearchSubmit} className="flex items-center gap-3">
+            <input
+              ref={headerSearchRef}
+              value={headerSearchQuery}
+              onChange={(event) => setHeaderSearchQuery(event.target.value)}
+              placeholder="/auth flow...?"
+              className="h-[24px] w-[190px] rounded-[4px] border border-[#22a5f1] bg-transparent px-[10px] text-[12px] text-white outline-none placeholder:text-white/45"
+            />
+            <span className="text-[12px]">admin ▾</span>
+          </form>
+        ) : (
+          <div className="flex items-center gap-3 text-white">
             <button
               type="button"
               className="text-[14px] hover:text-white/80"
-              onClick={toggleOpen}
+              onClick={() => {
+                if (location.pathname === '/search') {
+                  window.dispatchEvent(new CustomEvent('datum:focus-search'))
+                  return
+                }
+                navigate({ to: '/search' })
+                window.setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('datum:focus-search'))
+                }, 0)
+              }}
             >
-              <PanelRight className="size-4" />
+              <Search className="size-4" />
             </button>
-          )}
-          <span className="text-[12px]">admin ▾</span>
-        </div>
+            <button
+              type="button"
+              className="text-[14px] hover:text-white/80"
+              onClick={toggleCommandPalette}
+            >
+              <Settings className="size-4" />
+            </button>
+            {content && (
+              <button
+                type="button"
+                className="text-[14px] hover:text-white/80"
+                onClick={toggleOpen}
+              >
+                <PanelRight className="size-4" />
+              </button>
+            )}
+            <span className="text-[12px]">admin ▾</span>
+          </div>
+        )}
       </header>
       {/* Body — sidebar + main + context panel */}
       <div className="flex min-h-0 flex-1">

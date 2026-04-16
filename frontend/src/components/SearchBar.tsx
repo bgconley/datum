@@ -9,9 +9,13 @@ interface SearchBarProps {
   value: SearchDraft
   projects: Project[]
   loading?: boolean
+  compact?: boolean
+  hideQuery?: boolean
+  showAdvanced?: boolean
   onChange: (next: SearchDraft) => void
   onSearch: () => void | Promise<void>
   onReset: () => void
+  onToggleAdvanced?: () => void
 }
 
 const selectClassName =
@@ -37,11 +41,17 @@ export function SearchBar({
   value,
   projects,
   loading = false,
+  compact = false,
+  hideQuery = false,
+  showAdvanced = false,
   onChange,
   onSearch,
   onReset,
+  onToggleAdvanced,
 }: SearchBarProps) {
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const advancedOpen = compact ? showAdvanced : true
+  const modeLabel = SEARCH_MODES.find((mode) => mode.value === value.mode)?.label ?? 'Search'
 
   useEffect(() => {
     const handleFocusSearch = () => {
@@ -62,42 +72,105 @@ export function SearchBar({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded border border-border bg-white p-5 shadow-sm">
+    <form
+      onSubmit={handleSubmit}
+      className={
+        compact
+          ? 'rounded-[4px] border border-[#e1e8ed] bg-white p-4 shadow-sm'
+          : 'rounded border border-border bg-white p-5 shadow-sm'
+      }
+    >
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap gap-2">
-          {SEARCH_MODES.map((mode) => (
-            <Button
-              key={mode.value}
-              type="button"
-              size="xs"
-              variant={value.mode === mode.value ? 'default' : 'outline'}
-              onClick={() => onChange({ ...value, mode: mode.value })}
-            >
-              {mode.label}
-            </Button>
-          ))}
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            ref={inputRef}
-            value={value.query}
-            onChange={(event) => onChange({ ...value, query: event.target.value })}
-            placeholder={placeholders[value.mode]}
-            className="flex-1"
-            autoFocus
-          />
-          <div className="flex gap-2">
-            <Button type="submit" disabled={loading || !value.query.trim()}>
-              {loading ? 'Searching...' : 'Search'}
-            </Button>
-            <Button type="button" variant="outline" onClick={onReset} disabled={loading}>
-              Reset
-            </Button>
+        {compact ? (
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="rounded-full bg-[#f3f6f8] px-[10px] py-[5px] text-[10px] font-semibold uppercase tracking-[0.18em] text-[#1b2431]">
+                {modeLabel}
+              </span>
+              {!hideQuery ? (
+                <Input
+                  ref={inputRef}
+                  value={value.query}
+                  onChange={(event) => onChange({ ...value, query: event.target.value })}
+                  placeholder={placeholders[value.mode]}
+                  className="h-9 flex-1 border-[#22a5f1] text-[13px]"
+                  autoFocus
+                />
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" size="sm" disabled={loading || !value.query.trim()}>
+                {loading ? 'Searching...' : 'Run Search'}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onToggleAdvanced}
+              >
+                {advancedOpen ? 'Hide Filters' : 'Refine Search'}
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={onReset} disabled={loading}>
+                Reset
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {SEARCH_MODES.map((mode) => (
+                <Button
+                  key={mode.value}
+                  type="button"
+                  size="xs"
+                  variant={value.mode === mode.value ? 'default' : 'outline'}
+                  onClick={() => onChange({ ...value, mode: mode.value })}
+                >
+                  {mode.label}
+                </Button>
+              ))}
+            </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                ref={inputRef}
+                value={value.query}
+                onChange={(event) => onChange({ ...value, query: event.target.value })}
+                placeholder={placeholders[value.mode]}
+                className="flex-1"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button type="submit" disabled={loading || !value.query.trim()}>
+                  {loading ? 'Searching...' : 'Search'}
+                </Button>
+                <Button type="button" variant="outline" onClick={onReset} disabled={loading}>
+                  Reset
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {advancedOpen && (
+          <>
+            {compact && (
+              <div className="flex flex-wrap gap-2 border-t border-[#e1e8ed] pt-3">
+                {SEARCH_MODES.map((mode) => (
+                  <Button
+                    key={mode.value}
+                    type="button"
+                    size="xs"
+                    variant={value.mode === mode.value ? 'default' : 'outline'}
+                    onClick={() => onChange({ ...value, mode: mode.value })}
+                  >
+                    {mode.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <label className="space-y-1 text-sm">
             <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Project
@@ -193,11 +266,16 @@ export function SearchBar({
               <option value={50}>50</option>
             </select>
           </label>
-        </div>
 
-        <div className="text-xs leading-5 text-muted-foreground">
-          Search modes shape the retrieval task without hiding the underlying cabinet scope. Use current/all for day-to-day retrieval, as-of for temporal reconstruction, snapshot for named release states, and branch for head-set lookup outside main.
-        </div>
+            </div>
+
+            <div className="text-xs leading-5 text-muted-foreground">
+              Search modes shape the retrieval task without hiding the underlying cabinet scope. Use
+              current/all for day-to-day retrieval, as-of for temporal reconstruction, snapshot for
+              named release states, and branch for head-set lookup outside main.
+            </div>
+          </>
+        )}
       </div>
     </form>
   )

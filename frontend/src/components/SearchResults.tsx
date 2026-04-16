@@ -55,6 +55,13 @@ function provenanceLabel(result: SearchResultItem): string {
   return 'ParadeDB'
 }
 
+function humanizeAnswerError(error: string): string {
+  if (/chat\/completions|404 Not Found|Connection refused|ECONNREFUSED|timed out/i.test(error)) {
+    return 'Answer synthesis is temporarily unavailable. Ranked retrieval results are still shown below.'
+  }
+  return error
+}
+
 export function SearchResults({
   results,
   latencyMs,
@@ -87,6 +94,8 @@ export function SearchResults({
       result.entities.some((e) => e.canonical_name === entityFacet),
     )
   }, [results, entityFacet])
+  const answerText = answer?.answer?.trim() ?? ''
+  const answerError = answer?.error?.trim() ? humanizeAnswerError(answer.error) : ''
 
   useEffect(() => {
     setContent(
@@ -203,17 +212,17 @@ export function SearchResults({
         </span>
       </div>
 
-      {answer && (answer.answer || answer.error) && (
+      {answer && (answerText || answerError) && (
         <div className="flex h-[100px] items-start overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white">
           <div className="h-full w-[4px] shrink-0 bg-[#d9534f]" />
           <div className="flex min-w-0 flex-1 flex-col gap-[8px] px-[16px] py-[14px]">
             <span className="text-[9px] font-semibold text-[#666]">AI SYNTHESIS</span>
-            {answer.error ? (
-              <p className="line-clamp-2 text-[12px] text-[#666]">{answer.error}</p>
+            {answerError ? (
+              <p className="line-clamp-2 text-[12px] text-[#666]">{answerError}</p>
             ) : (
-              <p className="line-clamp-2 text-[12px] text-[#333]">{answer.answer}</p>
+              <p className="line-clamp-2 text-[12px] text-[#333]">{answerText}</p>
             )}
-            {!answer.error && answer.citations.length > 0 && (
+            {!answerError && answer.citations.length > 0 && (
               <div className="flex items-start gap-[6px] text-[10px]">
                 <span className="text-[#666]">Citations:</span>
                 {answer.citations.map((citation) => (

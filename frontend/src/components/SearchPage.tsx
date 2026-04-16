@@ -114,6 +114,7 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
+  const [searchOptionsOpen, setSearchOptionsOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [streamPhase, setStreamPhase] = useState<'idle' | 'lexical' | 'reranked' | 'answer_ready'>('idle')
   const [semanticEnabled, setSemanticEnabled] = useState<boolean | null>(null)
@@ -258,6 +259,12 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
     })
   }, [executeSearch, routeDraft, routeDraftKey])
 
+  useEffect(() => {
+    if (!searched) {
+      setSearchOptionsOpen(false)
+    }
+  }, [searched])
+
   const handleSearch = async () => {
     const currentDraft = draftFromRouteSearch(routeSearch)
     if (draftsEqual(currentDraft, draft)) {
@@ -393,11 +400,12 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
 
   const scopeSummary = describeScope(draft, projects)
 
+  const compactSearch = searched
   const hasResults = searched && !error
 
   return (
-    <div className={hasResults ? 'flex flex-col gap-[14px] px-[24px] py-[20px]' : 'mx-auto flex max-w-5xl flex-col gap-6 p-8'}>
-      {!hasResults && (
+    <div className={compactSearch ? 'flex flex-col gap-[14px] px-[24px] py-[20px]' : 'mx-auto flex max-w-5xl flex-col gap-6 p-8'}>
+      {!searched && (
         <div className="rounded border border-border bg-white p-8 shadow-sm">
           <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
             Search workspace
@@ -415,12 +423,24 @@ export function SearchPage({ routeSearch, navigateToSearch }: SearchPageProps) {
         value={draft}
         projects={projects}
         loading={loading}
+        compact={compactSearch}
+        hideQuery={compactSearch}
+        showAdvanced={searchOptionsOpen}
         onChange={handleDraftChange}
         onSearch={handleSearch}
         onReset={handleReset}
+        onToggleAdvanced={() => setSearchOptionsOpen((current) => !current)}
       />
 
-      {!hasResults && draft.project && (
+      {compactSearch && searchOptionsOpen && draft.project && (
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => void handleSaveSearch()}>
+            Save current search
+          </Button>
+        </div>
+      )}
+
+      {!searched && draft.project && (
         <div className="rounded border border-border bg-white p-5">
           <div className="flex items-center justify-between gap-3">
             <div>

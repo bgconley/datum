@@ -14,6 +14,54 @@ interface ContextPanelProps {
 const SECTION = 'text-[11px] font-semibold text-[#666]'
 const DIVIDER = 'h-px w-full bg-[#e1e8ed]'
 
+function formatVersionNumber(version: number) {
+  return `v${String(version).padStart(3, '0')}`
+}
+
+function formatActorLabel(version: VersionInfo | undefined) {
+  const source = version?.created_by ?? version?.change_source ?? 'web-ui'
+  const role = version?.change_source === 'agent' ? 'Agent' : 'Human'
+  return `${source} (${role})`
+}
+
+function formatVersionCreated(createdAt: string | undefined) {
+  if (!createdAt) {
+    return 'N/A'
+  }
+  const parsed = new Date(createdAt)
+  return Number.isNaN(parsed.getTime()) ? 'N/A' : parsed.toLocaleString()
+}
+
+function buildTocEntries(
+  documentTitle: string,
+  headings: Array<{ id: string; level: number; text: string }>,
+) {
+  const visibleHeadings = headings.filter(
+    (heading, index) => !(index === 0 && heading.level === 1 && heading.text.trim() === documentTitle.trim()),
+  )
+  if (visibleHeadings.length === 0) {
+    return []
+  }
+
+  const baseLevel = Math.min(...visibleHeadings.map((heading) => heading.level))
+  const counters: number[] = []
+
+  return visibleHeadings.map((heading) => {
+    const normalizedLevel = Math.max(heading.level - baseLevel + 1, 1)
+    while (counters.length < normalizedLevel) {
+      counters.push(0)
+    }
+    counters.length = normalizedLevel
+    counters[normalizedLevel - 1] += 1
+
+    return {
+      ...heading,
+      number: counters.join('.'),
+      normalizedLevel,
+    }
+  })
+}
+
 export function ContextPanel({
   projectSlug,
   document: doc,
@@ -23,6 +71,7 @@ export function ContextPanel({
 }: ContextPanelProps) {
   const recentVersions = [...versions].slice(-5).reverse()
   const latestVersion = recentVersions[0]
+  const tocEntries = buildTocEntries(doc.title, headings)
 
   // Deduplicate entity mentions
   const seen = new Set<string>()
@@ -43,7 +92,7 @@ export function ContextPanel({
         {/* Version / Updated / By */}
         <div className="flex items-start justify-between text-[11px]">
           <span className="text-[#666]">Version</span>
-          <span className="font-medium text-[#333]">v{String(doc.version).padStart(3, '0')}</span>
+          <span className="font-medium text-[#333]">{formatVersionNumber(doc.version)}</span>
         </div>
         <div className="flex items-start justify-between text-[11px]">
           <span className="text-[#666]">Updated</span>
@@ -53,26 +102,25 @@ export function ContextPanel({
         </div>
         <div className="flex items-start justify-between text-[11px]">
           <span className="text-[#666]">By</span>
-          <span className="font-medium text-[#333]">
-            {latestVersion?.change_source ?? 'web-ui'} ({latestVersion?.change_source === 'agent' ? 'Agent' : 'Human'})
-          </span>
+          <span className="font-medium text-[#333]">{formatActorLabel(latestVersion)}</span>
         </div>
 
         <div className={DIVIDER} />
 
         {/* Table of Contents */}
-        {headings.length > 0 && (
+        {tocEntries.length > 0 && (
           <>
             <p className={SECTION}>TABLE OF CONTENTS</p>
-            {headings.map((h) => (
+            {tocEntries.map((h) => (
               <a
                 key={h.id}
                 href={`#${h.id}`}
                 className="text-[11px] text-[#22a5f1] hover:underline"
-                style={{ paddingLeft: h.level > 1 ? `${(h.level - 1) * 12}px` : undefined }}
+                style={{
+                  paddingLeft: h.normalizedLevel > 1 ? `${(h.normalizedLevel - 1) * 12}px` : undefined,
+                }}
               >
-                {h.level <= 2 ? `${headings.filter((x) => x.level <= h.level).indexOf(h) + 1}. ` : ''}
-                {h.text}
+                {h.number}. {h.text}
               </a>
             ))}
             <div className={DIVIDER} />
@@ -118,12 +166,12 @@ export function ContextPanel({
               <div key={v.version_number} className="rounded-[4px] border border-[#e1e8ed] bg-[#f7f9fa] px-[12px] py-[8px]">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-medium text-[#333]">
-                    v{String(v.version_number).padStart(3, '0')}
+                    {formatVersionNumber(v.version_number)}
                   </span>
                   <span className="text-[10px] text-[#999]">{v.change_source}</span>
                 </div>
                 <div className="mt-1 text-[10px] text-[#999]">
-                  {new Date(v.created).toLocaleString()}
+                  {formatVersionCreated(v.created_at)}
                 </div>
                 <div className="mt-1 flex gap-[6px]">
                   <span className="rounded-[3px] bg-[#e1e8ed] px-[6px] py-[2px] text-[9px] font-semibold text-[#333]">

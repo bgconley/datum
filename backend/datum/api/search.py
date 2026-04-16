@@ -1,5 +1,5 @@
 import time
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
@@ -24,6 +24,14 @@ from datum.services.preflight import record_preflight
 from datum.services.search import SearchOptions, search_execution, stream_search
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
+
+
+def _source_ref_payload(source_ref: object) -> dict:
+    if is_dataclass(source_ref):
+        return asdict(source_ref)
+    if hasattr(source_ref, "__dict__"):
+        return vars(source_ref)
+    raise TypeError("Unsupported source_ref payload")
 
 
 def _resolve_search_options(body: SearchRequest) -> tuple[SearchOptions, bool]:
@@ -71,7 +79,7 @@ async def api_search(
                     CitationResponse(
                         index=item.index,
                         human_readable=item.human_readable,
-                        source_ref=SourceRefResponse(**item.source_ref.__dict__),
+                        source_ref=SourceRefResponse(**_source_ref_payload(item.source_ref)),
                     )
                     for item in answer_response.citations
                     if item.source_ref is not None
@@ -168,7 +176,7 @@ async def api_search_stream(
                             CitationResponse(
                                 index=item.index,
                                 human_readable=item.human_readable,
-                                source_ref=SourceRefResponse(**item.source_ref.__dict__),
+                                source_ref=SourceRefResponse(**_source_ref_payload(item.source_ref)),
                             )
                             for item in answer_response.citations
                             if item.source_ref is not None

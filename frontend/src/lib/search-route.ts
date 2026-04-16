@@ -39,6 +39,22 @@ export const DEFAULT_SEARCH_DRAFT: SearchDraft = {
   limit: 20,
 }
 
+const VALID_SEARCH_MODES = new Set<SearchMode>([
+  'find_docs',
+  'ask_question',
+  'find_decisions',
+  'search_history',
+  'compare_over_time',
+])
+
+const VALID_SEARCH_SCOPES = new Set<SearchVersionMode>([
+  'current',
+  'all',
+  'as_of',
+  'snapshot',
+  'branch',
+])
+
 export function toDatetimeLocalValue(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
@@ -120,6 +136,31 @@ export function draftFromRouteSearch(search: SearchRouteState): SearchDraft {
     snapshot: '',
     branch: '',
     limit,
+  }
+}
+
+export function parseSearchRouteState(searchStr: string): SearchRouteState {
+  const params = new URLSearchParams(searchStr.startsWith('?') ? searchStr.slice(1) : searchStr)
+  const mode = params.get('mode')
+  const scope = params.get('scope')
+  const limitValue = params.get('limit')
+  const parsedLimit = limitValue ? Number(limitValue) : undefined
+
+  return {
+    query: params.get('query') ?? undefined,
+    project: params.get('project') ?? undefined,
+    mode: mode && VALID_SEARCH_MODES.has(mode as SearchMode) ? (mode as SearchMode) : undefined,
+    scope:
+      scope && VALID_SEARCH_SCOPES.has(scope as SearchVersionMode)
+        ? (scope as SearchVersionMode)
+        : undefined,
+    as_of: params.get('as_of') ?? undefined,
+    snapshot: params.get('snapshot') ?? undefined,
+    branch: params.get('branch') ?? undefined,
+    limit:
+      parsedLimit != null && Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? parsedLimit
+        : undefined,
   }
 }
 

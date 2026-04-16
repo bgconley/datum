@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
@@ -22,9 +22,11 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { api, type AttachmentItem, type DocumentMeta, type GeneratedFile } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
+import { resolveSelectedProject } from '@/lib/route-project'
 import { useProjectsQuery, useProjectWorkspaceQuery } from '@/lib/workspace-query'
 import { CreateDocumentDialog, openTemplateDialog } from './CreateDocumentDialog'
 import { CreateProjectDialog } from './CreateProjectDialog'
+import { UploadModal } from './UploadModal'
 
 const EMPTY_DOCUMENTS: DocumentMeta[] = []
 const EMPTY_ATTACHMENTS: AttachmentItem[] = []
@@ -46,7 +48,7 @@ export function Sidebar({ style }: SidebarProps) {
   const [movingAttachment, setMovingAttachment] = useState(false)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [renamingFolder, setRenamingFolder] = useState(false)
-  const [uploading, setUploading] = useState(false)
+  const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deletingFolder, setDeletingFolder] = useState(false)
   const [deletingAttachment, setDeletingAttachment] = useState(false)
@@ -56,9 +58,7 @@ export function Sidebar({ style }: SidebarProps) {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const selectedProject = location.pathname.startsWith('/projects/')
-    ? decodeURIComponent(location.pathname.split('/')[2] ?? '')
-    : null
+  const selectedProject = resolveSelectedProject(location.pathname, location.searchStr)
   const documentPrefix = selectedProject ? `/projects/${selectedProject}/docs/` : null
   let selectedDocument: string | null = null
   if (documentPrefix && location.pathname.startsWith(documentPrefix)) {
@@ -292,24 +292,6 @@ export function Sidebar({ style }: SidebarProps) {
     }
   }
 
-  const handleUploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file || !selectedProject) {
-      return
-    }
-    setUploading(true)
-    setOperationError(null)
-    try {
-      await api.upload.file(selectedProject, file)
-      await refreshProjectState()
-    } catch (error) {
-      setOperationError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setUploading(false)
-      event.target.value = ''
-    }
-  }
-
   // Build folder tree from document paths
   const folderTree = useMemo(() => {
     const folders = new Set<string>()
@@ -401,14 +383,7 @@ export function Sidebar({ style }: SidebarProps) {
             <button
               type="button"
               className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
-              onClick={() => {
-                const input = document.createElement('input')
-                input.type = 'file'
-                input.onchange = (event) => {
-                  handleUploadFile(event as unknown as ChangeEvent<HTMLInputElement>)
-                }
-                input.click()
-              }}
+              onClick={() => setUploadModalOpen(true)}
             >
               + Upload File
             </button>
@@ -426,6 +401,12 @@ export function Sidebar({ style }: SidebarProps) {
             >
               + New ADR
             </button>
+            <UploadModal
+              projectSlug={selectedProject}
+              open={uploadModalOpen}
+              onOpenChange={setUploadModalOpen}
+              onSuccess={() => refreshProjectState().catch(console.error)}
+            />
           </div>
         )}
 

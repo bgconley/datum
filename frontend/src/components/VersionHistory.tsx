@@ -232,20 +232,22 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
               const active = version.version_number === selectedB
 
               return (
-                <button
+                <div
                   key={version.version_number}
-                  type="button"
-                  onClick={() => {
-                    setSelectedA(selectedB)
-                    setSelectedB(version.version_number)
-                  }}
                   className={`flex w-full items-start justify-between border-l-[3px] px-[12px] py-[8px] text-left ${
                     active
                       ? 'border-l-[#22a5f1] bg-[#e8f4fd]'
                       : 'border-l-transparent hover:bg-[#f7f9fa]'
                   }`}
                 >
-                  <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedA(selectedB)
+                      setSelectedB(version.version_number)
+                    }}
+                    className="min-w-0 flex-1 text-left"
+                  >
                     <div className="flex items-center gap-[6px]">
                       <span className={`text-[12px] ${active ? 'font-semibold text-[#22a5f1]' : 'text-[#333]'}`}>
                         v{version.version_number.toString().padStart(3, '0')}
@@ -257,24 +259,23 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
                     <div className="mt-[2px] text-[10px] text-[#999]">
                       by {version.created_by ?? version.change_source ?? 'web-ui'}
                     </div>
+                  </button>
+                  <div className="ml-[12px] flex shrink-0 flex-col items-end gap-[6px]">
+                    <span className="text-[11px] text-[#333]">
+                      {new Date(version.created_at).toLocaleDateString()}
+                    </span>
                     {active && isLatest && (
                       <button
                         type="button"
-                        className="mt-[6px] rounded-[3px] bg-[#22a5f1] px-[10px] py-[4px] text-[10px] font-semibold text-white"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleRestore(version.version_number)
-                        }}
+                        className="rounded-[3px] bg-[#22a5f1] px-[10px] py-[4px] text-[10px] font-semibold text-white"
+                        onClick={() => handleRestore(version.version_number)}
                         disabled={restoreMutation.isPending}
                       >
                         {restoreMutation.isPending ? 'Restoring…' : 'RESTORE'}
                       </button>
                     )}
                   </div>
-                  <span className="text-[11px] text-[#333]">
-                    {new Date(version.created_at).toLocaleDateString()}
-                  </span>
-                </button>
+                </div>
               )
             })}
           </div>
