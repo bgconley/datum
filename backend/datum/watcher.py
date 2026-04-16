@@ -19,7 +19,7 @@ from datum.services.watcher_utils import compute_file_state, should_process_path
 logger = logging.getLogger(__name__)
 
 DEBOUNCE_SECONDS = 2.0
-HEARTBEAT_PATH = Path("/tmp/datum-watcher-heartbeat")
+HEARTBEAT_PATH = settings.cache_root / "watcher-heartbeat"
 
 
 class DebouncedHandler(FileSystemEventHandler):

@@ -39,11 +39,11 @@ async def _check_db_health(db: AsyncSession) -> HealthStatus:
     try:
         await db.execute(select(func.literal(1)))
         latency = (time.monotonic() - start) * 1000
-        return HealthStatus(subsystem="database", healthy=True, latency_ms=latency)
+        return HealthStatus(name="paradedb", healthy=True, latency_ms=latency)
     except Exception as exc:
         latency = (time.monotonic() - start) * 1000
         return HealthStatus(
-            subsystem="database", healthy=False, latency_ms=latency, error=str(exc)
+            name="paradedb", healthy=False, latency_ms=latency, error=str(exc)
         )
 
 
@@ -54,7 +54,7 @@ async def _check_watcher_health(heartbeat_path: Path) -> HealthStatus:
         if not heartbeat_path.exists():
             latency = (time.monotonic() - start) * 1000
             return HealthStatus(
-                subsystem="watcher",
+                name="file_watcher",
                 healthy=False,
                 latency_ms=latency,
                 error="heartbeat file not found",
@@ -64,31 +64,73 @@ async def _check_watcher_health(heartbeat_path: Path) -> HealthStatus:
         latency = (time.monotonic() - start) * 1000
         if age > 60:
             return HealthStatus(
-                subsystem="watcher",
+                name="file_watcher",
                 healthy=False,
                 latency_ms=latency,
                 error=f"heartbeat stale ({age:.0f}s old)",
             )
-        return HealthStatus(subsystem="watcher", healthy=True, latency_ms=latency)
+        return HealthStatus(name="file_watcher", healthy=True, latency_ms=latency)
     except Exception as exc:
         latency = (time.monotonic() - start) * 1000
         return HealthStatus(
-            subsystem="watcher", healthy=False, latency_ms=latency, error=str(exc)
+            name="file_watcher", healthy=False, latency_ms=latency, error=str(exc)
         )
 
 
-async def _check_model_health(model_type: str) -> HealthStatus:
+async def _check_zfs_mount(projects_root: Path) -> HealthStatus:
+    """Check ZFS by verifying the projects root mount is accessible."""
+    start = time.monotonic()
+    try:
+        exists = projects_root.exists() and projects_root.is_dir()
+        latency = (time.monotonic() - start) * 1000
+        if exists:
+            return HealthStatus(name="zfs_pool", healthy=True, latency_ms=latency)
+        return HealthStatus(
+            name="zfs_pool", healthy=False, latency_ms=latency, error="mount not accessible"
+        )
+    except Exception as exc:
+        latency = (time.monotonic() - start) * 1000
+        return HealthStatus(
+            name="zfs_pool", healthy=False, latency_ms=latency, error=str(exc)
+        )
+
+
+async def _check_worker_queue_health(db: AsyncSession) -> HealthStatus:
+    """Check worker queue by counting active ingestion jobs."""
+    start = time.monotonic()
+    try:
+        result = await db.execute(
+            select(func.count()).select_from(IngestionJob).where(
+                IngestionJob.status.in_(["queued", "processing"])
+            )
+        )
+        active_jobs = result.scalar() or 0
+        latency = (time.monotonic() - start) * 1000
+        return HealthStatus(
+            name="worker_queue",
+            healthy=True,
+            latency_ms=latency,
+            error=f"{active_jobs} jobs" if active_jobs > 0 else None,
+        )
+    except Exception as exc:
+        latency = (time.monotonic() - start) * 1000
+        return HealthStatus(
+            name="worker_queue", healthy=False, latency_ms=latency, error=str(exc)
+        )
+
+
+async def _check_model_health(model_type: str, display_name: str) -> HealthStatus:
     """Check a model service health endpoint with latency timing."""
     gateway = build_model_gateway()
     start = time.monotonic()
     try:
         healthy = await gateway.check_health(model_type)
         latency = (time.monotonic() - start) * 1000
-        return HealthStatus(subsystem=model_type, healthy=healthy, latency_ms=latency)
+        return HealthStatus(name=display_name, healthy=healthy, latency_ms=latency)
     except Exception as exc:
         latency = (time.monotonic() - start) * 1000
         return HealthStatus(
-            subsystem=model_type, healthy=False, latency_ms=latency, error=str(exc)
+            name=display_name, healthy=False, latency_ms=latency, error=str(exc)
         )
     finally:
         await gateway.close()
@@ -101,13 +143,13 @@ async def _check_zfs_health(zfs_status_path: Path) -> HealthStatus:
         if not zfs_status_path.exists():
             latency = (time.monotonic() - start) * 1000
             return HealthStatus(
-                subsystem="zfs", healthy=False, latency_ms=latency, error="status file not found"
+                name="zfs_pool", healthy=False, latency_ms=latency, error="status file not found"
             )
         content = zfs_status_path.read_text().strip().lower()
         latency = (time.monotonic() - start) * 1000
         healthy = content in {"online", "healthy", "ok"}
         return HealthStatus(
-            subsystem="zfs",
+            name="zfs_pool",
             healthy=healthy,
             latency_ms=latency,
             error=None if healthy else f"status: {content}",
@@ -115,7 +157,7 @@ async def _check_zfs_health(zfs_status_path: Path) -> HealthStatus:
     except Exception as exc:
         latency = (time.monotonic() - start) * 1000
         return HealthStatus(
-            subsystem="zfs", healthy=False, latency_ms=latency, error=str(exc)
+            name="zfs_pool", healthy=False, latency_ms=latency, error=str(exc)
         )
 
 
@@ -128,20 +170,24 @@ async def get_system_health(db: AsyncSession, app_settings: Settings) -> HealthR
             coros = [
                 _check_db_health(db),
                 _check_watcher_health(app_settings.watcher_heartbeat_path),
-                _check_model_health("embedding"),
-                _check_model_health("reranker"),
-                _check_model_health("ner"),
-                _check_model_health("llm"),
+                _check_worker_queue_health(db),
+                _check_model_health("embedding", "embedder"),
+                _check_model_health("reranker", "reranker"),
+                _check_model_health("ner", "gliner_ner"),
+                _check_model_health("llm", "llm"),
             ]
+            # Always check ZFS — use status file if available, otherwise check projects_root mount
             if app_settings.zfs_status_path is not None:
                 coros.append(_check_zfs_health(app_settings.zfs_status_path))
+            else:
+                coros.append(_check_zfs_mount(app_settings.projects_root))
 
             results = await asyncio.gather(*coros, return_exceptions=True)
             subsystems: list[HealthStatus] = []
             for result in results:
                 if isinstance(result, Exception):
                     subsystems.append(
-                        HealthStatus(subsystem="unknown", healthy=False, error=str(result))
+                        HealthStatus(name="unknown", healthy=False, error=str(result))
                     )
                 else:
                     subsystems.append(result)
@@ -153,7 +199,7 @@ async def get_system_health(db: AsyncSession, app_settings: Settings) -> HealthR
             )
         except asyncio.TimeoutError:
             subsystems = [
-                HealthStatus(subsystem="timeout", healthy=False, error="health check timed out")
+                HealthStatus(name="timeout", healthy=False, error="health check timed out")
             ]
 
         overall = all(s.healthy for s in subsystems)
@@ -166,7 +212,7 @@ async def get_system_health(db: AsyncSession, app_settings: Settings) -> HealthR
         logger.exception("Health check failed unexpectedly")
         return HealthResponse(
             subsystems=[
-                HealthStatus(subsystem="system", healthy=False, error=str(exc))
+                HealthStatus(name="system", healthy=False, error=str(exc))
             ],
             healthy=False,
             checked_at=datetime.now(UTC),

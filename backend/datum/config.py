@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     lifecycle_enforcement_mode: str = "advisory"
     preflight_ttl_seconds: int = Field(default=300, ge=1, le=86400)
     session_stale_hours: int = Field(default=24, ge=1, le=24 * 30)
-    watcher_heartbeat_path: Path = Path("cache/watcher-heartbeat")
+    watcher_heartbeat_path: Path = Path("/tank/datum/cache/watcher-heartbeat")
     zfs_status_path: Path | None = None
 
     # For local dev/testing, override paths

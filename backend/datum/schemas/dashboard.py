@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class HealthStatus(BaseModel):
-    subsystem: str
+    name: str
     healthy: bool
     latency_ms: float | None = None
     error: str | None = None

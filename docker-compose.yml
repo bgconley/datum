@@ -70,10 +70,12 @@ services:
     command: python -m datum.watcher
     volumes:
       - ${DATUM_PROJECTS_ROOT:-./dev/projects}:/tank/datum/projects
+      - ${DATUM_CACHE_ROOT:-./dev/cache}:/tank/datum/cache
     restart: unless-stopped
     environment:
       DATUM_DATABASE_URL: postgresql+asyncpg://datum:${DATUM_DB_PASSWORD:-datum_dev}@paradedb:5432/datum
       DATUM_PROJECTS_ROOT: /tank/datum/projects
+      DATUM_CACHE_ROOT: /tank/datum/cache
       DATUM_LIFECYCLE_ENFORCEMENT_MODE: ${DATUM_LIFECYCLE_ENFORCEMENT_MODE:-blocking}
     depends_on:
       paradedb:
@@ -84,7 +86,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "from pathlib import Path; import sys, time; heartbeat = Path('/tmp/datum-watcher-heartbeat'); sys.exit(0 if heartbeat.exists() and time.time() - heartbeat.stat().st_mtime < 30 else 1)",
+          "from pathlib import Path; import sys, time; heartbeat = Path('/tank/datum/cache/watcher-heartbeat'); sys.exit(0 if heartbeat.exists() and time.time() - heartbeat.stat().st_mtime < 30 else 1)",
         ]
       interval: 15s
       timeout: 5s
