@@ -30,73 +30,78 @@ function HistoryContextPanel({
   const latestVersion = versions.length > 0 ? versions[versions.length - 1] : null
 
   return (
-    <div className="space-y-5 p-5">
-      <div>
-        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Context: History
-        </div>
-        <h2 className="mt-2 text-xl font-semibold tracking-tight">Version history</h2>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Compare immutable cabinet versions and restore prior states without rewriting history.
-        </p>
-      </div>
+    <div className="flex flex-col gap-[10px] p-[16px]">
+      <p className="text-[11px] font-semibold text-[#666]">CONTEXT: HISTORY</p>
+      <div className="h-px w-full bg-[#e1e8ed]" />
 
       {latestVersion && (
-        <div className="rounded border border-border bg-muted p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Change source
+        <>
+          <div className="flex items-start justify-between text-[11px]">
+            <span className="text-[#666]">Change Source</span>
+            <span className="font-medium text-[#333]">
+              {latestVersion.created_by ?? latestVersion.change_source ?? 'unknown'}
+            </span>
           </div>
-          <div className="mt-2 text-sm">
-            {latestVersion.created_by ?? latestVersion.change_source ?? 'unknown'}
+          <div className="flex items-start justify-between text-[11px]">
+            <span className="text-[#666]">Diffing</span>
+            <span className="font-medium text-[#333]">
+              {selectedA && selectedB
+                ? `v${selectedA.toString().padStart(3, '0')} ↔ v${selectedB.toString().padStart(3, '0')}`
+                : 'N/A'}
+            </span>
           </div>
-        </div>
-      )}
+          <div className="h-px w-full bg-[#e1e8ed]" />
 
-      {latestVersion && (
-        <div className="rounded border border-border bg-muted p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Technical metadata
-          </div>
-          <div className="mt-2 space-y-1 font-mono text-xs text-muted-foreground">
-            <div>file: {latestVersion.version_file}</div>
-            <div>hash: {latestVersion.content_hash}</div>
-            <div>indexing: {latestVersion.indexing_status ?? 'unknown'}</div>
-          </div>
-        </div>
-      )}
-
-      <Separator />
-
-      <div className="rounded border border-border bg-muted p-4">
-        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Selected comparison
-        </div>
-        <div className="mt-3 space-y-2 text-sm">
-          <div>Base: {selectedA ? `v${selectedA.toString().padStart(3, '0')}` : 'Not selected'}</div>
-          <div>Target: {selectedB ? `v${selectedB.toString().padStart(3, '0')}` : 'Not selected'}</div>
-          {diff && (
-            <div className="flex items-center gap-3 text-xs">
-              <Badge className="border-green-200 bg-green-50 text-green-700">+{diff.additions}</Badge>
-              <Badge className="border-red-200 bg-red-50 text-red-700">-{diff.deletions}</Badge>
+          <p className="text-[11px] font-semibold text-[#666]">TECHNICAL METADATA</p>
+          <div className="space-y-1 font-mono text-[11px] text-[#333]">
+            <div className="flex justify-between">
+              <span className="text-[#666]">File</span>
+              <span>{latestVersion.version_file}</span>
             </div>
-          )}
-        </div>
-      </div>
+            <div className="flex justify-between">
+              <span className="text-[#666]">Hash</span>
+              <span className="truncate max-w-[120px]">{latestVersion.content_hash}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[#666]">Size</span>
+              <span>-</span>
+            </div>
+          </div>
+          <div className="h-px w-full bg-[#e1e8ed]" />
 
-      {latestVersion && (
-        <div className="space-y-3">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Pipeline status
+          <p className="text-[11px] font-semibold text-[#666]">PIPELINE STATUS</p>
+          <div className="space-y-2 text-[11px]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-[6px]">
+                <span className="inline-block size-[8px] rounded-full bg-[#5cb85c]" />
+                <span className="text-[#666]">Chunking</span>
+              </div>
+              <span className="font-medium text-[#333]">OK</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-[6px]">
+                <span className="inline-block size-[8px] rounded-full bg-[#5cb85c]" />
+                <span className="text-[#666]">Embedding</span>
+              </div>
+              <span className="font-medium text-[#333]">OK</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-[6px]">
+                <span className="inline-block size-[8px] rounded-full bg-[#5cb85c]" />
+                <span className="text-[#666]">NER</span>
+              </div>
+              <span className="font-medium text-[#333]">OK</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="inline-block size-2 rounded-full bg-green-500" />
-            {latestVersion.indexing_status ?? 'unknown'}
+          <div className="flex gap-[8px]">
+            <button type="button" className="rounded-[4px] bg-[#22a5f1] px-[12px] py-[6px] text-[10px] font-semibold text-white">
+              RE-INDEX
+            </button>
+            <button type="button" className="rounded-[4px] bg-[#5cb85c] px-[12px] py-[6px] text-[10px] font-semibold text-white">
+              RE-EXTRACT
+            </button>
           </div>
-          <div className="flex gap-2">
-            <Button type="button" size="xs" variant="outline">Re-index</Button>
-            <Button type="button" size="xs" variant="outline">Re-extract</Button>
-          </div>
-        </div>
+        </>
       )}
     </div>
   )
@@ -189,198 +194,134 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
     return <div className="p-8 text-muted-foreground">Loading version history…</div>
   }
 
+  const filename = docPath.split('/').pop() ?? docPath
+
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-8">
-      <div className="flex flex-col gap-4 rounded border border-border bg-white p-8 shadow-sm md:flex-row md:items-end md:justify-between">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Version history
-          </div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">{docPath}</h1>
-          <p className="mt-3 text-sm leading-7 text-muted-foreground">
-            Compare immutable document versions, inspect technical state, and restore a prior head when needed.
-          </p>
-        </div>
+    <div className="flex flex-col gap-[12px] overflow-auto px-[24px] py-[20px]">
+      {/* Title — Figma: filename (History) Diffing: vXXX ↔ vYYY */}
+      <div className="flex items-center gap-[8px]">
+        <span className="text-[18px] font-semibold text-[#1b2431]">{filename}</span>
         <Link
           to="/projects/$slug/docs/$"
           params={{ slug: projectSlug, _splat: docPath }}
-          className="inline-flex h-8 items-center rounded border border-border bg-white px-3 text-sm font-medium transition-colors hover:bg-muted"
+          className="text-[13px] text-[#22a5f1] hover:underline"
         >
-          <ArrowLeft className="mr-1 size-4" />
-          Back to document
+          (History)
         </Link>
+        {selectedA != null && selectedB != null && (
+          <span className="text-[13px] text-[#999]">
+            Diffing: v{selectedA.toString().padStart(3, '0')} ↔ v{selectedB.toString().padStart(3, '0')}
+          </span>
+        )}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.3fr)_minmax(0,0.7fr)]">
-        <Card className="bg-white">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <GitCompareArrows className="size-4" />
-              Compare and restore
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <label className="block text-sm">
-              <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                Base version
-              </span>
-              <select
-                value={selectedA ?? ''}
-                onChange={(event) => setSelectedA(Number(event.target.value))}
-                className="mt-2 h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none"
-              >
-                {versions.map((version) => (
-                  <option key={`base-${version.version_number}`} value={version.version_number}>
-                    v{version.version_number.toString().padStart(3, '0')} · {version.branch}
-                  </option>
-                ))}
-              </select>
-            </label>
+      {/* Split: version list + diff */}
+      <div className="flex gap-[12px]" style={{ minHeight: 0, flex: '1 1 0' }}>
+        {/* Version list — left ~30% */}
+        <div className="flex w-[280px] shrink-0 flex-col">
+          {/* Table header */}
+          <div className="flex border-b border-[#e1e8ed] pb-[6px] text-[9px] font-semibold text-[#666]">
+            <span className="flex-1">VERSION</span>
+            <span className="w-[80px] text-right">DATE</span>
+          </div>
 
-            <label className="block text-sm">
-              <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                Target version
-              </span>
-              <select
-                value={selectedB ?? ''}
-                onChange={(event) => setSelectedB(Number(event.target.value))}
-                className="mt-2 h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none"
-              >
-                {versions.map((version) => (
-                  <option key={`target-${version.version_number}`} value={version.version_number}>
-                    v{version.version_number.toString().padStart(3, '0')} · {version.branch}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {/* Version rows */}
+          <div className="mt-[4px] space-y-0">
+            {[...versions].reverse().map((version, i) => {
+              const isLatest = i === 0
+              const active = version.version_number === selectedB
 
-            <Separator />
+              return (
+                <button
+                  key={version.version_number}
+                  type="button"
+                  onClick={() => {
+                    setSelectedA(selectedB)
+                    setSelectedB(version.version_number)
+                  }}
+                  className={`flex w-full items-start justify-between border-l-[3px] px-[12px] py-[8px] text-left ${
+                    active
+                      ? 'border-l-[#22a5f1] bg-[#e8f4fd]'
+                      : 'border-l-transparent hover:bg-[#f7f9fa]'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center gap-[6px]">
+                      <span className={`text-[12px] ${active ? 'font-semibold text-[#22a5f1]' : 'text-[#333]'}`}>
+                        v{version.version_number.toString().padStart(3, '0')}
+                      </span>
+                      {isLatest && (
+                        <span className="text-[10px] text-[#5cb85c]">(Current)</span>
+                      )}
+                    </div>
+                    <div className="mt-[2px] text-[10px] text-[#999]">
+                      by {version.created_by ?? version.change_source ?? 'web-ui'}
+                    </div>
+                    {active && isLatest && (
+                      <button
+                        type="button"
+                        className="mt-[6px] rounded-[3px] bg-[#22a5f1] px-[10px] py-[4px] text-[10px] font-semibold text-white"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRestore(version.version_number)
+                        }}
+                        disabled={restoreMutation.isPending}
+                      >
+                        {restoreMutation.isPending ? 'Restoring…' : 'RESTORE'}
+                      </button>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-[#333]">
+                    {new Date(version.created_at).toLocaleDateString()}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
-            <div className="flex items-center gap-2">
-              <Button
+        {/* Diff — right ~70% */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-center justify-between pb-[8px]">
+            <span className="text-[11px] font-semibold text-[#666]">
+              UNIFIED DIFF{' '}
+              {selectedA != null && selectedB != null
+                ? `v${selectedA.toString().padStart(3, '0')} ↔ v${selectedB.toString().padStart(3, '0')}`
+                : ''}
+            </span>
+            <div className="flex items-center gap-[4px]">
+              <button
                 type="button"
-                size="xs"
-                variant={viewType === 'split' ? 'default' : 'outline'}
+                className={`rounded-[4px] px-[10px] py-[4px] text-[10px] font-semibold ${
+                  viewType === 'split' ? 'bg-[#22a5f1] text-white' : 'bg-white border border-[#e1e8ed] text-[#333]'
+                }`}
                 onClick={() => setViewType('split')}
               >
                 Split
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                size="xs"
-                variant={viewType === 'unified' ? 'default' : 'outline'}
+                className={`rounded-[4px] px-[10px] py-[4px] text-[10px] font-semibold ${
+                  viewType === 'unified' ? 'bg-[#22a5f1] text-white' : 'bg-white border border-[#e1e8ed] text-[#333]'
+                }`}
                 onClick={() => setViewType('unified')}
               >
                 Unified
-              </Button>
+              </button>
             </div>
+          </div>
 
-            <div className="space-y-2">
-              {[...versions].reverse().map((version) => {
-                const active =
-                  version.version_number === selectedA || version.version_number === selectedB
-
-                return (
-                  <div
-                    key={version.version_number}
-                    className={`rounded border px-3 py-3 transition-colors ${
-                      active
-                        ? 'border-l-[3px] border-l-primary border-t-border border-r-border border-b-border bg-blue-50'
-                        : 'border-border bg-muted'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedA(selectedB)
-                        setSelectedB(version.version_number)
-                      }}
-                      className="w-full text-left"
-                    >
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-mono">
-                          v{version.version_number.toString().padStart(3, '0')}
-                        </span>
-                        <Badge variant="outline">{version.branch}</Badge>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {new Date(version.created_at).toLocaleString()}
-                      </div>
-                    </button>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {version.label && <Badge variant="secondary">{version.label}</Badge>}
-                      {version.restored_from && (
-                        <Badge variant="outline">
-                          restored from v{version.restored_from.toString().padStart(3, '0')}
-                        </Badge>
-                      )}
-                    </div>
-
-                    <details className="mt-3 rounded border border-border bg-white p-3 text-xs">
-                      <summary className="cursor-pointer font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                        Technical panel
-                      </summary>
-                      <div className="mt-3 space-y-2 font-mono leading-5 text-muted-foreground">
-                        <div>hash: {version.content_hash}</div>
-                        <div>path: {docPath}</div>
-                        <div>created_by: {version.created_by ?? version.change_source ?? 'unknown'}</div>
-                        <div>indexing_status: {version.indexing_status ?? 'unknown'}</div>
-                        <div>version_file: {version.version_file}</div>
-                      </div>
-                    </details>
-
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      className="mt-3"
-                      onClick={() => handleRestore(version.version_number)}
-                      disabled={
-                        restoreMutation.isPending &&
-                        restoreMutation.variables === version.version_number
-                      }
-                    >
-                      <RotateCcw className="size-3" />
-                      {restoreMutation.isPending &&
-                      restoreMutation.variables === version.version_number
-                        ? 'Restoring…'
-                        : 'Restore'}
-                    </Button>
-                  </div>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="min-w-0 bg-white">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-3">
-              <span>
-                {selectedA != null && selectedB != null
-                  ? `v${selectedA.toString().padStart(3, '0')} → v${selectedB.toString().padStart(3, '0')}`
-                  : 'Choose versions'}
-              </span>
-              {diff && (
-                <div className="flex items-center gap-2 text-xs">
-                  <Badge variant="secondary">+{diff.additions}</Badge>
-                  <Badge variant="outline">-{diff.deletions}</Badge>
-                </div>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-auto">
+          <div className="flex-1 overflow-auto rounded-[4px] border border-[#e1e8ed] bg-white">
             {selectedA === selectedB ? (
-              <div className="rounded border border-dashed border-border px-6 py-10 text-sm text-muted-foreground">
+              <div className="p-[24px] text-[12px] text-[#999]">
                 Select two different versions to compare.
               </div>
             ) : parsedDiff.length === 0 ? (
-              <div className="rounded border border-dashed border-border px-6 py-10 text-sm text-muted-foreground">
+              <div className="p-[24px] text-[12px] text-[#999]">
                 No diff available for the selected versions.
               </div>
             ) : (
-              <div className="datum-diff-view overflow-hidden rounded border border-border bg-white">
+              <div className="datum-diff-view">
                 {parsedDiff.map((file) => (
                   <Diff
                     key={`${file.oldRevision}-${file.newRevision}`}
@@ -393,8 +334,8 @@ export function VersionHistory({ projectSlug, docPath }: VersionHistoryProps) {
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   )
