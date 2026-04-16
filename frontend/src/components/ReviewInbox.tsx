@@ -156,7 +156,7 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
     const busy = actingId != null
 
     setContent(
-      <div className="flex flex-col gap-[10px]">
+      <div className="flex flex-col gap-[10px] p-[16px]">
         <span className="text-[11px] font-semibold text-[#666]">CONTEXT: INBOX</span>
         <div className="h-px w-full bg-[#e1e8ed]" />
 
@@ -249,7 +249,7 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
   }, [setContent, project, projectSlug, selectedId, candidates, editingId, actingId])
 
   return (
-    <div className="flex flex-col gap-[12px]">
+    <div className="flex flex-col gap-[12px] px-[24px] py-[20px]">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-[12px]">
           <h1 className="text-[18px] font-semibold text-[#1b2431]">Inbox: Candidate Review</h1>

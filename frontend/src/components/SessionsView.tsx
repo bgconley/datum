@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, Info } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { useContextPanel } from '@/lib/context-panel'
 import { api, type SessionSummary, type SessionDetail } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -37,12 +32,7 @@ function formatTime(iso: string): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return new Date(iso).toISOString().slice(0, 10)
 }
 
 function formatDuration(startIso: string, endIso: string | null): string {
@@ -50,36 +40,35 @@ function formatDuration(startIso: string, endIso: string | null): string {
   const end = endIso ? new Date(endIso).getTime() : Date.now()
   const ms = end - start
   const totalMinutes = Math.floor(ms / 60_000)
-  if (totalMinutes < 60) return `${totalMinutes}m`
+  if (totalMinutes < 60) return `${totalMinutes} min`
   const hours = Math.floor(totalMinutes / 60)
   const minutes = totalMinutes % 60
-  return `${hours}h ${minutes}m`
+  return minutes > 0 ? `${hours}h ${String(minutes).padStart(2, '0')}m` : `${hours}h`
 }
 
-function statusDotColor(status: string, isDirty: boolean): string {
-  if (status === 'active' && isDirty) return 'bg-amber-500'
-  if (status === 'active') return 'bg-green-500'
-  if (status === 'finalized') return 'bg-green-500'
-  if (status === 'abandoned') return 'bg-red-500'
-  return 'bg-muted-foreground'
+function statusDot(status: string, isDirty: boolean): string {
+  if (status === 'active' && isDirty) return 'bg-[#f0ad4e]'
+  if (status === 'active') return 'bg-[#22a5f1]'
+  if (status === 'finalized') return 'bg-[#5cb85c]'
+  if (status === 'abandoned') return 'bg-[#d9534f]'
+  return 'bg-[#999]'
 }
 
-function statusTextColor(status: string): string {
-  if (status === 'finalized') return 'text-green-600'
-  if (status === 'abandoned') return 'text-red-500'
-  return 'text-muted-foreground'
+function statusColor(status: string): string {
+  if (status === 'finalized') return 'text-[#5cb85c]'
+  if (status === 'abandoned') return 'text-[#d9534f]'
+  return 'text-[#666]'
 }
 
 // ---------------------------------------------------------------------------
-// Context panel content
+// Context panel
 // ---------------------------------------------------------------------------
 
 function SessionContextPanel({ detail }: { detail: SessionDetail }) {
   const hookEvents = detail.hook_events
-  const deltas = detail.deltas
   const auditEvents = detail.audit_events
+  const deltas = detail.deltas
 
-  // Compute delta summary
   const filesTouched = new Set<string>()
   let linesAdded = 0
   let linesRemoved = 0
@@ -91,203 +80,111 @@ function SessionContextPanel({ detail }: { detail: SessionDetail }) {
     if (typeof d['deletions'] === 'number') linesRemoved += d['deletions'] as number
   }
 
-  return (
-    <ScrollArea className="h-full">
-      <div className="space-y-5 p-5">
-        {/* Header */}
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
-            Context: Session
-          </div>
-        </div>
+  const preflightOk = hookEvents.some(
+    (event) =>
+      event.hook_type === 'SessionStart' &&
+      (event.detail['status'] === 'ok' || event.detail['preflight'] === 'ok'),
+  )
 
-        {/* Session metadata */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Session ID</span>
-            <span className="font-mono text-xs">{detail.session_id}</span>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Agent</span>
-            <span className="text-primary">{detail.client_type}</span>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Enforcement</span>
-            <Badge variant="outline">{detail.enforcement_mode}</Badge>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Preflight</span>
-            <span className="font-medium text-green-600">
-              {hookEvents.some(
-                (event) =>
-                  event.hook_type === 'SessionStart' &&
-                  (event.detail['status'] === 'ok' || event.detail['preflight'] === 'ok'),
-              )
-                ? 'PASS'
-                : hookEvents.length > 0
-                  ? 'FAIL'
-                  : '--'}
+  return (
+    <div className="flex flex-col gap-[8px] p-[16px]">
+      <span className="text-[11px] font-semibold text-[#666]">CONTEXT: SESSION</span>
+      <div className="h-px w-full bg-[#e1e8ed]" />
+
+      <div className="flex items-start justify-between text-[10px]">
+        <span className="text-[#666]">Session ID</span>
+        <span className="font-mono text-[#333]">{detail.session_id}</span>
+      </div>
+      <div className="flex items-start justify-between text-[10px]">
+        <span className="text-[#666]">Agent</span>
+        <span className="font-mono text-[#333]">{detail.client_type}</span>
+      </div>
+      <div className="flex items-start justify-between">
+        <span className="text-[10px] text-[#666]">Enforcement</span>
+        <span className="rounded-[3px] bg-[#d9edf7] px-[8px] py-[3px] text-[10px] font-semibold text-[#22a5f1]">
+          {detail.enforcement_mode}
+        </span>
+      </div>
+      <div className="flex items-start justify-between">
+        <span className="text-[10px] text-[#666]">Preflight</span>
+        <div className="flex items-center gap-[4px]">
+          <div
+            className={`size-[8px] rounded-full ${preflightOk ? 'bg-[#5cb85c]' : hookEvents.length > 0 ? 'bg-[#d9534f]' : 'bg-[#999]'}`}
+          />
+          <span
+            className={`text-[10px] font-medium ${preflightOk ? 'text-[#5cb85c]' : hookEvents.length > 0 ? 'text-[#d9534f]' : 'text-[#999]'}`}
+          >
+            {preflightOk ? 'PASS' : hookEvents.length > 0 ? 'FAIL' : '--'}
+          </span>
+        </div>
+      </div>
+      <div className="h-px w-full bg-[#e1e8ed]" />
+
+      <span className="text-[11px] font-semibold text-[#666]">HOOK EVENT TIMELINE</span>
+      {hookEvents.length === 0 ? (
+        <span className="text-[9px] text-[#999]">No hook telemetry</span>
+      ) : (
+        hookEvents.map((event) => (
+          <div key={event.id} className="flex items-center gap-[8px]">
+            <span className="shrink-0 font-mono text-[9px] text-[#999]">
+              {formatTime(event.created_at)}
+            </span>
+            <span className="text-[10px] font-medium text-[#333]">{event.hook_type}</span>
+            <span className="truncate text-[9px] text-[#666]">
+              {event.detail['status']
+                ? String(event.detail['status'])
+                : event.detail['preflight']
+                  ? `preflight ${String(event.detail['preflight'])}`
+                  : ''}
             </span>
           </div>
-        </div>
+        ))
+      )}
+      <div className="h-px w-full bg-[#e1e8ed]" />
 
-        <Separator />
-
-        {/* Hook event timeline */}
-        <div className="space-y-2">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Hook event timeline
+      <span className="text-[11px] font-semibold text-[#666]">MCP TOOL CALL LOG</span>
+      {auditEvents.length === 0 ? (
+        <span className="text-[9px] text-[#999]">No tool calls</span>
+      ) : (
+        auditEvents.map((event) => (
+          <div key={event.id} className="flex items-center gap-[8px]">
+            <span className="shrink-0 font-mono text-[9px] text-[#999]">
+              {formatTime(event.created_at)}
+            </span>
+            <span className="text-[10px] font-medium text-[#22a5f1]">{event.operation}</span>
+            <span className="truncate text-[9px] text-[#666]">
+              {event.metadata['result_count'] != null
+                ? `${String(event.metadata['result_count'])} results`
+                : event.target_path ?? ''}
+            </span>
           </div>
-          {hookEvents.length === 0 ? (
-            <div className="flex items-center gap-2 rounded border border-border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
-              <Info className="size-4 shrink-0 text-muted-foreground/60" />
-              No hook telemetry for this session
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {hookEvents.map((event) => (
-                <div key={event.id} className="flex gap-2 text-xs">
-                  <span className="shrink-0 font-mono text-muted-foreground">
-                    {formatTime(event.created_at)}
-                  </span>
-                  <span>
-                    <span className="font-medium">{event.hook_type}</span>{' '}
-                    <span className="text-muted-foreground">
-                      {event.detail['status']
-                        ? String(event.detail['status'])
-                        : event.detail['preflight']
-                          ? `preflight ${String(event.detail['preflight'])}`
-                          : ''}
-                    </span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        ))
+      )}
+      <div className="h-px w-full bg-[#e1e8ed]" />
 
-        <Separator />
-
-        {/* MCP tool call log */}
-        <div className="space-y-2">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            MCP tool call log
-          </div>
-          {auditEvents.length === 0 ? (
-            <div className="text-xs text-muted-foreground">No tool calls recorded.</div>
-          ) : (
-            <div className="space-y-1">
-              {auditEvents.map((event) => (
-                <div key={event.id} className="flex gap-2 text-xs">
-                  <span className="shrink-0 font-mono text-muted-foreground">
-                    {formatTime(event.created_at)}
-                  </span>
-                  <span>
-                    <span className="font-medium">{event.operation}</span>
-                    {event.metadata['result_count'] != null && (
-                      <span className="text-muted-foreground">
-                        {' '}
-                        {String(event.metadata['result_count'])} results
-                      </span>
-                    )}
-                    {event.target_path && (
-                      <span className="text-muted-foreground"> {event.target_path}</span>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <Separator />
-
-        {/* Delta summary */}
-        <div className="space-y-3">
-          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Delta summary
-          </div>
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Files touched</span>
-              <span className="font-medium">{filesTouched.size || deltas.length}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Lines added</span>
-              <span className="font-medium text-green-600">+{linesAdded}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Lines removed</span>
-              <span className="font-medium text-red-500">-{linesRemoved}</span>
-            </div>
-          </div>
-        </div>
-
-        <Separator />
-
-        {/* Finalize button */}
-        {detail.status === 'active' && (
-          <Button className="w-full">Finalize session</Button>
-        )}
+      <span className="text-[11px] font-semibold text-[#666]">DELTA SUMMARY</span>
+      <div className="flex items-start justify-between text-[10px]">
+        <span className="text-[#666]">Files touched</span>
+        <span className="font-semibold text-[#333]">{filesTouched.size || deltas.length}</span>
       </div>
-    </ScrollArea>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Active session card
-// ---------------------------------------------------------------------------
-
-function ActiveSessionCard({
-  session,
-  selected,
-  onSelect,
-}: {
-  session: SessionSummary
-  selected: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`w-full cursor-pointer rounded border bg-white px-4 py-3 text-left transition-colors hover:bg-accent/30 ${
-        selected ? 'border-l-2 border-l-primary border-t-border border-r-border border-b-border' : 'border-border'
-      }`}
-    >
-      {/* Row 1: status dot, agent, badge, session id */}
-      <div className="flex items-center gap-2">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotColor(session.status, session.is_dirty)}`} />
-        <span className="font-medium">{session.client_type}</span>
-        {session.is_dirty && (
-          <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-700">
-            dirty
-          </Badge>
-        )}
-        {session.status === 'active' && !session.is_dirty && (
-          <Badge variant="default">active</Badge>
-        )}
-        <span className="ml-auto font-mono text-xs text-muted-foreground">{session.session_id}</span>
+      <div className="flex items-start justify-between text-[10px]">
+        <span className="text-[#666]">Lines added</span>
+        <span className="font-semibold text-[#5cb85c]">+{linesAdded}</span>
+      </div>
+      <div className="flex items-start justify-between text-[10px]">
+        <span className="text-[#666]">Lines removed</span>
+        <span className="font-semibold text-[#d9534f]">-{linesRemoved}</span>
       </div>
 
-      {/* Row 2: metadata line */}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>Started: {formatRelativeTime(session.started_at)}</span>
-        <span>Deltas: {session.delta_count}</span>
-      </div>
-
-      {/* Row 3: action buttons */}
-      <div className="mt-3 flex gap-2" onClick={(event) => event.stopPropagation()}>
-        {session.is_dirty && (
-          <Button size="xs" variant="default">
-            Flush
-          </Button>
-        )}
-        <Button size="xs" variant="outline">
-          View note
-        </Button>
-      </div>
-    </button>
+      {detail.status === 'active' && (
+        <button
+          type="button"
+          className="rounded-[4px] bg-[#5cb85c] px-[12px] py-[8px] text-[10px] font-semibold text-white"
+        >
+          FINALIZE SESSION
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -305,7 +202,6 @@ export function SessionsView({ projectSlug }: SessionsViewProps) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const { setContent } = useContextPanel()
 
-  // Fetch sessions list with polling
   const sessionsQuery = useQuery({
     queryKey: queryKeys.dashboardSessions(projectSlug),
     queryFn: () => api.dashboard.sessions(projectSlug),
@@ -313,19 +209,15 @@ export function SessionsView({ projectSlug }: SessionsViewProps) {
   })
 
   const sessions = sessionsQuery.data ?? EMPTY_SESSIONS
+  const activeSessions = sessions.filter((s) => s.status === 'active')
+  const recentSessions = sessions.filter((s) => s.status !== 'active')
 
-  // Split into active and recent
-  const activeSessions = sessions.filter((session) => session.status === 'active')
-  const recentSessions = sessions.filter((session) => session.status !== 'active')
-
-  // Auto-select first active session when none selected
   useEffect(() => {
     if (!selectedSessionId && activeSessions.length > 0) {
       setSelectedSessionId(activeSessions[0].session_id)
     }
   }, [activeSessions, selectedSessionId])
 
-  // Fetch session detail when selected, with faster polling
   const detailQuery = useQuery({
     queryKey: queryKeys.sessionDetail(projectSlug, selectedSessionId ?? ''),
     queryFn: () => api.dashboard.sessionDetail(projectSlug, selectedSessionId!),
@@ -333,7 +225,6 @@ export function SessionsView({ projectSlug }: SessionsViewProps) {
     refetchInterval: 5_000,
   })
 
-  // Push context panel content when detail changes
   useEffect(() => {
     if (detailQuery.data) {
       setContent(<SessionContextPanel detail={detailQuery.data} />)
@@ -343,115 +234,166 @@ export function SessionsView({ projectSlug }: SessionsViewProps) {
     return () => setContent(null)
   }, [detailQuery.data, selectedSessionId, setContent])
 
-  // Loading state
   if (sessionsQuery.isLoading) {
-    return <div className="p-8 text-muted-foreground">Loading sessions...</div>
+    return (
+      <div className="px-[24px] py-[20px] text-[11px] text-[#666]">Loading sessions&hellip;</div>
+    )
   }
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-      {/* Page header */}
+    <div className="flex flex-col gap-[14px] px-[24px] pb-[16px] pt-[20px]">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Sessions</h1>
-        <span className="font-mono text-sm text-primary">{projectSlug}</span>
+        <h1 className="text-[22px] text-[#1b2431]">Sessions</h1>
+        <span className="text-[13px] text-[#22a5f1]">{projectSlug}</span>
       </div>
 
-      {/* Active sessions section */}
-      <div>
-        <div className="flex items-center gap-3">
-          <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Active sessions
-          </h2>
+      {/* Active Sessions card */}
+      <div className="flex flex-col gap-[12px] rounded-[4px] border border-[#e1e8ed] bg-white px-[20px] py-[16px]">
+        <div className="flex items-center gap-[8px]">
+          <span className="text-[13px] font-semibold text-[#333]">Active Sessions</span>
           {activeSessions.length > 0 && (
-            <Badge variant="default">{activeSessions.length} active</Badge>
+            <span className="rounded-[3px] bg-[#22a5f1] px-[8px] py-[3px] text-[10px] font-semibold text-white">
+              {activeSessions.length} active
+            </span>
           )}
         </div>
+        <div className="h-px w-full bg-[#e1e8ed]" />
 
-        <div className="mt-4 space-y-3">
-          {activeSessions.length === 0 ? (
-            <div className="rounded border border-border bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
-              No active sessions
-            </div>
-          ) : (
-            activeSessions.map((session) => (
-              <ActiveSessionCard
+        {activeSessions.length === 0 ? (
+          <div className="py-[10px] text-[11px] text-[#666]">No active sessions</div>
+        ) : (
+          activeSessions.map((session) => {
+            const isSelected = selectedSessionId === session.session_id
+            const isDirty = session.is_dirty
+            return (
+              <button
                 key={session.id}
-                session={session}
-                selected={selectedSessionId === session.session_id}
-                onSelect={() => setSelectedSessionId(session.session_id)}
-              />
-            ))
-          )}
-        </div>
+                type="button"
+                onClick={() => setSelectedSessionId(session.session_id)}
+                className={`flex h-[100px] w-full items-start overflow-hidden rounded-[4px] text-left ${
+                  isDirty
+                    ? 'border border-[#22a5f1] border-l-[3px] bg-[rgba(34,165,241,0.04)]'
+                    : isSelected
+                      ? 'border border-[#22a5f1] bg-white'
+                      : 'border border-[#e1e8ed] bg-white'
+                }`}
+              >
+                <div className="flex min-w-0 flex-1 flex-col gap-[6px] px-[16px] py-[12px]">
+                  {/* Row 1: dot + name + badge + session ID */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-[8px]">
+                      <div
+                        className={`size-[8px] shrink-0 rounded-full ${statusDot(session.status, isDirty)}`}
+                      />
+                      <span className="text-[13px] font-semibold text-[#333]">
+                        {session.client_type}
+                      </span>
+                      {isDirty && (
+                        <span className="rounded-[3px] bg-[#fcf8e3] px-[8px] py-[3px] text-[10px] font-semibold text-[#f0ad4e]">
+                          dirty
+                        </span>
+                      )}
+                      {!isDirty && session.status === 'active' && (
+                        <span className="rounded-[3px] bg-[#d9edf7] px-[8px] py-[3px] text-[10px] font-semibold text-[#22a5f1]">
+                          active
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono text-[10px] text-[#999]">
+                      {session.session_id}
+                    </span>
+                  </div>
+                  {/* Row 2: stats */}
+                  <div className="flex items-center gap-[16px] text-[10px] text-[#666]">
+                    <span>Started: {formatRelativeTime(session.started_at)}</span>
+                    <span>Deltas: {session.delta_count}</span>
+                    {isDirty && (
+                      <span className="font-medium text-[#f0ad4e]">
+                        Pending: {session.delta_count}
+                      </span>
+                    )}
+                  </div>
+                  {/* Row 3: actions */}
+                  <div
+                    className="flex items-start gap-[8px]"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {isDirty && (
+                      <div className="rounded-[4px] bg-[#22a5f1] px-[10px] py-[5px] text-[9px] font-semibold text-white">
+                        FLUSH
+                      </div>
+                    )}
+                    <div className="rounded-[4px] border border-[#e1e8ed] bg-white px-[10px] py-[5px] text-[9px] font-semibold text-[#333]">
+                      VIEW NOTE
+                    </div>
+                  </div>
+                </div>
+              </button>
+            )
+          })
+        )}
       </div>
 
-      {/* Recent sessions table */}
-      <div>
-        <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Recent sessions
-        </h2>
-
-        <div className="mt-4 overflow-hidden rounded border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Date
-                </th>
-                <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Agent
-                </th>
-                <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Status
-                </th>
-                <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Deltas
-                </th>
-                <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Duration
-                </th>
-                <th className="w-10 px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {recentSessions.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-6 text-center text-sm text-muted-foreground"
-                  >
-                    No recent sessions
-                  </td>
-                </tr>
-              ) : (
-                recentSessions.map((session) => (
-                  <tr
-                    key={session.id}
-                    className="cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-accent/30"
-                    onClick={() => setSelectedSessionId(session.session_id)}
-                  >
-                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
-                      {formatDate(session.started_at)}
-                    </td>
-                    <td className="px-4 py-2.5 text-primary">{session.client_type}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`font-medium ${statusTextColor(session.status)}`}>
-                        {session.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5">{session.delta_count}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">
-                      {formatDuration(session.started_at, session.ended_at)}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <ArrowRight className="size-4 text-muted-foreground" />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      {/* Recent Sessions table */}
+      <div className="flex flex-1 flex-col overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white">
+        {/* Header row */}
+        <div className="flex items-center justify-between border-b border-[#e1e8ed] bg-[#f3f6f8] px-[20px] py-[12px]">
+          <div className="flex h-[16px] items-center">
+            <span className="text-[9px] font-semibold text-[#666]">DATE</span>
+          </div>
+          <div className="flex h-[16px] items-center">
+            <span className="text-[9px] font-semibold text-[#666]">AGENT</span>
+          </div>
+          <div className="flex h-[16px] items-center">
+            <span className="text-[9px] font-semibold text-[#666]">STATUS</span>
+          </div>
+          <div className="flex h-[16px] items-center">
+            <span className="text-[9px] font-semibold text-[#666]">FILES</span>
+          </div>
+          <div className="flex h-[16px] items-center">
+            <span className="text-[9px] font-semibold text-[#666]">DURATION</span>
+          </div>
+          <div className="h-[16px] w-[60px]" />
         </div>
+
+        {recentSessions.length === 0 ? (
+          <div className="px-[20px] py-[16px] text-[11px] text-[#666]">No recent sessions</div>
+        ) : (
+          recentSessions.map((session) => (
+            <button
+              key={session.id}
+              type="button"
+              onClick={() => setSelectedSessionId(session.session_id)}
+              className="flex w-full items-center justify-between border-b border-[rgba(225,232,237,0.5)] px-[20px] py-[10px] text-left last:border-b-0 hover:bg-[#f9fafb]"
+            >
+              <div className="flex h-[16px] items-center">
+                <span className="text-[11px] text-[#333]">{formatDate(session.started_at)}</span>
+              </div>
+              <div className="flex h-[16px] items-center">
+                <span className="text-[11px] font-medium text-[#22a5f1]">
+                  {session.client_type}
+                </span>
+              </div>
+              <div className="flex h-[16px] items-center">
+                <span className={`text-[11px] font-medium ${statusColor(session.status)}`}>
+                  {session.status}
+                </span>
+              </div>
+              <div className="flex h-[16px] items-center">
+                <span className="text-[11px] text-[#333]">{session.delta_count}</span>
+              </div>
+              <div className="flex h-[16px] items-center">
+                <span className="text-[11px] text-[#666]">
+                  {formatDuration(session.started_at, session.ended_at)}
+                </span>
+              </div>
+              <div className="flex h-[16px] w-[60px] items-center">
+                <span className="text-[11px] font-medium text-[#22a5f1]">{'\u2192'}</span>
+              </div>
+            </button>
+          ))
+        )}
       </div>
     </div>
   )
