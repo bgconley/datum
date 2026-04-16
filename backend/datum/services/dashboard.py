@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datum.config import Settings
@@ -37,7 +37,7 @@ async def _check_db_health(db: AsyncSession) -> HealthStatus:
     """Check database connectivity with SELECT 1."""
     start = time.monotonic()
     try:
-        await db.execute(select(func.literal(1)))
+        await db.execute(text("SELECT 1"))
         latency = (time.monotonic() - start) * 1000
         return HealthStatus(name="paradedb", healthy=True, latency_ms=latency)
     except Exception as exc:

@@ -47,12 +47,32 @@ function subsystemLabel(name: string): string {
     paradedb: 'ParadeDB',
     file_watcher: 'File Watcher',
     worker_queue: 'Worker Queue',
-    embedder: 'Embedder',
-    reranker: 'Reranker',
+    embedder: 'Embedder (Qwen3-4B)',
+    reranker: 'Reranker (Qwen3-0.6B)',
     gliner_ner: 'GLiNER NER',
-    llm: 'LLM',
+    llm: 'LLM (GPT-OSS-20B)',
   }
   return map[name] ?? name
+}
+
+const MODEL_PORTS: Record<string, string> = {
+  embedder: ':8010',
+  reranker: ':8011',
+  gliner_ner: ':8012',
+  llm: ':8000',
+}
+
+function infraStatus(sub: HealthSubsystem): string {
+  if (!sub.healthy) return 'Error'
+  if (sub.name === 'file_watcher') return 'Running'
+  if (sub.name === 'worker_queue') return sub.error ?? '0 jobs'
+  return 'OK'
+}
+
+function modelStatus(sub: HealthSubsystem): string {
+  if (!sub.healthy) return 'Idle'
+  const port = MODEL_PORTS[sub.name] ?? ''
+  return `OK  ${port}`
 }
 
 function StatusDot({ healthy }: { healthy: boolean }) {
@@ -174,8 +194,8 @@ function SystemHealthWidget({ health }: { health: HealthResponse | undefined }) 
                 <div key={sub.name} className="flex items-center gap-2 text-sm">
                   <StatusDot healthy={sub.healthy} />
                   <span>{subsystemLabel(sub.name)}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {sub.healthy ? 'Healthy' : sub.error ?? 'Error'}
+                  <span className="ml-auto text-xs font-medium">
+                    {infraStatus(sub)}
                   </span>
                 </div>
               ))}
@@ -193,12 +213,8 @@ function SystemHealthWidget({ health }: { health: HealthResponse | undefined }) 
                 <div key={sub.name} className="flex items-center gap-2 text-sm">
                   <StatusDot healthy={sub.healthy} />
                   <span>{subsystemLabel(sub.name)}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {sub.healthy
-                      ? sub.latency_ms !== null
-                        ? `${sub.latency_ms}ms`
-                        : 'Healthy'
-                      : sub.error ?? 'Error'}
+                  <span className="ml-auto whitespace-pre text-xs font-medium">
+                    {modelStatus(sub)}
                   </span>
                 </div>
               ))}
