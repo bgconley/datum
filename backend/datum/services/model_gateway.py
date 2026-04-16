@@ -183,6 +183,12 @@ class ModelGateway:
             await self._get(f"{config.endpoint}/health", timeout=2.0)
             return True
         except Exception:
+            if config.protocol == "openai":
+                try:
+                    await self._get(f"{config.endpoint}/v1/models", timeout=2.0)
+                    return True
+                except Exception:
+                    return False
             return False
 
     async def _post(self, url: str, payload: dict) -> Any:

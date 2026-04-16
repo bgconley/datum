@@ -174,13 +174,11 @@ async def _check_zfs_health(zfs_status_path: Path) -> HealthStatus:
 async def get_system_health(db: AsyncSession, app_settings: Settings) -> HealthResponse:
     """Composite system health check. Always returns result, never raises."""
     try:
-        tasks: list[asyncio.Task] = []
-
         async def _gather_with_timeout():
+            db_status = await _check_db_health(db)
+            worker_queue_status = await _check_worker_queue_health(db)
             coros = [
-                _check_db_health(db),
                 _check_watcher_health(app_settings.watcher_heartbeat_path),
-                _check_worker_queue_health(db),
                 _check_model_health("embedding", "embedder"),
                 _check_model_health("reranker", "reranker"),
                 _check_model_health("ner", "gliner_ner"),
@@ -193,15 +191,20 @@ async def get_system_health(db: AsyncSession, app_settings: Settings) -> HealthR
                 coros.append(_check_zfs_mount(app_settings.projects_root))
 
             results = await asyncio.gather(*coros, return_exceptions=True)
-            subsystems: list[HealthStatus] = []
+            concurrent_subsystems: list[HealthStatus] = []
             for result in results:
                 if isinstance(result, Exception):
-                    subsystems.append(
+                    concurrent_subsystems.append(
                         HealthStatus(name="unknown", healthy=False, error=str(result))
                     )
                 else:
-                    subsystems.append(result)
-            return subsystems
+                    concurrent_subsystems.append(result)
+            return [
+                db_status,
+                concurrent_subsystems[0],
+                worker_queue_status,
+                *concurrent_subsystems[1:],
+            ]
 
         try:
             subsystems = await asyncio.wait_for(
