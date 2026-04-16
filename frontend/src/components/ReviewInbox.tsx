@@ -1,7 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import {
+  Check,
+  FilePenLine,
+  Inbox,
+  ShieldAlert,
+  X,
+} from 'lucide-react'
+
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 import { useContextPanel } from '@/lib/context-panel'
 import { api, type Candidate } from '@/lib/api'
 import { notify } from '@/lib/notifications'
@@ -201,56 +214,109 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
   }
 
   return (
-    <div className="flex flex-col gap-[12px] overflow-auto px-[24px] py-[20px]">
-      {/* Title row — Figma: Inbox: Candidate Review + project + sort + count */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-[12px]">
-          <span className="text-[18px] font-semibold text-[#1b2431]">
-            Inbox: Candidate Review
-          </span>
-          <span className="text-[13px] text-[#22a5f1]">
-            {project?.name ?? projectSlug}
-          </span>
-        </div>
-        <div className="flex items-center gap-[8px]">
-          <span className="text-[10px] text-[#666]">Sorted by:</span>
-          <button
-            type="button"
-            onClick={() => setSortMode('confidence')}
-            className={`rounded-[4px] border border-[#e1e8ed] px-[10px] py-[5px] text-[9px] font-semibold ${
-              sortMode === 'confidence' ? 'bg-[#333] text-white' : 'bg-white text-[#333]'
-            }`}
-          >
-            CONF.
-          </button>
-          <button
-            type="button"
-            onClick={() => setSortMode('severity')}
-            className={`rounded-[4px] border border-[#e1e8ed] px-[10px] py-[5px] text-[9px] font-semibold ${
-              sortMode === 'severity' ? 'bg-[#333] text-white' : 'bg-white text-[#333]'
-            }`}
-          >
-            SEVERITY
-          </button>
-          <span className="text-[10px] text-[#666]">
-            1 - {filteredCandidates.length} of {filteredCandidates.length}
-          </span>
+    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
+      <div className="rounded border border-border bg-white p-8 shadow-sm">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Candidate review
+            </div>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">
+              Inbox: <span className="text-primary">{project?.name ?? projectSlug}</span>
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
+              Promote decisions, requirements, and open questions into curated records only after a
+              deliberate review step.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex overflow-hidden rounded border border-border text-xs">
+              <button
+                type="button"
+                onClick={() => setSortMode('confidence')}
+                className={`px-3 py-1.5 font-medium transition-colors ${sortMode === 'confidence' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
+              >
+                CONF.
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortMode('severity')}
+                className={`px-3 py-1.5 font-medium transition-colors ${sortMode === 'severity' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
+              >
+                SEVERITY
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={kindFilter === 'all' ? 'default' : 'outline'}
+                onClick={() => setKindFilter('all')}
+              >
+                All
+              </Button>
+              {CANDIDATE_KINDS.map((kind) => (
+                <Button
+                  key={kind}
+                  type="button"
+                  size="sm"
+                  variant={kindFilter === kind ? 'default' : 'outline'}
+                  onClick={() => setKindFilter(kind)}
+                >
+                  {kindLabel(kind)}
+                </Button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Candidate cards — flat list matching Figma */}
-      <div className="flex flex-col gap-[12px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.95fr)]">
+        <Card className="bg-white">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Inbox className="size-4" />
+              Inbox queue
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded border border-border bg-muted p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Pending</div>
+                <div className="mt-3 text-3xl font-semibold tracking-tight">{pendingCount}</div>
+              </div>
+              <div className="rounded border border-border bg-muted p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Sort mode</div>
+                <div className="mt-3 text-lg font-medium capitalize">{sortMode}</div>
+              </div>
+              <div className="rounded border border-border bg-muted p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Filter</div>
+                <div className="mt-3 text-lg font-medium capitalize">
+                  {kindFilter === 'all' ? 'All candidates' : kindLabel(kindFilter)}
+                </div>
+              </div>
+            </div>
+
             {inboxQuery.isLoading ? (
-              <div className="rounded-[4px] border border-[#e1e8ed] bg-white p-[24px] text-[12px] text-[#999]">
+              <div className="rounded border border-dashed border-border bg-muted p-6 text-sm text-muted-foreground">
                 Loading candidate inbox…
               </div>
             ) : filteredCandidates.length === 0 ? (
-              <div className="rounded-[4px] border border-[#e1e8ed] bg-white p-[24px]">
+              <div className="rounded border border-dashed border-border bg-muted p-6">
                 <div className="flex items-start gap-4">
-                  <div>
-                    <h3 className="text-[13px] font-semibold text-[#333]">No pending candidates.</h3>
-                    <p className="mt-2 text-[11px] text-[#999]">
-                      New items appear here after documents are ingested and candidate extraction runs.
+                  <div className="rounded border border-border bg-white p-3">
+                    <ShieldAlert className="size-5 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-semibold tracking-tight">No pending candidates.</h3>
+                      <Badge variant="outline">Queue clear</Badge>
+                    </div>
+                    <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
+                      New items appear here after documents are ingested and candidate extraction
+                      runs.
                     </p>
                   </div>
                 </div>
@@ -280,69 +346,260 @@ export function ReviewInbox({ projectSlug }: ReviewInboxProps) {
                       : 'bg-gray-400'
                   : null
 
-                const accentColor = candidate.candidate_type === 'decision'
-                  ? 'bg-[#d9534f]'
-                  : 'bg-[#e1e8ed]'
-
                 return (
-                  <div key={candidate.id} className="flex overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white">
-                    {/* Left accent bar */}
-                    <div className={`w-[4px] shrink-0 ${accentColor}`} />
-                    {/* Content */}
-                    <div className="flex flex-1 flex-col gap-[6px] px-[16px] py-[14px]">
-                      <div className="flex items-center gap-[8px]">
-                        <span className="text-[9px] font-semibold text-[#666]">
-                          {kindLabel(candidate.candidate_type).toUpperCase()}
-                        </span>
-                        {isStructuredAdr && (
-                          <span className="rounded-[3px] bg-[#d9edf7] px-[8px] py-[3px] text-[9px] font-semibold text-[#22a5f1]">
-                            Parsed ADR
-                          </span>
-                        )}
-                        {isGliner && (
-                          <span className="rounded-[3px] bg-[#fcf8e3] px-[8px] py-[3px] text-[9px] font-semibold text-[#8a6d3b]">
-                            AI Candidate
-                          </span>
-                        )}
-                        {!isStructuredAdr && !isGliner && methodInfo && (
-                          <span className="rounded-[3px] bg-[#e1e8ed] px-[8px] py-[3px] text-[9px] font-semibold text-[#333]">
-                            {methodInfo.label}
-                          </span>
-                        )}
-                      </div>
-                      <h3 className="text-[13px] font-semibold text-[#22a5f1]">{candidate.title}</h3>
-                      <div className="flex items-center gap-[8px]">
-                        {confidenceDotColor && (
-                          <span className={`inline-block size-[8px] rounded-full ${confidenceDotColor}`} />
-                        )}
-                        <span className="text-[10px] text-[#333]">
-                          Trust: {isStructuredAdr ? 'Deterministic parser' : candidate.confidence != null ? `Conf: ${(candidate.confidence * 100).toFixed(0)}%` : 'Unknown'}
-                        </span>
-                        <span className="text-[10px] text-[#999]">·</span>
-                        <span className="text-[10px] text-[#666]">
-                          Source: {candidate.source_doc_path ?? 'unknown'}
-                          {candidate.source_version != null ? ` v${String(candidate.source_version).padStart(3, '0')}` : ''}
-                          {candidate.extraction_method ? ` · ${candidate.extraction_method}` : ''}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center p-[14px]">
+                  <Card key={candidate.id} className={`bg-white ${cardAccent}`}>
+                    <CardContent className="space-y-4 p-5">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center rounded bg-muted px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                              {kindLabel(candidate.candidate_type)}
+                            </span>
+                            <Badge variant={severityBadgeVariant(candidate.severity)}>
+                              {candidate.severity} severity
+                            </Badge>
+                            {isStructuredAdr && (
+                              <span className="inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                Parsed ADR
+                              </span>
+                            )}
+                            {isGliner && (
+                              <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                                AI Candidate
+                              </span>
+                            )}
+                            {!isStructuredAdr && !isGliner && methodInfo && (
+                              <Badge variant={methodInfo.variant}>{methodInfo.label}</Badge>
+                            )}
+                            {candidate.confidence != null && confidenceDotColor && (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <span className={`size-2 rounded-full ${confidenceDotColor}`} />
+                                {(candidate.confidence * 100).toFixed(0)}%
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold tracking-tight">{candidate.title}</h3>
+                            {candidate.context && (
+                              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                                {candidate.context}
+                              </p>
+                            )}
+                          </div>
+                          {candidate.source_doc_path && (
+                            <div className="text-xs text-muted-foreground">
+                              Source: {candidate.source_doc_path}
+                              {candidate.source_version != null ? ` v${candidate.source_version}` : ''}
+                            </div>
+                          )}
+                        </div>
+
                         {candidate.source_doc_path && (
                           <Link
                             to="/projects/$slug/docs/$"
                             params={{ slug: projectSlug, _splat: candidate.source_doc_path }}
-                            className="text-[10px] text-[#22a5f1] hover:underline"
+                            className="inline-flex h-9 items-center rounded border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
                           >
                             View source
                           </Link>
                         )}
                       </div>
-                  </div>
 
+                      {(candidate.decision || candidate.consequences || candidate.description || candidate.priority || candidate.resolution) && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {candidate.decision && (
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                Decision
+                              </div>
+                              <div className="mt-2 whitespace-pre-wrap">{candidate.decision}</div>
+                            </div>
+                          )}
+                          {candidate.consequences && (
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                Consequences
+                              </div>
+                              <div className="mt-2 whitespace-pre-wrap">{candidate.consequences}</div>
+                            </div>
+                          )}
+                          {candidate.description && (
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                Description
+                              </div>
+                              <div className="mt-2 whitespace-pre-wrap">{candidate.description}</div>
+                            </div>
+                          )}
+                          {candidate.priority && (
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                Priority
+                              </div>
+                              <div className="mt-2">{candidate.priority}</div>
+                            </div>
+                          )}
+                          {candidate.resolution && (
+                            <div className="rounded border border-border bg-white px-3 py-3 text-sm md:col-span-2">
+                              <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                Resolution
+                              </div>
+                              <div className="mt-2 whitespace-pre-wrap">{candidate.resolution}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {isEditing && (
+                        <div className="space-y-3 rounded border border-border bg-white p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                            Edit before promotion
+                          </div>
+                          <Input
+                            value={edits.title ?? ''}
+                            onChange={(event) =>
+                              setEdits((current) => ({ ...current, title: event.target.value }))
+                            }
+                            placeholder={candidate.candidate_type === 'open_question' ? 'Question' : 'Title'}
+                          />
+                          <Textarea
+                            value={edits.context ?? ''}
+                            onChange={(event) =>
+                              setEdits((current) => ({ ...current, context: event.target.value }))
+                            }
+                            placeholder="Context"
+                          />
+                          {candidate.candidate_type === 'decision' && (
+                            <>
+                              <Textarea
+                                value={edits.decision ?? ''}
+                                onChange={(event) =>
+                                  setEdits((current) => ({ ...current, decision: event.target.value }))
+                                }
+                                placeholder="Decision"
+                              />
+                              <Textarea
+                                value={edits.consequences ?? ''}
+                                onChange={(event) =>
+                                  setEdits((current) => ({ ...current, consequences: event.target.value }))
+                                }
+                                placeholder="Consequences"
+                              />
+                            </>
+                          )}
+                          {candidate.candidate_type === 'requirement' && (
+                            <>
+                              <Textarea
+                                value={edits.description ?? ''}
+                                onChange={(event) =>
+                                  setEdits((current) => ({ ...current, description: event.target.value }))
+                                }
+                                placeholder="Description"
+                              />
+                              <Input
+                                value={edits.priority ?? ''}
+                                onChange={(event) =>
+                                  setEdits((current) => ({ ...current, priority: event.target.value }))
+                                }
+                                placeholder="Priority"
+                              />
+                            </>
+                          )}
+                          {candidate.candidate_type === 'open_question' && (
+                            <Textarea
+                              value={edits.resolution ?? ''}
+                              onChange={(event) =>
+                                setEdits((current) => ({ ...current, resolution: event.target.value }))
+                              }
+                              placeholder="Resolution (optional)"
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      <Separator />
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          className="bg-green-600 text-white hover:bg-green-700"
+                          onClick={() => handleAccept(candidate, false)}
+                          disabled={isActing}
+                        >
+                          <Check className="mr-2 size-4" />
+                          {isActing ? 'Working…' : 'Accept'}
+                        </Button>
+                        {isEditing ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => handleAccept(candidate, true)}
+                              disabled={isActing}
+                            >
+                              <FilePenLine className="mr-2 size-4" />
+                              Save edits &amp; promote
+                            </Button>
+                            <Button type="button" variant="ghost" onClick={stopEditing} disabled={isActing}>
+                              Cancel editing
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => startEditing(candidate)}
+                            disabled={isActing}
+                          >
+                            <FilePenLine className="mr-2 size-4" />
+                            Edit
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          className="border-destructive bg-destructive text-white hover:bg-destructive/90"
+                          onClick={() => handleReject(candidate)}
+                          disabled={isActing}
+                        >
+                          <X className="mr-2 size-4" />
+                          Reject
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
                 )
               })
             )}
-        </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white">
+          <CardHeader>
+            <CardTitle>Promotion model</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-3 rounded border border-border bg-muted p-4">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">candidate</Badge>
+                <Badge variant="outline">human-reviewed</Badge>
+                <Badge variant="outline">filesystem-backed</Badge>
+              </div>
+              <div>
+                <div className="text-sm font-medium">Trust transition</div>
+                <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Candidate rows are rebuildable. Promotion writes curated YAML to disk under
+                  `.piq/records/`, making the record durable and auditable.
+                </div>
+              </div>
+              <Separator />
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <div>Accept: writes the record as-is.</div>
+                <div>Edit &amp; Accept: writes an operator-corrected record and marks it edited.</div>
+                <div>Reject: preserves the source document but blocks promotion.</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
