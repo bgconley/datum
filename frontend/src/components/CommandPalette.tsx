@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from '@tanstack/react-router'
 
 import { openTemplateDialog } from '@/components/CreateDocumentDialog'
 import { api, type DocumentMeta } from '@/lib/api'
+import { useProjectCreation } from '@/lib/project-creation'
 import { queryKeys } from '@/lib/query-keys'
 import { resolveSelectedProject } from '@/lib/route-project'
 import { useProjectsQuery } from '@/lib/workspace-query'
@@ -36,6 +37,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
   const location = useLocation()
+  const { openCreateProjectDialog } = useProjectCreation()
 
   const selectedProject = resolveSelectedProject(location.pathname, location.searchStr)
 
@@ -260,6 +262,18 @@ export function CommandPalette() {
 
             {/* Actions */}
             <Command.Group heading="ACTIONS" className={GROUP_HEADING}>
+              <Command.Item
+                value="create project"
+                onSelect={() => {
+                  close()
+                  openCreateProjectDialog({ source: 'command-palette' })
+                }}
+                className={ITEM_BASE}
+              >
+                <span className="size-[6px] shrink-0 rounded-full bg-[#22a5f1]" />
+                Create Project
+              </Command.Item>
+
               <Command.Item
                 value="search"
                 onSelect={() => {

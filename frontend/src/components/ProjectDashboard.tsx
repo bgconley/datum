@@ -1,21 +1,21 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 
-import { Separator } from '@/components/ui/separator'
+import { openTemplateDialog } from '@/components/CreateDocumentDialog'
+import { UploadModal } from '@/components/UploadModal'
 import { useContextPanel } from '@/lib/context-panel'
 import {
   api,
+  type AttachmentItem,
   type ActivityEvent,
-  type Candidate,
   type DocumentMeta,
-  type HealthResponse,
+  type GeneratedFile,
   type HealthSubsystem,
-  type AgentActivityStats,
   type OpenQuestionSummary,
-  type Project,
   type SessionSummary,
 } from '@/lib/api'
+import { isProjectOnboardingState } from '@/lib/project-onboarding'
 import { queryKeys } from '@/lib/query-keys'
 import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
@@ -126,14 +126,18 @@ interface Props {
 }
 
 const EMPTY_DOCS: DocumentMeta[] = []
-const EMPTY_CANDIDATES: Candidate[] = []
+const EMPTY_ATTACHMENTS: AttachmentItem[] = []
+const EMPTY_GENERATED_FILES: GeneratedFile[] = []
 const EMPTY_OQ: OpenQuestionSummary[] = []
 
 export function ProjectDashboard({ projectSlug }: Props) {
   const { setContent } = useContextPanel()
+  const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const wq = useProjectWorkspaceQuery(projectSlug)
   const project = wq.data?.project ?? null
   const docs = wq.data?.documents ?? EMPTY_DOCS
+  const attachments = wq.data?.attachments ?? EMPTY_ATTACHMENTS
+  const generatedFiles = wq.data?.generated_files ?? EMPTY_GENERATED_FILES
 
   const intQ = useQuery({
     queryKey: queryKeys.intelligenceSummary(projectSlug),
@@ -196,6 +200,13 @@ export function ProjectDashboard({ projectSlug }: Props) {
   const agent = agentQ.data
   const sessions = sessQ.data ?? []
   const activity = actQ.data ?? []
+  const showOnboarding = isProjectOnboardingState({
+    attachmentsCount: attachments.length,
+    documentsCount: docs.length,
+    generatedFilePaths: generatedFiles.map((file) => file.relative_path),
+    pendingCandidateCount: pendingCount,
+    sessionCount: sessions.length,
+  })
 
   const finalizedCount = sessions.filter((s) => s.status === 'finalized').length
   const dirtyCount = sessions.filter((s) => s.is_dirty).length
@@ -300,64 +311,188 @@ export function ProjectDashboard({ projectSlug }: Props) {
     return <div className="p-8 text-[#666]">Project not found.</div>
   }
 
+  const systemHealthCard = (
+    <div className={`${CARD} flex flex-col gap-[10px]`}>
+      <div className="flex items-center justify-between">
+        <span className={CARD_TITLE}>Datum System Health</span>
+        <div className="flex items-center gap-[6px]">
+          <span className={allHealthy ? DOT_GREEN : DOT_RED} />
+          <span
+            className={`text-[9px] font-semibold ${allHealthy ? 'text-[#5cb85c]' : 'text-[#d9534f]'}`}
+          >
+            {allHealthy ? 'ALL SYSTEMS OPERATIONAL' : 'DEGRADED'}
+          </span>
+        </div>
+      </div>
+      <div className={DIVIDER} />
+      <div className="flex gap-[32px]">
+        <div className="flex flex-1 flex-col gap-[5px]">
+          <span className={SECTION_LABEL}>INFRASTRUCTURE</span>
+          {infra.map((s) => (
+            <div key={s.name} className="flex items-center justify-between">
+              <div className="flex items-center gap-[6px]">
+                {dot(s.healthy)}
+                <span className="text-[11px] text-[#333]">{LABELS[s.name]}</span>
+              </div>
+              <span className="text-[11px] font-medium text-[#333]">{infraStatus(s)}</span>
+            </div>
+          ))}
+          {infra.length === 0 && <span className="text-[11px] text-[#999]">No data</span>}
+        </div>
+        <div className="flex flex-1 flex-col gap-[5px]">
+          <span className={SECTION_LABEL}>MODEL SERVICES</span>
+          {models.map((s) => (
+            <div key={s.name} className="flex items-center justify-between">
+              <div className="flex items-center gap-[6px]">
+                {dot(s.healthy)}
+                <span className="text-[11px] text-[#333]">{LABELS[s.name]}</span>
+              </div>
+              <span className="whitespace-pre text-[11px] font-medium text-[#333]">
+                {modelStatus(s)}
+              </span>
+            </div>
+          ))}
+          {models.length === 0 && <span className="text-[11px] text-[#999]">No data</span>}
+        </div>
+      </div>
+      <div className={DIVIDER} />
+      <div className="flex items-center gap-[12px]">
+        <span className={SECTION_LABEL}>INGESTION:</span>
+        <span className="text-[11px] text-[#333]">{ing?.queued ?? 0} queued</span>
+        <span className="text-[11px] text-[#999]">·</span>
+        <span className="text-[11px] text-[#f0ad4e]">{ing?.processing ?? 0} running</span>
+        <span className="text-[11px] text-[#999]">·</span>
+        <span className="text-[11px] text-[#5cb85c]">{ing?.failed ?? 0} failed</span>
+      </div>
+    </div>
+  )
+
+  if (showOnboarding) {
+    return (
+      <div className="flex flex-col gap-[12px] overflow-auto px-[24px] pb-[16px] pt-[20px]">
+        <p className="text-[22px] text-[#1b2431]">Dashboard</p>
+
+        <div className="rounded-[4px] border border-[#d6e0e8] bg-[linear-gradient(135deg,#ffffff_0%,#f7fbfe_100%)] px-[28px] py-[24px]">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7b8794]">
+            NEW PROJECT
+          </div>
+          <div className="mt-2 flex items-start justify-between gap-6">
+            <div className="min-w-0">
+              <h2 className="text-[30px] font-semibold leading-none text-[#1b2431]">
+                {project.name}
+              </h2>
+              <p className="mt-3 max-w-[640px] text-[13px] leading-7 text-[#666]">
+                {project.description ||
+                  'Start with the first source document, a structured note, or a scoped project search to seed the workspace.'}
+              </p>
+            </div>
+            <div className="min-w-[220px] rounded-[4px] border border-[#e1e8ed] bg-white px-[14px] py-[12px]">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#666]">
+                PROJECT READY
+              </div>
+              <div className="mt-3 space-y-2 text-[11px] text-[#666]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Status</span>
+                  <span className="font-semibold text-[#3c763d]">
+                    {project.status.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Created</span>
+                  <span className="font-medium text-[#333]">
+                    {project.created ? new Date(project.created).toLocaleDateString() : 'Today'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Slug</span>
+                  <span className="font-mono text-[#333]">{project.slug}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-3 gap-3">
+            <button
+              type="button"
+              className="rounded-[4px] bg-[#22a5f1] px-[16px] py-[12px] text-left text-white transition hover:bg-[#1a94db]"
+              onClick={() => setUploadModalOpen(true)}
+            >
+              <div className="text-[13px] font-semibold">Upload Document</div>
+              <div className="mt-1 text-[11px] text-white/80">
+                Bring in the first source file and start ingestion.
+              </div>
+            </button>
+            <button
+              type="button"
+              className="rounded-[4px] border border-[#d6e0e8] bg-white px-[16px] py-[12px] text-left transition hover:border-[#22a5f1] hover:text-[#22a5f1]"
+              onClick={() => openTemplateDialog('adr')}
+            >
+              <div className="text-[13px] font-semibold text-[#1b2431]">Create Document</div>
+              <div className="mt-1 text-[11px] text-[#7b8794]">
+                Start with a template and anchor the project context.
+              </div>
+            </button>
+            <Link
+              to="/search"
+              search={{ project: projectSlug, scope: 'current' }}
+              className="rounded-[4px] border border-[#d6e0e8] bg-white px-[16px] py-[12px] text-left transition hover:border-[#22a5f1] hover:text-[#22a5f1]"
+            >
+              <div className="text-[13px] font-semibold text-[#1b2431]">Search Project</div>
+              <div className="mt-1 text-[11px] text-[#7b8794]">
+                Open scoped search before documents accumulate.
+              </div>
+            </Link>
+          </div>
+
+          <div className="mt-5 grid grid-cols-3 gap-4 text-[11px] text-[#666]">
+            <div>
+              <div className="font-semibold uppercase tracking-[0.14em] text-[#7b8794]">
+                Suggested First Step
+              </div>
+              <div className="mt-2 leading-6">
+                Upload the canonical requirement set or an architecture brief.
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold uppercase tracking-[0.14em] text-[#7b8794]">
+                Onboarding State
+              </div>
+              <div className="mt-2 leading-6">
+                This dashboard stays active until the project has real workspace activity.
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold uppercase tracking-[0.14em] text-[#7b8794]">
+                Search Scope
+              </div>
+              <div className="mt-2 leading-6">
+                Search launched from here defaults to the current project scope.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {systemHealthCard}
+
+        <UploadModal
+          projectSlug={projectSlug}
+          open={uploadModalOpen}
+          onOpenChange={setUploadModalOpen}
+          onSuccess={() => {
+            void Promise.all([wq.refetch(), intQ.refetch(), sessQ.refetch()])
+          }}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-[12px] overflow-auto px-[24px] pb-[16px] pt-[20px]">
       {/* Title — Figma: 22px regular #1b2431 */}
       <p className="text-[22px] text-[#1b2431]">Dashboard</p>
 
       {/* ── System Health ── */}
-      <div className={`${CARD} flex flex-col gap-[10px]`}>
-        <div className="flex items-center justify-between">
-          <span className={CARD_TITLE}>Datum System Health</span>
-          <div className="flex items-center gap-[6px]">
-            <span className={allHealthy ? DOT_GREEN : DOT_RED} />
-            <span className={`text-[9px] font-semibold ${allHealthy ? 'text-[#5cb85c]' : 'text-[#d9534f]'}`}>
-              {allHealthy ? 'ALL SYSTEMS OPERATIONAL' : 'DEGRADED'}
-            </span>
-          </div>
-        </div>
-        <div className={DIVIDER} />
-        <div className="flex gap-[32px]">
-          {/* Infrastructure */}
-          <div className="flex flex-1 flex-col gap-[5px]">
-            <span className={SECTION_LABEL}>INFRASTRUCTURE</span>
-            {infra.map((s) => (
-              <div key={s.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-[6px]">
-                  {dot(s.healthy)}
-                  <span className="text-[11px] text-[#333]">{LABELS[s.name]}</span>
-                </div>
-                <span className="text-[11px] font-medium text-[#333]">{infraStatus(s)}</span>
-              </div>
-            ))}
-            {infra.length === 0 && <span className="text-[11px] text-[#999]">No data</span>}
-          </div>
-          {/* Model Services */}
-          <div className="flex flex-1 flex-col gap-[5px]">
-            <span className={SECTION_LABEL}>MODEL SERVICES</span>
-            {models.map((s) => (
-              <div key={s.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-[6px]">
-                  {dot(s.healthy)}
-                  <span className="text-[11px] text-[#333]">{LABELS[s.name]}</span>
-                </div>
-                <span className="whitespace-pre text-[11px] font-medium text-[#333]">{modelStatus(s)}</span>
-              </div>
-            ))}
-            {models.length === 0 && <span className="text-[11px] text-[#999]">No data</span>}
-          </div>
-        </div>
-        <div className={DIVIDER} />
-        {/* Ingestion bar */}
-        <div className="flex items-center gap-[12px]">
-          <span className={SECTION_LABEL}>INGESTION:</span>
-          <span className="text-[11px] text-[#333]">{ing?.queued ?? 0} queued</span>
-          <span className="text-[11px] text-[#999]">·</span>
-          <span className="text-[11px] text-[#f0ad4e]">{ing?.processing ?? 0} running</span>
-          <span className="text-[11px] text-[#999]">·</span>
-          <span className="text-[11px] text-[#5cb85c]">{ing?.failed ?? 0} failed</span>
-        </div>
-      </div>
+      {systemHealthCard}
 
       {/* ── Row 2: Knowledge Summary + Attention Alerts ── */}
       <div className="flex gap-[12px]">

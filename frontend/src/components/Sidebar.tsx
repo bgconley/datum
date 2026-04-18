@@ -21,11 +21,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { api, type AttachmentItem, type DocumentMeta, type GeneratedFile } from '@/lib/api'
+import {
+  buildResumeTarget,
+  buildProjectSwitchTarget,
+  describeProjectVisit,
+  navigateToProjectTarget,
+} from '@/lib/project-navigation'
+import { useProjectPreferences } from '@/lib/project-preferences'
 import { queryKeys } from '@/lib/query-keys'
 import { resolveSelectedProject } from '@/lib/route-project'
 import { useProjectsQuery, useProjectWorkspaceQuery } from '@/lib/workspace-query'
 import { CreateDocumentDialog, openTemplateDialog } from './CreateDocumentDialog'
-import { CreateProjectDialog } from './CreateProjectDialog'
 import { UploadModal } from './UploadModal'
 
 const EMPTY_DOCUMENTS: DocumentMeta[] = []
@@ -71,6 +77,7 @@ export function Sidebar({ style }: SidebarProps) {
   const projectsQuery = useProjectsQuery()
   const workspaceQuery = useProjectWorkspaceQuery(selectedProject, { subscribe: true })
   const projects = projectsQuery.data ?? []
+  const preferences = useProjectPreferences()
   const project = workspaceQuery.data?.project ?? null
   const docs = workspaceQuery.data?.documents ?? EMPTY_DOCUMENTS
   const attachments = workspaceQuery.data?.attachments ?? EMPTY_ATTACHMENTS
@@ -312,6 +319,33 @@ export function Sidebar({ style }: SidebarProps) {
   }
 
   const dashboardPath = selectedProject ? `/projects/${selectedProject}` : '/'
+  const projectBySlug = useMemo(
+    () => new Map(projects.map((item) => [item.slug, item])),
+    [projects],
+  )
+  const recentProjects = useMemo(
+    () =>
+      preferences.recent
+        .map((entry) => {
+          const item = projectBySlug.get(entry.slug)
+          if (!item) {
+            return null
+          }
+          return { entry, project: item }
+        })
+        .filter(
+          (item): item is { entry: (typeof preferences.recent)[number]; project: (typeof projects)[number] } =>
+            Boolean(item),
+        ),
+    [preferences.recent, projectBySlug, projects],
+  )
+  const pinnedProjects = useMemo(
+    () =>
+      preferences.pinnedSlugs
+        .map((slug) => projectBySlug.get(slug))
+        .filter((item): item is (typeof projects)[number] => Boolean(item)),
+    [preferences.pinnedSlugs, projectBySlug, projects],
+  )
 
   return (
     <aside className="flex shrink-0 flex-col bg-sidebar text-sidebar-foreground" style={style}>
@@ -327,7 +361,7 @@ export function Sidebar({ style }: SidebarProps) {
                 : 'border-l-4 border-transparent text-[#999] hover:text-white'
             }`}
           >
-            Dashboard
+            {selectedProject ? 'Dashboard' : 'Projects'}
           </Link>
           <Link
             to="/search"
@@ -370,6 +404,65 @@ export function Sidebar({ style }: SidebarProps) {
         {/* Separator */}
         <div className="h-px w-full bg-white/10" />
 
+        {!selectedProject && (
+          <>
+            <div className="py-2">
+              <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
+                RECENT
+              </div>
+              {recentProjects.length > 0 ? (
+                recentProjects.slice(0, 3).map(({ entry, project }) => (
+                  <button
+                    key={`recent:${project.slug}`}
+                    type="button"
+                    className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] text-[#999] hover:text-white"
+                    onClick={() => navigateToProjectTarget(navigate, buildResumeTarget(entry))}
+                  >
+                    <div className="truncate">{project.name}</div>
+                    <div className="truncate text-[10px] text-[#666]">{describeProjectVisit(entry)}</div>
+                  </button>
+                ))
+              ) : (
+                <div className="px-4 py-[5px] text-[11px] text-[#666]">
+                  Recent projects appear here.
+                </div>
+              )}
+            </div>
+
+            <div className="h-px w-full bg-white/10" />
+
+            <div className="py-2">
+              <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
+                PINNED
+              </div>
+              {pinnedProjects.length > 0 ? (
+                pinnedProjects.slice(0, 3).map((item) => (
+                  <button
+                    key={`pinned:${item.slug}`}
+                    type="button"
+                    className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] text-[#999] hover:text-white"
+                    onClick={() =>
+                      navigateToProjectTarget(
+                        navigate,
+                        buildProjectSwitchTarget('/', '', item.slug),
+                      )
+                    }
+                  >
+                    <div className="truncate">{item.name}</div>
+                    <div className="truncate text-[10px] text-[#666]">{item.slug}</div>
+                  </button>
+                ))
+              ) : (
+                <div className="px-4 py-[5px] text-[11px] text-[#666]">
+                  Pin projects from Projects Home or the switcher.
+                </div>
+              )}
+            </div>
+
+            <div className="h-px w-full bg-white/10" />
+          </>
+        )}
+
         {/* Quick Actions — Figma: 9px semibold #666 label, 11px medium #22A5F1 text */}
         {selectedProject && (
           <div className="py-2">
@@ -407,6 +500,26 @@ export function Sidebar({ style }: SidebarProps) {
               onOpenChange={setUploadModalOpen}
               onSuccess={() => refreshProjectState().catch(console.error)}
             />
+          </div>
+        )}
+
+        {!selectedProject && (
+          <div className="py-2">
+            <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
+              WORKSPACE
+            </div>
+            <div className="px-4 py-[5px] text-[11px] text-[#999]">
+              • {projects.length} active projects
+            </div>
+            <div className="px-4 py-[5px] text-[11px] text-[#999]">
+              • {preferences.pinnedSlugs.length} pinned
+            </div>
+            <div className="px-4 py-[5px] text-[11px] text-[#999]">
+              • {recentProjects.length} recent
+            </div>
+            <div className="px-4 py-[5px] text-[11px] text-[#999]">
+              • global search enabled
+            </div>
           </div>
         )}
 

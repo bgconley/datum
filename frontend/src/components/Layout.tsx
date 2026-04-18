@@ -12,6 +12,7 @@ import { PanelRight, Search, Settings } from 'lucide-react'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 
 import { useContextPanel, useContextPanelState } from '@/lib/context-panel'
+import { recordProjectLocation } from '@/lib/project-navigation'
 import { resolveSelectedProject } from '@/lib/route-project'
 import {
   draftFromRouteSearch,
@@ -19,6 +20,7 @@ import {
   routeSearchFromDraft,
 } from '@/lib/search-route'
 import { toggleCommandPalette } from '@/components/CommandPalette'
+import { ProjectSwitcher } from '@/components/ProjectSwitcher'
 import { Sidebar } from './Sidebar'
 
 export interface LayoutConfig {
@@ -61,6 +63,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const searchDraft = useMemo(() => draftFromRouteSearch(routeSearch), [routeSearch])
   const showHeaderSearch = location.pathname === '/search' && Boolean(searchDraft.query.trim())
   const [headerSearchQuery, setHeaderSearchQuery] = useState(searchDraft.query)
+  const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false)
 
   useEffect(() => {
     if (showHeaderSearch) {
@@ -129,6 +132,14 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const selectedProject = resolveSelectedProject(location.pathname, location.searchStr)
 
+  useEffect(() => {
+    if (!selectedProject) {
+      return
+    }
+
+    recordProjectLocation(location.pathname, location.searchStr)
+  }, [location.pathname, location.searchStr, selectedProject])
+
   const handleHeaderSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const nextDraft = { ...searchDraft, query: headerSearchQuery }
@@ -143,15 +154,21 @@ export function Layout({ children }: { children: ReactNode }) {
           <span className="text-[14px] font-bold text-white">DATUM</span>
           <div className="h-6 w-px bg-white/20" />
           {selectedProject ? (
-            <Link
-              to="/projects/$slug"
-              params={{ slug: selectedProject }}
+            <button
+              type="button"
               className="text-[13px] text-primary"
+              onClick={() => setProjectSwitcherOpen((current) => !current)}
             >
               {selectedProject} ▾
+            </button>
+          ) : location.pathname === '/' ? (
+            <Link to="/" className="text-[13px] text-primary">
+              Projects
             </Link>
           ) : (
-            <span className="text-[13px] text-white/60">No project</span>
+            <Link to="/" className="text-[13px] text-white/60 hover:text-white/80">
+              Projects
+            </Link>
           )}
         </div>
         {showHeaderSearch ? (
@@ -216,6 +233,13 @@ export function Layout({ children }: { children: ReactNode }) {
           </aside>
         )}
       </div>
+      {selectedProject && (
+        <ProjectSwitcher
+          open={projectSwitcherOpen}
+          onOpenChange={setProjectSwitcherOpen}
+          selectedProject={selectedProject}
+        />
+      )}
     </div>
   )
 }

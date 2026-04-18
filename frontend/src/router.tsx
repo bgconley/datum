@@ -11,10 +11,14 @@ import {
 import { CommandPalette } from '@/components/CommandPalette'
 import { Layout } from '@/components/Layout'
 import { ContextPanelProvider } from '@/lib/context-panel'
+import { ProjectCreationProvider } from '@/lib/project-creation'
 import { routeSearchFromDraft, type SearchRouteState } from '@/lib/search-route'
 
 const SearchPage = lazy(() =>
   import('@/components/SearchPage').then((module) => ({ default: module.SearchPage })),
+)
+const ProjectsHome = lazy(() =>
+  import('@/components/ProjectsHome').then((module) => ({ default: module.ProjectsHome })),
 )
 const ProjectDashboard = lazy(() =>
   import('@/components/ProjectDashboard').then((module) => ({
@@ -58,33 +62,21 @@ export const queryClient = new QueryClient({
 function RootComponent() {
   return (
     <ContextPanelProvider>
-      <Layout>
-        <Outlet />
-      </Layout>
-      <CommandPalette />
+      <ProjectCreationProvider>
+        <Layout>
+          <Outlet />
+        </Layout>
+        <CommandPalette />
+      </ProjectCreationProvider>
     </ContextPanelProvider>
   )
 }
 
 function HomeRouteComponent() {
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="max-w-2xl rounded border border-border bg-white p-10 shadow-sm">
-        <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Current build
-        </div>
-        <h1 className="mt-3 text-4xl font-semibold tracking-tight">
-          Cabinet-first workspace for living project memory.
-        </h1>
-        <p className="mt-4 max-w-xl text-sm leading-7 text-muted-foreground">
-          Open a project from the cabinet, jump straight to search with
-          <kbd className="mx-1 rounded border border-border bg-muted px-1.5 py-0.5 text-[11px]">/</kbd>
-          , or use
-          <kbd className="mx-1 rounded border border-border bg-muted px-1.5 py-0.5 text-[11px]">Ctrl+K</kbd>
-          to navigate documents, dashboards, and search from anywhere.
-        </p>
-      </div>
-    </div>
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading projects…</div>}>
+      <ProjectsHome />
+    </Suspense>
   )
 }
 
