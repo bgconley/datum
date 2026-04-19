@@ -27,6 +27,7 @@ import {
   describeProjectVisit,
   navigateToProjectTarget,
 } from '@/lib/project-navigation'
+import { useProjectCreation } from '@/lib/project-creation'
 import { useProjectPreferences } from '@/lib/project-preferences'
 import { queryKeys } from '@/lib/query-keys'
 import { resolveSelectedProject } from '@/lib/route-project'
@@ -64,6 +65,7 @@ export function Sidebar({ style }: SidebarProps) {
   const queryClient = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
+  const { openCreateProjectDialog } = useProjectCreation()
 
   const selectedProject = resolveSelectedProject(location.pathname, location.searchStr)
   const documentPrefix = selectedProject ? `/projects/${selectedProject}/docs/` : null
@@ -347,6 +349,7 @@ export function Sidebar({ style }: SidebarProps) {
         .filter((item): item is (typeof projects)[number] => Boolean(item)),
     [preferences.pinnedSlugs, projectBySlug, projects],
   )
+  const lastVisitedProject = recentProjects[0] ?? null
 
   return (
     <aside className="flex shrink-0 flex-col bg-sidebar text-sidebar-foreground" style={style}>
@@ -474,6 +477,37 @@ export function Sidebar({ style }: SidebarProps) {
 
             <div className="h-px w-full bg-white/10" />
           </>
+        )}
+
+        {!selectedProject && (
+          <div className="py-2">
+            <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
+              QUICK ACTIONS
+            </div>
+            <button
+              type="button"
+              className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
+              onClick={() => openCreateProjectDialog({ source: 'projects-home' })}
+            >
+              + New Project
+            </button>
+            <button
+              type="button"
+              className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
+              onClick={() => navigate({ to: '/search', search: createSearchRouteStateForLaunch() })}
+            >
+              + Search All
+            </button>
+            {lastVisitedProject && (
+              <button
+                type="button"
+                className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
+                onClick={() => navigateToProjectTarget(navigate, buildResumeTarget(lastVisitedProject.entry))}
+              >
+                + Resume {lastVisitedProject.project.name}
+              </button>
+            )}
+          </div>
         )}
 
         {/* Quick Actions — Figma: 9px semibold #666 label, 11px medium #22A5F1 text */}

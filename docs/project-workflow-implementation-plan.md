@@ -94,6 +94,18 @@ GPU-node deployment and validation.
 
 See: [project-workflow-phase-5-validation.md](./project-workflow-phase-5-validation.md)
 
+### Phase 6
+
+UI/UX fidelity implementation against the approved Figma artifacts.
+
+See: [project-workflow-phase-6-ui-fidelity.md](./project-workflow-phase-6-ui-fidelity.md)
+
+### Phase 7
+
+Final integrated validation and release sign-off.
+
+See: [project-workflow-phase-7-final-signoff.md](./project-workflow-phase-7-final-signoff.md)
+
 ## Execution Order
 
 1. Complete Phase 0 and treat it as the implementation contract.
@@ -102,6 +114,9 @@ See: [project-workflow-phase-5-validation.md](./project-workflow-phase-5-validat
 4. Implement Phase 3 after the create/open/switch model is in place.
 5. Implement Phase 4 after the shell is stable.
 6. Execute Phase 5 only after local and GPU-node code paths are ready.
+7. Implement Phase 6 only after the workflow is functionally correct on the GPU
+   node.
+8. Execute Phase 7 only after the fidelity pass is complete and deployed.
 
 ## Release Boundaries
 
@@ -117,6 +132,8 @@ Ship the operational project workflow:
 - Search launch defaults and visible scope behavior
 - Route preservation and deterministic fallback behavior
 - Read-only project settings surface
+- UI/UX fidelity pass across all impacted project-workflow screens
+- Final GPU-node regression and sign-off validation
 
 ### Release B
 
@@ -147,6 +164,8 @@ The following remain explicitly excluded from this implementation plan:
 - Search defaults are predictable and visible to the user.
 - The command palette supports true cross-project work.
 - GPU-node validation passes against the real inference topology.
+- Final implemented screens are visually aligned with the approved Figma
+  artifacts at production fidelity.
 
 ## Stop Conditions
 

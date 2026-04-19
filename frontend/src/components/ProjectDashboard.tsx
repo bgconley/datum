@@ -370,109 +370,112 @@ export function ProjectDashboard({ projectSlug }: Props) {
   if (showOnboarding) {
     return (
       <div className="flex flex-col gap-[12px] overflow-auto px-[24px] pb-[16px] pt-[20px]">
-        <p className="text-[22px] text-[#1b2431]">Dashboard</p>
+        <div>
+          <p className="text-[22px] text-[#1b2431]">{project.name}</p>
+          <p className="mt-1 text-[12px] text-[#7b8794]">
+            {project.description ||
+              'Project created just now. Start by adding sources, creating a brief, or searching the empty cabinet.'}
+          </p>
+        </div>
 
-        <div className="rounded-[4px] border border-[#d6e0e8] bg-[linear-gradient(135deg,#ffffff_0%,#f7fbfe_100%)] px-[28px] py-[24px]">
+        <div className="rounded-[4px] border border-[#d6e0e8] bg-white px-[28px] py-[14px]">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7b8794]">
             NEW PROJECT
           </div>
-          <div className="mt-2 flex items-start justify-between gap-6">
-            <div className="min-w-0">
-              <h2 className="text-[30px] font-semibold leading-none text-[#1b2431]">
-                {project.name}
-              </h2>
-              <p className="mt-3 max-w-[640px] text-[13px] leading-7 text-[#666]">
-                {project.description ||
-                  'Start with the first source document, a structured note, or a scoped project search to seed the workspace.'}
+          <div className="mt-1 flex items-start justify-between gap-6">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-[13px] font-semibold text-[#1b2431]">Get Started</h2>
+              <p className="mt-2 max-w-[620px] text-[12px] leading-6 text-[#7b8794]">
+                The first dashboard state should build useful context quickly.
               </p>
-            </div>
-            <div className="min-w-[220px] rounded-[4px] border border-[#e1e8ed] bg-white px-[14px] py-[12px]">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#666]">
-                PROJECT READY
-              </div>
-              <div className="mt-3 space-y-2 text-[11px] text-[#666]">
-                <div className="flex items-center justify-between gap-3">
-                  <span>Status</span>
-                  <span className="font-semibold text-[#3c763d]">
-                    {project.status.toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>Created</span>
-                  <span className="font-medium text-[#333]">
-                    {project.created ? new Date(project.created).toLocaleDateString() : 'Today'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>Slug</span>
-                  <span className="font-mono text-[#333]">{project.slug}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 grid grid-cols-3 gap-3">
-            <button
-              type="button"
-              className="rounded-[4px] bg-[#22a5f1] px-[16px] py-[12px] text-left text-white transition hover:bg-[#1a94db]"
-              onClick={() => setUploadModalOpen(true)}
-            >
-              <div className="text-[13px] font-semibold">Upload Document</div>
-              <div className="mt-1 text-[11px] text-white/80">
-                Bring in the first source file and start ingestion.
-              </div>
-            </button>
-            <button
-              type="button"
-              className="rounded-[4px] border border-[#d6e0e8] bg-white px-[16px] py-[12px] text-left transition hover:border-[#22a5f1] hover:text-[#22a5f1]"
-              onClick={() => openTemplateDialog('adr')}
-            >
-              <div className="text-[13px] font-semibold text-[#1b2431]">Create Document</div>
-              <div className="mt-1 text-[11px] text-[#7b8794]">
-                Start with a template and anchor the project context.
-              </div>
-            </button>
-            <Link
-              to="/search"
-              search={{ project: projectSlug, scope: 'current' }}
-              className="rounded-[4px] border border-[#d6e0e8] bg-white px-[16px] py-[12px] text-left transition hover:border-[#22a5f1] hover:text-[#22a5f1]"
-            >
-              <div className="text-[13px] font-semibold text-[#1b2431]">Search Project</div>
-              <div className="mt-1 text-[11px] text-[#7b8794]">
-                Open scoped search before documents accumulate.
-              </div>
-            </Link>
-          </div>
-
-          <div className="mt-5 grid grid-cols-3 gap-4 text-[11px] text-[#666]">
-            <div>
-              <div className="font-semibold uppercase tracking-[0.14em] text-[#7b8794]">
-                Suggested First Step
-              </div>
-              <div className="mt-2 leading-6">
-                Upload the canonical requirement set or an architecture brief.
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-[4px] bg-[#22a5f1] px-[16px] py-[10px] text-[12px] font-semibold text-white transition hover:bg-[#1a94db]"
+                  onClick={() => setUploadModalOpen(true)}
+                >
+                  Upload Document
+                </button>
+                <button
+                  type="button"
+                  className="rounded-[4px] border border-[#d6e0e8] bg-white px-[16px] py-[10px] text-[12px] font-semibold text-[#1b2431] transition hover:border-[#22a5f1] hover:text-[#22a5f1]"
+                  onClick={() => openTemplateDialog('adr')}
+                >
+                  Create Document
+                </button>
+                <Link
+                  to="/search"
+                  search={{ project: projectSlug, scope: 'current' }}
+                  className="rounded-[4px] border border-[#d6e0e8] bg-white px-[16px] py-[10px] text-[12px] font-semibold text-[#1b2431] transition hover:border-[#22a5f1] hover:text-[#22a5f1]"
+                >
+                  Open Search
+                </Link>
               </div>
             </div>
-            <div>
-              <div className="font-semibold uppercase tracking-[0.14em] text-[#7b8794]">
-                Onboarding State
-              </div>
-              <div className="mt-2 leading-6">
-                This dashboard stays active until the project has real workspace activity.
-              </div>
-            </div>
-            <div>
-              <div className="font-semibold uppercase tracking-[0.14em] text-[#7b8794]">
-                Search Scope
-              </div>
-              <div className="mt-2 leading-6">
-                Search launched from here defaults to the current project scope.
-              </div>
+            <div className="min-w-[240px] text-[11px] text-[#333]">
+              <div className="font-medium text-[#666]">Recommended first inputs</div>
+              <ul className="mt-2 space-y-1.5 leading-5">
+                <li>• project brief or scope note</li>
+                <li>• vendor questionnaire or source PDF</li>
+                <li>• initial requirements / risks list</li>
+              </ul>
             </div>
           </div>
         </div>
 
-        {systemHealthCard}
+        <div className="grid grid-cols-2 gap-4">
+          <section className={`${CARD} flex flex-col gap-[10px]`}>
+            <span className={SECTION_LABEL}>ONBOARDING</span>
+            <span className="text-[13px] font-semibold text-[#1b2431]">Suggested First Docs</span>
+            <div className="space-y-3 text-[12px] text-[#333]">
+              <div>
+                <div className="font-semibold">1. Requirements brief</div>
+                <div className="mt-1 text-[11px] text-[#7b8794]">
+                  Capture purpose, stakeholders, and evaluation rules.
+                </div>
+              </div>
+              <div>
+                <div className="font-semibold">2. Session note</div>
+                <div className="mt-1 text-[11px] text-[#7b8794]">
+                  Record kickoff context and key follow-up actions.
+                </div>
+              </div>
+              <div>
+                <div className="font-semibold">3. Decision record</div>
+                <div className="mt-1 text-[11px] text-[#7b8794]">
+                  Start tracking why risky vendors are accepted or rejected.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className={`${CARD} flex flex-col gap-[10px]`}>
+            <span className={SECTION_LABEL}>EMPTY BUT READY</span>
+            <span className="text-[13px] font-semibold text-[#1b2431]">Current Project State</span>
+            <div className="space-y-1 text-[18px] font-semibold leading-7 text-[#1b2431]">
+              <div>{docs.length} documents</div>
+              <div>{entityCount} entities</div>
+              <div>{pendingCount} review candidates</div>
+            </div>
+            <p className="text-[11px] leading-5 text-[#7b8794]">
+              As soon as content is added, search, inbox, and sessions become project-specific.
+            </p>
+          </section>
+        </div>
+
+        <section className={`${CARD} flex flex-col gap-[10px]`}>
+          <span className={SECTION_LABEL}>WORKFLOW NOTE</span>
+          <span className="text-[13px] font-semibold text-[#1b2431]">Why This Landing Exists</span>
+          <div className="space-y-3 text-[12px] leading-6 text-[#666]">
+            <p>Create Project should not dead-end in a blank shell.</p>
+            <p>
+              The first dashboard state explains the next three actions and keeps the project switcher available at all times.
+            </p>
+            <p>
+              If the user switches away immediately, the same header switcher should return them here until real project activity exists.
+            </p>
+          </div>
+        </section>
 
         <UploadModal
           projectSlug={projectSlug}

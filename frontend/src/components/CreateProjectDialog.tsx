@@ -58,7 +58,7 @@ function getErrorMessage(error: unknown) {
       return parsed.detail
     }
   } catch {
-    // Fall back to the raw message below.
+    // Fall back to raw error text.
   }
 
   return rawBody
@@ -75,6 +75,8 @@ export function CreateProjectDialog({
   const [name, setName] = useState(defaultName)
   const [slug, setSlug] = useState(toProjectSlug(defaultName))
   const [description, setDescription] = useState('')
+  const [tags, setTags] = useState<string[]>([])
+  const [tagDraft, setTagDraft] = useState('')
   const [slugTouched, setSlugTouched] = useState(Boolean(defaultName))
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -84,6 +86,8 @@ export function CreateProjectDialog({
       setName(defaultName)
       setSlug(toProjectSlug(defaultName))
       setDescription('')
+      setTags([])
+      setTagDraft('')
       setSlugTouched(Boolean(defaultName))
       setError(null)
       setSaving(false)
@@ -93,6 +97,8 @@ export function CreateProjectDialog({
     setName(defaultName)
     setSlug(toProjectSlug(defaultName))
     setDescription('')
+    setTags([])
+    setTagDraft('')
     setSlugTouched(Boolean(defaultName))
     setError(null)
   }, [defaultName, open])
@@ -105,6 +111,16 @@ export function CreateProjectDialog({
       return
     }
     onOpenChange(false)
+  }
+
+  const appendTag = (value: string) => {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized || tags.includes(normalized)) {
+      setTagDraft('')
+      return
+    }
+    setTags((current) => [...current, normalized])
+    setTagDraft('')
   }
 
   const handleNameChange = (value: string) => {
@@ -138,6 +154,7 @@ export function CreateProjectDialog({
         name: name.trim(),
         slug,
         description: description.trim() || undefined,
+        tags,
       })
 
       await queryClient.invalidateQueries({ queryKey: queryKeys.projects })
@@ -183,16 +200,11 @@ export function CreateProjectDialog({
       onClick={close}
     >
       <div
-        className="flex w-[520px] flex-col overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white shadow-[0px_8px_24px_0px_rgba(0,0,0,0.2)]"
+        className="flex w-[370px] flex-col overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white shadow-[0px_8px_24px_0px_rgba(0,0,0,0.2)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between bg-[#22a5f1] px-[20px] py-[14px]">
-          <div>
-            <div className="text-[14px] font-semibold text-white">Create Project</div>
-            <div className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-white/75">
-              Workspace Setup
-            </div>
-          </div>
+        <div className="flex items-center justify-between bg-[#22a5f1] px-[14px] py-[10px]">
+          <div className="text-[14px] font-semibold text-white">Create Project</div>
           <button
             type="button"
             onClick={close}
@@ -202,17 +214,17 @@ export function CreateProjectDialog({
           </button>
         </div>
 
-        <div className="flex flex-col gap-[18px] px-[28px] py-[24px]">
+        <div className="flex flex-col gap-[14px] px-[20px] py-[18px]">
           <div className="flex flex-col gap-[8px]">
             <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#666]">
               Project Name
             </span>
             <Input
               autoFocus
-              placeholder="Authentication Platform"
+              placeholder="e.g. vendor-risk"
               value={name}
               onChange={(event) => handleNameChange(event.target.value)}
-              className="h-[40px] border-[#d6e0e8] text-[13px]"
+              className="h-[40px] rounded-[3px] border-[#d6e0e8] text-[12px]"
             />
           </div>
 
@@ -221,14 +233,14 @@ export function CreateProjectDialog({
               Slug
             </span>
             <Input
-              placeholder="authentication-platform"
+              placeholder="vendor-risk"
               value={slug}
               onChange={(event) => handleSlugChange(event.target.value)}
-              className="h-[40px] border-[#d6e0e8] font-mono text-[12px]"
+              className="h-[40px] rounded-[3px] border-[#d6e0e8] font-mono text-[12px]"
             />
-            <div className={`text-[11px] ${slugError ? 'text-[#d9534f]' : 'text-[#7b8794]'}`}>
-              {slugError ?? 'Used in routes and on disk. Lowercase letters, numbers, hyphens.'}
-            </div>
+            {slugTouched && slugError ? (
+              <div className="text-[11px] text-[#d9534f]">{slugError}</div>
+            ) : null}
           </div>
 
           <div className="flex flex-col gap-[8px]">
@@ -236,7 +248,7 @@ export function CreateProjectDialog({
               Description
             </span>
             <Textarea
-              placeholder="Briefly describe the project focus or operational scope."
+              placeholder="Track vendor assessments, requirements, decisions, and open questions."
               value={description}
               onChange={(event) => {
                 setDescription(event.target.value)
@@ -244,9 +256,40 @@ export function CreateProjectDialog({
                   setError(null)
                 }
               }}
-              rows={4}
-              className="resize-none border-[#d6e0e8] text-[12px]"
+              rows={3}
+              className="resize-none rounded-[3px] border-[#d6e0e8] text-[12px]"
             />
+          </div>
+
+          <div className="flex flex-col gap-[8px]">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#666]">
+              Optional Tags
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              {tags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className="rounded-full bg-[#f3f6f8] px-[8px] py-[2px] text-[10px] font-medium text-[#1b2431]"
+                  onClick={() => setTags((current) => current.filter((item) => item !== tag))}
+                >
+                  {tag}
+                </button>
+              ))}
+              <input
+                value={tagDraft}
+                onChange={(event) => setTagDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ',') {
+                    event.preventDefault()
+                    appendTag(tagDraft)
+                  }
+                }}
+                onBlur={() => appendTag(tagDraft)}
+                placeholder="Add tag"
+                className="h-6 min-w-[72px] border-0 bg-transparent p-0 text-[11px] text-[#7b8794] outline-none placeholder:text-[#999]"
+              />
+            </div>
           </div>
 
           {error && (
@@ -255,21 +298,28 @@ export function CreateProjectDialog({
             </div>
           )}
 
-          <div className="rounded-[4px] border border-[#e1e8ed] bg-[#f8fafb] px-[12px] py-[10px] text-[11px] leading-6 text-[#666]">
-            New projects land on the dashboard onboarding state with quick actions for upload,
-            document creation, and scoped search.
+          <div className="border-t border-[#e1e8ed] pt-2 text-[11px] leading-5 text-[#7b8794]">
+            Landing opens the new dashboard with Upload, Create Document, and Search.
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[#e1e8ed] px-[28px] py-[16px]">
-          <Button type="button" variant="ghost" onClick={close} disabled={saving}>
+        <div className="flex items-center justify-between border-t border-[#e1e8ed] px-[20px] py-[10px]">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="border-[#d6e0e8] bg-white text-[#1b2431]"
+            onClick={close}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button
             type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
+            size="sm"
             className="bg-[#22a5f1] text-white hover:bg-[#1a94db]"
+            disabled={!canSubmit}
+            onClick={() => void handleSubmit()}
           >
             {saving ? 'Creating…' : 'Create Project'}
           </Button>

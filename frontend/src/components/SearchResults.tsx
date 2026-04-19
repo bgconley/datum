@@ -72,7 +72,7 @@ export function SearchResults({
   onProjectSelect,
   loading,
   streamPhase,
-  semanticEnabled,
+  semanticEnabled: _semanticEnabled,
   rerankApplied,
   entityFacets,
 }: SearchResultsProps) {
@@ -106,11 +106,11 @@ export function SearchResults({
         <span className="text-[11px] font-semibold text-[#666]">FILTERS</span>
         <div className="flex items-start justify-between text-[10px]">
           <span className="text-[#666]">Scope</span>
-          <span className="font-medium text-[#22a5f1]">{projectScope ?? 'All'}</span>
+          <span className="font-medium text-[#22a5f1]">{projectScope ? 'Current project' : 'All projects'}</span>
         </div>
         <div className="flex items-start justify-between text-[10px]">
           <span className="text-[#666]">Time</span>
-          <span className="font-medium text-[#22a5f1]">All</span>
+          <span className="font-medium text-[#22a5f1]">Past 30 Days</span>
         </div>
         <div className="flex items-start justify-between text-[10px]">
           <span className="text-[#666]">Doc Type</span>
@@ -127,8 +127,7 @@ export function SearchResults({
           <div key={facet.value} className="flex items-center gap-[8px]">
             <div className="size-[12px] rounded-[2px] border border-[#e1e8ed]" />
             <span className="text-[10px] text-[#333]">
-              {facet.value.charAt(0).toUpperCase() + facet.value.slice(1).replace('_', ' ')}s (
-              {facet.count})
+              {facet.value.charAt(0).toUpperCase() + facet.value.slice(1).replace('_', ' ')}s ({facet.count})
             </span>
           </div>
         ))}
@@ -198,32 +197,61 @@ export function SearchResults({
     )
   }
 
+  const synthesisBody =
+    answerError ||
+    answerText ||
+    (projectScope
+      ? `Search is currently scoped to ${projectScope}. Switch to all projects when the query needs comparison across cabinets, decisions, and review notes.`
+      : `Search is currently spanning all projects. Switch to the current project when the query should stay anchored to one cabinet.`)
+
   return (
-    <div className="flex flex-col gap-[14px]">
-      <div className="flex items-center justify-between">
-        <h1 className="text-[18px] font-semibold text-[#1b2431]">
-          Search: &ldquo;{query}&rdquo;
-        </h1>
+    <div className="flex flex-col gap-[12px]">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[18px] font-semibold text-[#1b2431]">
+            Search: &ldquo;{query}&rdquo;
+          </h1>
+          <div className="mt-1 flex gap-2">
+            <button
+              type="button"
+              className={`rounded-full px-[10px] py-[4px] text-[10px] font-semibold ${
+                projectScope
+                  ? 'bg-[#22a5f1] text-white'
+                  : 'border border-[#d6e0e8] bg-white text-[#666]'
+              }`}
+              onClick={() => onProjectSelect(projectScope ?? '')}
+            >
+              Current project
+            </button>
+            <button
+              type="button"
+              className={`rounded-full px-[10px] py-[4px] text-[10px] font-semibold ${
+                !projectScope
+                  ? 'bg-[#22a5f1] text-white'
+                  : 'border border-[#d6e0e8] bg-white text-[#666]'
+              }`}
+              onClick={() => onProjectSelect('')}
+            >
+              All projects
+            </button>
+          </div>
+        </div>
         <span className="whitespace-pre text-[10px] text-[#666]">
           Showing Top {results.length} Chunks {'  |  '}
           {filteredResults.length > 0
-            ? `1 \u2013 ${filteredResults.length} of ${results.length}`
+            ? `1 - ${filteredResults.length} of ${results.length}`
             : `0 of ${results.length}`}
         </span>
       </div>
 
-      {answer && (answerText || answerError) && (
-        <div className="flex h-[100px] items-start overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white">
-          <div className="h-full w-[4px] shrink-0 bg-[#d9534f]" />
-          <div className="flex min-w-0 flex-1 flex-col gap-[8px] px-[16px] py-[14px]">
-            <span className="text-[9px] font-semibold text-[#666]">AI SYNTHESIS</span>
-            {answerError ? (
-              <p className="line-clamp-2 text-[12px] text-[#666]">{answerError}</p>
-            ) : (
-              <p className="line-clamp-2 text-[12px] text-[#333]">{answerText}</p>
-            )}
-            {!answerError && answer.citations.length > 0 && (
-              <div className="flex items-start gap-[6px] text-[10px]">
+      <div className="overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white">
+        <div className="flex">
+          <div className="w-[3px] shrink-0 bg-[#d9534f]" />
+          <div className="min-w-0 flex-1 px-[14px] py-[12px]">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#666]">AI SYNTHESIS</span>
+            <p className="mt-2 text-[12px] leading-6 text-[#333]">{synthesisBody}</p>
+            {!answerError && answer?.citations.length ? (
+              <div className="mt-2 flex items-start gap-[6px] text-[10px]">
                 <span className="text-[#666]">Citations:</span>
                 {answer.citations.map((citation) => (
                   <Link
@@ -239,10 +267,16 @@ export function SearchResults({
                   </Link>
                 ))}
               </div>
+            ) : (
+              <div className="mt-2 text-[10px] text-[#7b8794]">
+                Scope behavior: <span className="text-[#22a5f1]">current project default</span>{' '}
+                <span className="text-[#999]">|</span>{' '}
+                <span className="text-[#22a5f1]">all projects available</span>
+              </div>
             )}
           </div>
         </div>
-      )}
+      </div>
 
       {loading && streamPhase === 'idle' && (
         <div className="rounded-[4px] border border-[#e1e8ed] bg-white px-[20px] py-[14px] text-[11px] text-[#666]">
@@ -261,40 +295,40 @@ export function SearchResults({
               result.chunk_id ||
               `${result.project_slug}:${result.document_path}:${result.version_number}`
             }
-            className="flex h-[100px] items-start overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white"
+            className="overflow-hidden rounded-[4px] border border-[#e1e8ed] bg-white"
           >
-            <div className={`h-[80px] w-[4px] shrink-0 ${accent}`} />
-            <div className="flex min-w-0 flex-1 flex-col gap-[4px] px-[16px] py-[12px]">
-              <div className="flex items-center gap-[8px] text-[12px] font-semibold">
-                <span className="text-[#333]">{index + 1}.</span>
-                <Link
-                  to="/projects/$slug/docs/$"
-                  params={{ slug: result.project_slug, _splat: result.document_path }}
-                  search={{
-                    sourceQuery: query,
-                    sourceSnippet: result.snippet,
-                    sourceHeading: result.heading_path,
-                    sourceSignals: result.match_signals.join(','),
-                  }}
-                  className="truncate text-[#22a5f1] hover:underline"
-                >
-                  {result.document_title}
-                </Link>
-              </div>
-              {result.heading_path && (
-                <p className="text-[10px] text-[#666]">
-                  {'\u25b8'} {result.heading_path}
-                </p>
-              )}
-              <div className="flex items-start gap-[8px]">
-                <span className="text-[10px] text-[#666]">Rank:</span>
-                <span
-                  className={`rounded-[3px] px-[8px] py-[3px] text-[9px] font-semibold ${badge.bg} ${badge.text}`}
-                >
-                  {badge.label}
-                </span>
-                <span className="text-[10px] text-[#666]">Provenance:</span>
-                <span className="text-[10px] font-medium text-[#22a5f1]">{prov}</span>
+            <div className="flex">
+              <div className={`w-[3px] shrink-0 ${accent}`} />
+              <div className="min-w-0 flex-1 px-[14px] py-[12px]">
+                <div className="flex items-center gap-[8px] text-[12px] font-semibold">
+                  <span className="text-[#333]">{index + 1}.</span>
+                  <Link
+                    to="/projects/$slug/docs/$"
+                    params={{ slug: result.project_slug, _splat: result.document_path }}
+                    search={{
+                      sourceQuery: query,
+                      sourceSnippet: result.snippet,
+                      sourceHeading: result.heading_path,
+                      sourceSignals: result.match_signals.join(','),
+                    }}
+                    className="truncate text-[#22a5f1] hover:underline"
+                  >
+                    {result.document_title}
+                  </Link>
+                </div>
+                <div className="mt-1 text-[10px] text-[#666]">
+                  Section: {result.heading_path || 'Document root'}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-[8px] text-[10px]">
+                  <span className="text-[#666]">Rank:</span>
+                  <span
+                    className={`rounded-[3px] px-[6px] py-[2px] text-[9px] font-semibold ${badge.bg} ${badge.text}`}
+                  >
+                    {badge.label}
+                  </span>
+                  <span className="text-[#666]">Provenance:</span>
+                  <span className="font-medium text-[#22a5f1]">{prov}</span>
+                </div>
               </div>
             </div>
           </div>
