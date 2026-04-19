@@ -298,8 +298,13 @@ export function CreateProjectDialog({
             </div>
           )}
 
-          <div className="border-t border-[#e1e8ed] pt-2 text-[11px] leading-5 text-[#7b8794]">
-            Landing opens the new dashboard with Upload, Create Document, and Search.
+          <div className="border-t border-[#e1e8ed] pt-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#666]">
+              After Create
+            </div>
+            <div className="mt-2 text-[11px] leading-5 text-[#7b8794]">
+              Landing opens the new dashboard with Upload, Create Document, and Search.
+            </div>
           </div>
         </div>
 

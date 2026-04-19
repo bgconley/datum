@@ -218,6 +218,53 @@ export function ProjectDashboard({ projectSlug }: Props) {
   // Context panel
   useEffect(() => {
     if (!project) return () => setContent(null)
+    if (showOnboarding) {
+      setContent(
+        <div className="flex flex-col gap-[10px] p-[16px]">
+          <p className={SECTION_LABEL}>CONTEXT: PROJECT</p>
+          <div className={DIVIDER} />
+          <div className="flex items-start justify-between text-[11px]">
+            <span className="text-[#666]">Status</span>
+            <span className="rounded-[3px] bg-[#5cb85c] px-[8px] py-[3px] text-[10px] font-semibold text-white">
+              {project.status.toUpperCase()}
+            </span>
+          </div>
+          <div className="flex items-start justify-between text-[11px]">
+            <span className="text-[#666]">Created</span>
+            <span className="font-medium text-[#333]">
+              {project.created ? formatTime(project.created) : 'just now'}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-start gap-[6px]">
+            <span className="text-[11px] text-[#666]">Tags</span>
+            {project.tags.length > 0 ? (
+              project.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-[#f3f6f8] px-[8px] py-[2px] text-[10px] font-medium text-[#1b2431]"
+                >
+                  {tag}
+                </span>
+              ))
+            ) : (
+              <span className="text-[11px] text-[#999]">No tags yet.</span>
+            )}
+          </div>
+          <div className={DIVIDER} />
+          <p className={SECTION_LABEL}>ONBOARDING CHECKLIST</p>
+          <div className="space-y-[4px] text-[11px] text-[#333]">
+            <p>• Upload first source document</p>
+            <p>• Create a project brief</p>
+            <p>• Run first grounded search</p>
+          </div>
+          <div className={DIVIDER} />
+          <p className={SECTION_LABEL}>ROUTE BEHAVIOR</p>
+          <p className="text-[11px] text-[#7b8794]">Preserve section context when possible.</p>
+        </div>,
+      )
+      return () => setContent(null)
+    }
+
     setContent(
       <div className="flex flex-col gap-[10px] p-[16px]">
         <p className={SECTION_LABEL}>CONTEXT: PROJECT</p>
@@ -302,7 +349,7 @@ export function ProjectDashboard({ projectSlug }: Props) {
       </div>,
     )
     return () => setContent(null)
-  }, [project, docs, pendingCount, openQuestions, staleDocs, health, infra, setContent])
+  }, [project, docs, pendingCount, openQuestions, staleDocs, showOnboarding, health, infra, setContent])
 
   if (wq.isLoading) {
     return <div className="p-8 text-[#666]">Loading project dashboard...</div>
