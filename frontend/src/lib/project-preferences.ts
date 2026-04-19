@@ -8,6 +8,7 @@ export type ProjectVisitSection =
   | 'dashboard'
   | 'inbox'
   | 'sessions'
+  | 'settings'
   | 'search'
   | 'document'
   | 'unknown'

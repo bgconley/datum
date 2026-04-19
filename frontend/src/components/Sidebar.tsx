@@ -30,6 +30,7 @@ import {
 import { useProjectPreferences } from '@/lib/project-preferences'
 import { queryKeys } from '@/lib/query-keys'
 import { resolveSelectedProject } from '@/lib/route-project'
+import { createSearchRouteStateForLaunch } from '@/lib/search-route'
 import { useProjectsQuery, useProjectWorkspaceQuery } from '@/lib/workspace-query'
 import { CreateDocumentDialog, openTemplateDialog } from './CreateDocumentDialog'
 import { UploadModal } from './UploadModal'
@@ -365,6 +366,7 @@ export function Sidebar({ style }: SidebarProps) {
           </Link>
           <Link
             to="/search"
+            search={createSearchRouteStateForLaunch(selectedProject)}
             className={`flex items-center py-[10px] pl-3 pr-4 text-[13px] ${
               isActiveNav('/search')
                 ? 'border-l-4 border-primary bg-sidebar-accent text-white'
@@ -396,6 +398,17 @@ export function Sidebar({ style }: SidebarProps) {
                 }`}
               >
                 Sessions
+              </Link>
+              <Link
+                to="/projects/$slug/settings"
+                params={{ slug: selectedProject }}
+                className={`flex items-center py-[10px] pl-3 pr-4 text-[13px] ${
+                  isActiveNav(`/projects/${selectedProject}/settings`)
+                    ? 'border-l-4 border-primary bg-sidebar-accent text-white'
+                    : 'border-l-4 border-transparent text-[#999] hover:text-white'
+                }`}
+              >
+                Settings
               </Link>
             </>
           )}

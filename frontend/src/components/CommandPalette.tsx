@@ -5,9 +5,18 @@ import { useLocation, useNavigate } from '@tanstack/react-router'
 
 import { openTemplateDialog } from '@/components/CreateDocumentDialog'
 import { api, type DocumentMeta } from '@/lib/api'
+import {
+  buildProjectSwitchTarget,
+  navigateToProjectTarget,
+} from '@/lib/project-navigation'
 import { useProjectCreation } from '@/lib/project-creation'
 import { queryKeys } from '@/lib/query-keys'
 import { resolveSelectedProject } from '@/lib/route-project'
+import {
+  createSearchDraftForLaunch,
+  createSearchRouteStateForLaunch,
+  routeSearchFromDraft,
+} from '@/lib/search-route'
 import { useProjectsQuery } from '@/lib/workspace-query'
 
 interface CommandDocument extends DocumentMeta {
@@ -67,7 +76,7 @@ export function CommandPalette() {
 
   const projectsQuery = useProjectsQuery()
   const projects = open ? (projectsQuery.data ?? []) : []
-  const visibleProjects = useMemo(
+  const contentProjects = useMemo(
     () =>
       selectedProject
         ? projects.filter((project) => project.slug === selectedProject)
@@ -77,7 +86,7 @@ export function CommandPalette() {
 
   const workspaceQueries = useQueries({
     queries: open
-      ? visibleProjects.map((project) => ({
+      ? contentProjects.map((project) => ({
           queryKey: queryKeys.workspace(project.slug),
           queryFn: () => api.projects.workspace(project.slug),
         }))
@@ -97,16 +106,16 @@ export function CommandPalette() {
   )
 
   const entitySeed = useMemo(
-    () => visibleProjects.map((project) => project.slug).join('|'),
-    [visibleProjects],
+    () => contentProjects.map((project) => project.slug).join('|'),
+    [contentProjects],
   )
 
   const entitiesQuery = useQuery({
     queryKey: queryKeys.commandPaletteEntities(selectedProject, entitySeed),
-    enabled: open && visibleProjects.length > 0,
+    enabled: open && contentProjects.length > 0,
     queryFn: async () => {
       const summaries = await Promise.all(
-        visibleProjects.map(async (project) => ({
+        contentProjects.map(async (project) => ({
           projectSlug: project.slug,
           summary: await api.intelligence.summary(project.slug),
         })),
@@ -131,6 +140,16 @@ export function CommandPalette() {
   })
   const entities = entitiesQuery.data ?? []
   const normalizedQuery = query.trim().replace(/^\/+/, '')
+  const buildPaletteSearchState = (project?: string | null) => {
+    if (!normalizedQuery) {
+      return createSearchRouteStateForLaunch(project)
+    }
+
+    return routeSearchFromDraft({
+      ...createSearchDraftForLaunch(project),
+      query: normalizedQuery,
+    })
+  }
   const detectedEntity = useMemo(() => {
     if (!normalizedQuery) {
       return null
@@ -142,12 +161,12 @@ export function CommandPalette() {
         const candidate = entity.rawText.toLowerCase()
         return candidate.includes(loweredQuery) || loweredQuery.includes(candidate)
       }) ?? {
-        projectSlug: selectedProject ?? visibleProjects[0]?.slug ?? '',
+        projectSlug: selectedProject ?? contentProjects[0]?.slug ?? '',
         rawText: normalizedQuery,
         termType: 'tags',
       }
     )
-  }, [entities, normalizedQuery, selectedProject, visibleProjects])
+  }, [contentProjects, entities, normalizedQuery, selectedProject])
   const decisionReferenceCount = useMemo(() => {
     if (!normalizedQuery) {
       return 0
@@ -219,9 +238,6 @@ export function CommandPalette() {
             {/* Documents (FIND) */}
             <Command.Group heading="FIND" className={GROUP_HEADING}>
               {documents
-                .filter((document) =>
-                  selectedProject ? document.project_slug === selectedProject : true,
-                )
                 .map((document) => (
                   <Command.Item
                     key={`${document.project_slug}:${document.relative_path}`}
@@ -263,6 +279,18 @@ export function CommandPalette() {
             {/* Actions */}
             <Command.Group heading="ACTIONS" className={GROUP_HEADING}>
               <Command.Item
+                value="projects home"
+                onSelect={() => {
+                  close()
+                  navigate({ to: '/' })
+                }}
+                className={ITEM_BASE}
+              >
+                <span className="size-[6px] shrink-0 rounded-full bg-[#22a5f1]" />
+                Open Projects Home
+              </Command.Item>
+
+              <Command.Item
                 value="create project"
                 onSelect={() => {
                   close()
@@ -275,19 +303,36 @@ export function CommandPalette() {
               </Command.Item>
 
               <Command.Item
-                value="search"
+                value={`search all projects ${normalizedQuery}`}
                 onSelect={() => {
                   close()
-                  navigate({ to: '/search' })
+                  navigate({
+                    to: '/search',
+                    search: buildPaletteSearchState(),
+                  })
                 }}
                 className={ITEM_BASE}
               >
                 <span className="size-[6px] shrink-0 rounded-full bg-[#5cb85c]" />
-                Search workspace
+                Search All Projects
               </Command.Item>
 
               {selectedProject && (
                 <>
+                  <Command.Item
+                    value={`search current project ${selectedProject} ${normalizedQuery}`}
+                    onSelect={() => {
+                      close()
+                      navigate({
+                        to: '/search',
+                        search: buildPaletteSearchState(selectedProject),
+                      })
+                    }}
+                    className={ITEM_BASE}
+                  >
+                    <span className="size-[6px] shrink-0 rounded-full bg-[#5cb85c]" />
+                    Search Current Project
+                  </Command.Item>
                   <Command.Item
                     value={`create adr ${selectedProject}`}
                     onSelect={() => {
@@ -327,16 +372,16 @@ export function CommandPalette() {
                 </>
               )}
 
-              {visibleProjects.map((project) => (
+              {projects.map((project) => (
                 <Command.Item
                   key={project.slug}
                   value={`project ${project.name} ${project.slug}`}
                   onSelect={() => {
                     close()
-                    navigate({
-                      to: '/projects/$slug',
-                      params: { slug: project.slug },
-                    })
+                    navigateToProjectTarget(
+                      navigate,
+                      buildProjectSwitchTarget(location.pathname, location.searchStr, project.slug),
+                    )
                   }}
                   className={ITEM_BASE}
                 >

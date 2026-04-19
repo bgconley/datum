@@ -15,6 +15,7 @@ import { useContextPanel, useContextPanelState } from '@/lib/context-panel'
 import { recordProjectLocation } from '@/lib/project-navigation'
 import { resolveSelectedProject } from '@/lib/route-project'
 import {
+  createSearchRouteStateForLaunch,
   draftFromRouteSearch,
   parseSearchRouteState,
   routeSearchFromDraft,
@@ -61,6 +62,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const headerSearchRef = useRef<HTMLInputElement | null>(null)
   const routeSearch = useMemo(() => parseSearchRouteState(location.searchStr), [location.searchStr])
   const searchDraft = useMemo(() => draftFromRouteSearch(routeSearch), [routeSearch])
+  const selectedProject = resolveSelectedProject(location.pathname, location.searchStr)
   const showHeaderSearch = location.pathname === '/search' && Boolean(searchDraft.query.trim())
   const [headerSearchQuery, setHeaderSearchQuery] = useState(searchDraft.query)
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false)
@@ -100,7 +102,10 @@ export function Layout({ children }: { children: ReactNode }) {
           focusSearch()
           return
         }
-        navigate({ to: '/search' })
+        navigate({
+          to: '/search',
+          search: createSearchRouteStateForLaunch(selectedProject),
+        })
         window.setTimeout(focusSearch, 0)
       }
 
@@ -128,9 +133,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [content, location.pathname, navigate, open, setOpen, showHeaderSearch])
-
-  const selectedProject = resolveSelectedProject(location.pathname, location.searchStr)
+  }, [content, location.pathname, navigate, open, selectedProject, setOpen, showHeaderSearch])
 
   useEffect(() => {
     if (!selectedProject) {
@@ -192,7 +195,10 @@ export function Layout({ children }: { children: ReactNode }) {
                   window.dispatchEvent(new CustomEvent('datum:focus-search'))
                   return
                 }
-                navigate({ to: '/search' })
+                navigate({
+                  to: '/search',
+                  search: createSearchRouteStateForLaunch(selectedProject),
+                })
                 window.setTimeout(() => {
                   window.dispatchEvent(new CustomEvent('datum:focus-search'))
                 }, 0)

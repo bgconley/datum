@@ -16,6 +16,7 @@ import {
   togglePinnedProject,
   useProjectPreferences,
 } from '@/lib/project-preferences'
+import { createSearchRouteStateForLaunch } from '@/lib/search-route'
 import { useProjectsQuery } from '@/lib/workspace-query'
 
 function formatRelativeVisit(value: string) {
@@ -182,7 +183,9 @@ export function ProjectsHome() {
               type="button"
               variant="outline"
               className="gap-2 border-[#d6e0e8] bg-white text-[#1b2431]"
-              onClick={() => navigate({ to: '/search' })}
+              onClick={() =>
+                navigate({ to: '/search', search: createSearchRouteStateForLaunch() })
+              }
             >
               <Search className="size-4" />
               Search Workspace
@@ -208,7 +211,9 @@ export function ProjectsHome() {
               type="button"
               variant="outline"
               className="border-[#d6e0e8] bg-white text-[#1b2431]"
-              onClick={() => navigate({ to: '/search' })}
+              onClick={() =>
+                navigate({ to: '/search', search: createSearchRouteStateForLaunch() })
+              }
             >
               Search All
             </Button>

@@ -50,6 +50,11 @@ const SessionsView = lazy(() =>
     default: module.SessionsView,
   })),
 )
+const ProjectSettings = lazy(() =>
+  import('@/components/ProjectSettings').then((module) => ({
+    default: module.ProjectSettings,
+  })),
+)
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -194,6 +199,15 @@ function SessionsRouteComponent() {
   return (
     <Suspense fallback={<div className="p-8 text-muted-foreground">Loading sessions…</div>}>
       <SessionsView projectSlug={slug} />
+    </Suspense>
+  )
+}
+
+function ProjectSettingsRouteComponent() {
+  const { slug } = settingsRoute.useParams()
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading settings…</div>}>
+      <ProjectSettings projectSlug={slug} />
     </Suspense>
   )
 }
@@ -346,6 +360,12 @@ const sessionsRoute = createRoute({
   component: SessionsRouteComponent,
 })
 
+const settingsRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'settings',
+  component: ProjectSettingsRouteComponent,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   searchRoute,
@@ -354,6 +374,7 @@ const routeTree = rootRoute.addChildren([
     inboxRoute,
     reviewAliasRoute,
     sessionsRoute,
+    settingsRoute,
     entitiesRoute.addChildren([entityDetailRoute]),
     projectDocsRoute.addChildren([
       documentRoute,

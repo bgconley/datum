@@ -1,5 +1,5 @@
 import type { SearchRouteState } from '@/lib/search-route'
-import { parseSearchRouteState } from '@/lib/search-route'
+import { parseSearchRouteState, replaceSearchRouteProject } from '@/lib/search-route'
 import { resolveSelectedProject } from '@/lib/route-project'
 import type {
   ProjectVisitSection,
@@ -23,6 +23,7 @@ type ProjectNavigateTarget =
   | { to: '/projects/$slug'; params: { slug: string } }
   | { to: '/projects/$slug/inbox'; params: { slug: string } }
   | { to: '/projects/$slug/sessions'; params: { slug: string } }
+  | { to: '/projects/$slug/settings'; params: { slug: string } }
   | { to: '/projects/$slug/docs/$'; params: { slug: string; _splat: string }; search?: DocumentRouteSearchState }
   | { to: '/search'; search?: SearchRouteState }
 
@@ -100,6 +101,10 @@ export function parseProjectLocation(pathname: string, searchStr: string): Parse
     return { slug, section: 'sessions', pathname, searchStr }
   }
 
+  if (remainder === '/settings') {
+    return { slug, section: 'settings', pathname, searchStr }
+  }
+
   if (remainder.startsWith('/docs/')) {
     return {
       slug,
@@ -146,6 +151,8 @@ export function describeProjectVisit(snapshot: ProjectVisitSnapshot) {
       return 'Resume in inbox'
     case 'sessions':
       return 'Resume in sessions'
+    case 'settings':
+      return 'Resume in settings'
     case 'search':
       return 'Resume search in same scope'
     case 'document':
@@ -171,6 +178,8 @@ export function buildResumeTarget(snapshot: ProjectVisitSnapshot): ProjectNaviga
       return { to: '/projects/$slug/inbox', params: { slug: parsed.slug } }
     case 'sessions':
       return { to: '/projects/$slug/sessions', params: { slug: parsed.slug } }
+    case 'settings':
+      return { to: '/projects/$slug/settings', params: { slug: parsed.slug } }
     case 'search':
       return { to: '/search', search: parsed.searchState }
     case 'document':
@@ -201,13 +210,12 @@ export function buildProjectSwitchTarget(
       return { to: '/projects/$slug/inbox', params: { slug: destinationSlug } }
     case 'sessions':
       return { to: '/projects/$slug/sessions', params: { slug: destinationSlug } }
+    case 'settings':
+      return { to: '/projects/$slug/settings', params: { slug: destinationSlug } }
     case 'search':
       return {
         to: '/search',
-        search: {
-          ...(parsed.searchState ?? {}),
-          project: destinationSlug,
-        },
+        search: replaceSearchRouteProject(parsed.searchState, destinationSlug),
       }
     case 'document':
     case 'unknown':
@@ -233,6 +241,14 @@ export function navigateToProjectTarget(
       to: '/projects/$slug/docs/$',
       params: target.params,
       search: target.search,
+    })
+    return
+  }
+
+  if (target.to === '/projects/$slug/settings') {
+    navigate({
+      to: '/projects/$slug/settings',
+      params: target.params,
     })
     return
   }

@@ -39,6 +39,13 @@ export const DEFAULT_SEARCH_DRAFT: SearchDraft = {
   limit: 20,
 }
 
+export function createSearchDraftForLaunch(project?: string | null): SearchDraft {
+  return {
+    ...DEFAULT_SEARCH_DRAFT,
+    project: project ?? '',
+  }
+}
+
 const VALID_SEARCH_MODES = new Set<SearchMode>([
   'find_docs',
   'ask_question',
@@ -197,4 +204,26 @@ export function routeSearchFromDraft(draft: SearchDraft): SearchRouteState {
   }
 
   return next
+}
+
+export function createSearchRouteStateForLaunch(project?: string | null): SearchRouteState {
+  return routeSearchFromDraft(createSearchDraftForLaunch(project))
+}
+
+export function replaceSearchRouteProject(
+  search: SearchRouteState | undefined,
+  project: string,
+): SearchRouteState {
+  if (!search) {
+    return { project }
+  }
+
+  if (!search.project) {
+    return { ...search }
+  }
+
+  return {
+    ...search,
+    project,
+  }
 }
