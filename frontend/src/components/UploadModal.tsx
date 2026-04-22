@@ -1,7 +1,14 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '@/lib/api'
 import { notify } from '@/lib/notifications'
+import {
+  collectProjectDocumentFolders,
+  CUSTOM_FOLDER_VALUE,
+  formatDocumentFolderLabel,
+  normalizeDocumentFolderPath,
+} from '@/lib/project-folders'
+import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
 interface UploadModalProps {
   projectSlug: string
@@ -13,20 +20,71 @@ interface UploadModalProps {
 const ACCEPTED_EXTENSIONS = ['.md', '.sql', '.yaml', '.yml', '.txt', '.pdf', '.docx']
 const ACCEPTED_MIME =
   '.md,.sql,.yaml,.yml,.txt,.pdf,.docx,text/markdown,text/plain,text/x-sql,text/yaml,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const DOC_TYPE_OPTIONS = [
+  { value: '', label: 'Auto-detect from extension' },
+  { value: 'requirements', label: 'Requirements' },
+  { value: 'decision', label: 'Decision / ADR' },
+  { value: 'plan', label: 'Plan' },
+  { value: 'session', label: 'Session' },
+  { value: 'schema', label: 'Schema' },
+  { value: 'config', label: 'Config' },
+  { value: 'reference', label: 'Reference' },
+  { value: 'note', label: 'Note' },
+]
+const DEFAULT_FOLDER_BY_DOC_TYPE: Record<string, string> = {
+  requirements: 'docs/requirements',
+  decision: 'docs/decisions',
+  plan: 'docs/plans',
+  session: 'docs/sessions',
+  schema: 'docs/schema',
+  config: 'docs/config',
+  reference: 'docs/reference',
+  note: 'docs/notes',
+}
 
 export function UploadModal({ projectSlug, open, onOpenChange, onSuccess }: UploadModalProps) {
   const [file, setFile] = useState<File | null>(null)
-  const [folder, setFolder] = useState('docs/requirements/')
+  const [folder, setFolder] = useState('docs/requirements')
+  const [folderTouched, setFolderTouched] = useState(false)
+  const [useCustomFolder, setUseCustomFolder] = useState(false)
   const [docType, setDocType] = useState('')
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const workspaceQuery = useProjectWorkspaceQuery(projectSlug)
+  const documents = workspaceQuery.data?.documents ?? []
+  const folderOptions = useMemo(
+    () =>
+      collectProjectDocumentFolders(
+        documents,
+        Object.values(DEFAULT_FOLDER_BY_DOC_TYPE),
+      ),
+    [documents],
+  )
+  const normalizedFolder = normalizeDocumentFolderPath(folder)
+  const folderSelectValue =
+    useCustomFolder || !folderOptions.includes(normalizedFolder)
+      ? CUSTOM_FOLDER_VALUE
+      : normalizedFolder
+
+  useEffect(() => {
+    if (folderTouched || !docType) {
+      return
+    }
+    const suggestedFolder = DEFAULT_FOLDER_BY_DOC_TYPE[docType]
+    if (suggestedFolder) {
+      setFolder(suggestedFolder)
+      setUseCustomFolder(false)
+    }
+  }, [docType, folderTouched])
 
   const reset = () => {
     setFile(null)
-    setFolder('docs/requirements/')
+    setFolder('docs/requirements')
+    setFolderTouched(false)
+    setUseCustomFolder(false)
     setDocType('')
     setTagInput('')
     setTags([])
@@ -106,7 +164,7 @@ export function UploadModal({ projectSlug, open, onOpenChange, onSuccess }: Uplo
       await api.ingest.upload(
         projectSlug,
         file,
-        folder,
+        normalizedFolder,
         docType || undefined,
         tags.length > 0 ? tags.join(',') : undefined,
       )
@@ -199,18 +257,40 @@ export function UploadModal({ projectSlug, open, onOpenChange, onSuccess }: Uplo
           {/* Destination folder */}
           <div className="flex flex-col gap-[8px]">
             <span className="text-[10px] font-semibold text-[#666]">DESTINATION FOLDER</span>
-            <div className="flex items-center justify-between rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px]">
+            <select
+              value={folderSelectValue}
+              onChange={(e) => {
+                const nextValue = e.target.value
+                setFolderTouched(true)
+                if (nextValue === CUSTOM_FOLDER_VALUE) {
+                  setUseCustomFolder(true)
+                  return
+                }
+                setUseCustomFolder(false)
+                setFolder(nextValue)
+              }}
+              className="rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px] text-[12px] text-[#333] outline-none"
+            >
+              {folderOptions.map((option) => (
+                <option key={option} value={option}>
+                  {formatDocumentFolderLabel(option)}
+                </option>
+              ))}
+              <option value={CUSTOM_FOLDER_VALUE}>Custom path...</option>
+            </select>
+            {folderSelectValue === CUSTOM_FOLDER_VALUE && (
               <input
                 type="text"
                 value={folder}
-                onChange={(e) => setFolder(e.target.value)}
-                placeholder="docs/requirements/"
-                className="min-w-0 flex-1 border-none bg-transparent text-[12px] text-[#333] outline-none"
+                onChange={(e) => {
+                  setFolderTouched(true)
+                  setUseCustomFolder(true)
+                  setFolder(e.target.value)
+                }}
+                placeholder="docs/requirements"
+                className="rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px] text-[12px] text-[#333] outline-none"
               />
-              <span className="shrink-0 rounded-[3px] border border-[#e1e8ed] bg-[#f3f6f8] px-[8px] py-[4px] text-[10px] font-medium text-[#333]">
-                Browse {'\u25be'}
-              </span>
-            </div>
+            )}
           </div>
 
           {/* Document type */}
@@ -221,12 +301,11 @@ export function UploadModal({ projectSlug, open, onOpenChange, onSuccess }: Uplo
               onChange={(e) => setDocType(e.target.value)}
               className="rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px] text-[12px] text-[#333] outline-none"
             >
-              <option value="">Auto-detect from extension</option>
-              <option value="requirement">Requirement</option>
-              <option value="architecture">Architecture</option>
-              <option value="schema">Schema</option>
-              <option value="session-note">Session Note</option>
-              <option value="reference">Reference</option>
+              {DOC_TYPE_OPTIONS.map((option) => (
+                <option key={option.value || 'auto'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -244,18 +323,6 @@ export function UploadModal({ projectSlug, open, onOpenChange, onSuccess }: Uplo
                   {tag}
                 </button>
               ))}
-              <button
-                type="button"
-                onClick={() => {
-                  const value = window.prompt('Add tag')
-                  if (value?.trim() && !tags.includes(value.trim())) {
-                    setTags((prev) => [...prev, value.trim()])
-                  }
-                }}
-                className="rounded-[3px] border border-[#e1e8ed] px-[6px] py-[3px] text-[10px] font-medium text-[#666]"
-              >
-                +
-              </button>
               <input
                 type="text"
                 value={tagInput}

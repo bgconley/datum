@@ -530,16 +530,9 @@ export function Sidebar({ style }: SidebarProps) {
             <button
               type="button"
               className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
-              onClick={() => openTemplateDialog('session-note')}
+              onClick={() => openTemplateDialog('session-notes')}
             >
               + New Session
-            </button>
-            <button
-              type="button"
-              className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
-              onClick={() => openTemplateDialog('adr')}
-            >
-              + New ADR
             </button>
             <UploadModal
               projectSlug={selectedProject}

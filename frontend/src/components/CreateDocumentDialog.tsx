@@ -4,7 +4,14 @@ import { useNavigate } from '@tanstack/react-router'
 
 import { api } from '@/lib/api'
 import { notify } from '@/lib/notifications'
+import {
+  collectProjectDocumentFolders,
+  CUSTOM_FOLDER_VALUE,
+  formatDocumentFolderLabel,
+  normalizeDocumentFolderPath,
+} from '@/lib/project-folders'
 import { queryKeys } from '@/lib/query-keys'
+import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
 interface Props {
   projectSlug: string
@@ -22,6 +29,8 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
   const [title, setTitle] = useState('')
   const [templateId, setTemplateId] = useState('adr')
   const [folder, setFolder] = useState('docs/decisions')
+  const [folderTouched, setFolderTouched] = useState(false)
+  const [useCustomFolder, setUseCustomFolder] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
@@ -31,6 +40,8 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
     queryFn: api.templates.list,
   })
   const templates = templatesQuery.data ?? []
+  const workspaceQuery = useProjectWorkspaceQuery(projectSlug)
+  const documents = workspaceQuery.data?.documents ?? []
 
   useEffect(() => {
     const handleTemplateEvent = (event: Event) => {
@@ -40,6 +51,8 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
       if (template) {
         setTemplateId(template.name)
         setFolder(template.default_folder)
+        setFolderTouched(false)
+        setUseCustomFolder(false)
       }
       setOpen(true)
     }
@@ -50,25 +63,42 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
 
   useEffect(() => {
     const template = templates.find((item) => item.name === templateId)
-    if (template) {
+    if (template && !folderTouched) {
       setFolder(template.default_folder)
+      setUseCustomFolder(false)
     }
-  }, [templateId, templates])
+  }, [folderTouched, templateId, templates])
 
   const template = useMemo(
     () => templates.find((item) => item.name === templateId) ?? templates[0] ?? null,
     [templateId, templates],
   )
-  const filename =
+  const folderOptions = useMemo(
+    () =>
+      collectProjectDocumentFolders(
+        documents,
+        template ? [template.default_folder] : [],
+      ),
+    [documents, template],
+  )
+  const normalizedFolder = normalizeDocumentFolderPath(folder)
+  const folderSelectValue =
+    useCustomFolder || !folderOptions.includes(normalizedFolder)
+      ? CUSTOM_FOLDER_VALUE
+      : normalizedFolder
+  const slugifiedTitle =
     title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') + '.md'
-  const relativePath = `${folder.replace(/\/$/, '')}/${filename}`.replace(/^\/+/, '')
+      .replace(/^-|-$/g, '') || 'untitled'
+  const filename = `${slugifiedTitle}.md`
+  const relativePath = `${normalizedFolder}/${filename}`.replace(/^\/+/, '')
 
   const close = () => {
     setOpen(false)
     setTitle('')
+    setFolderTouched(false)
+    setUseCustomFolder(false)
     setTagInput('')
     setTags([])
   }
@@ -100,6 +130,7 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
         title,
         doc_type: rendered.doc_type,
         content: rendered.content,
+        tags,
       })
       close()
       onCreated()
@@ -167,22 +198,6 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
                   </option>
                 ))}
               </select>
-              <div className="flex flex-wrap gap-x-[8px] gap-y-[0px]">
-                {templates.map((item) => (
-                  <button
-                    key={item.name}
-                    type="button"
-                    onClick={() => setTemplateId(item.name)}
-                    className={`rounded-[4px] border px-[12px] py-[6px] text-[11px] ${
-                      item.name === templateId
-                        ? 'border-[#22a5f1] bg-[#22a5f1] font-semibold text-white'
-                        : 'border-[#e1e8ed] bg-white text-[#333]'
-                    }`}
-                  >
-                    {item.title}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="h-px w-full bg-[#e1e8ed]" />
@@ -202,18 +217,40 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
             {/* Folder path */}
             <div className="flex flex-col gap-[8px]">
               <span className="text-[10px] font-semibold text-[#666]">FOLDER PATH</span>
-              <div className="flex items-center justify-between rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px]">
+              <select
+                value={folderSelectValue}
+                onChange={(e) => {
+                  const nextValue = e.target.value
+                  setFolderTouched(true)
+                  if (nextValue === CUSTOM_FOLDER_VALUE) {
+                    setUseCustomFolder(true)
+                    return
+                  }
+                  setUseCustomFolder(false)
+                  setFolder(nextValue)
+                }}
+                className="rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px] text-[12px] text-[#333] outline-none"
+              >
+                {folderOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {formatDocumentFolderLabel(option)}
+                  </option>
+                ))}
+                <option value={CUSTOM_FOLDER_VALUE}>Custom path...</option>
+              </select>
+              {folderSelectValue === CUSTOM_FOLDER_VALUE && (
                 <input
                   type="text"
                   value={folder}
-                  onChange={(e) => setFolder(e.target.value)}
-                  placeholder="docs/decisions/"
-                  className="min-w-0 flex-1 border-none bg-transparent text-[12px] text-[#333] outline-none"
+                  onChange={(e) => {
+                    setFolderTouched(true)
+                    setUseCustomFolder(true)
+                    setFolder(e.target.value)
+                  }}
+                  placeholder="docs/decisions"
+                  className="rounded-[4px] border border-[#e1e8ed] bg-white px-[12px] py-[10px] text-[12px] text-[#333] outline-none"
                 />
-                <span className="shrink-0 rounded-[3px] border border-[#e1e8ed] bg-[#f3f6f8] px-[8px] py-[4px] text-[10px] font-medium text-[#333]">
-                  Browse {'\u25be'}
-                </span>
-              </div>
+              )}
             </div>
 
             {/* Preview */}
@@ -238,18 +275,6 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
                     {tag}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const value = window.prompt('Add tag')
-                    if (value?.trim() && !tags.includes(value.trim())) {
-                      setTags((prev) => [...prev, value.trim()])
-                    }
-                  }}
-                  className="rounded-[3px] border border-[#e1e8ed] px-[6px] py-[3px] text-[10px] font-medium text-[#666]"
-                >
-                  +
-                </button>
                 <input
                   type="text"
                   value={tagInput}
