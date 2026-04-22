@@ -80,7 +80,14 @@ const envStopwords = new Set([
 ])
 
 export function stripFrontmatter(content: string): string {
-  return content.replace(/^---[\s\S]*?---\n*/, '')
+  const pattern = /^\uFEFF?---\s*\n[\s\S]*?\n---\s*(?:\n|$)/
+  let output = content
+
+  while (pattern.test(output)) {
+    output = output.replace(pattern, '')
+  }
+
+  return output
 }
 
 export function slugifyHeading(value: string): string {

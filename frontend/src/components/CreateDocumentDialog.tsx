@@ -11,6 +11,7 @@ import {
   normalizeDocumentFolderPath,
 } from '@/lib/project-folders'
 import { queryKeys } from '@/lib/query-keys'
+import { stripFrontmatter } from '@/lib/technical-terms'
 import { useProjectWorkspaceQuery } from '@/lib/workspace-query'
 
 interface Props {
@@ -129,7 +130,7 @@ export function CreateDocumentDialog({ projectSlug, onCreated }: Props) {
         relative_path: relativePath,
         title,
         doc_type: rendered.doc_type,
-        content: rendered.content,
+        content: stripFrontmatter(rendered.content).trimStart(),
         tags,
       })
       close()

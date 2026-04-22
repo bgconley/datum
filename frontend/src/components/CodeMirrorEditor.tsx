@@ -51,6 +51,39 @@ function languageExtension(language: CodeMirrorEditorProps['language']): Extensi
   }
 }
 
+const datumEditorTheme = EditorView.theme({
+  '&': {
+    fontSize: '12.5px',
+    lineHeight: '1.55',
+    color: '#333333',
+    backgroundColor: '#ffffff',
+  },
+  '.cm-scroller': {
+    fontFamily: '"Fira Code", "SFMono-Regular", ui-monospace, monospace',
+  },
+  '.cm-gutters': {
+    backgroundColor: '#f8fbfd',
+    color: '#94a3b8',
+    borderRight: '1px solid #e1e8ed',
+  },
+  '.cm-content': {
+    paddingTop: '14px',
+    paddingBottom: '14px',
+  },
+  '.cm-line': {
+    paddingLeft: '10px',
+  },
+  '.cm-activeLine': {
+    backgroundColor: 'rgba(34, 165, 241, 0.06)',
+  },
+  '.cm-activeLineGutter': {
+    backgroundColor: 'rgba(34, 165, 241, 0.06)',
+  },
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
+    backgroundColor: 'rgba(34, 165, 241, 0.18)',
+  },
+})
+
 export function CodeMirrorEditor({
   value,
   onChange,
@@ -77,6 +110,7 @@ export function CodeMirrorEditor({
       extensions={[
         languageExtension(language),
         EditorView.lineWrapping,
+        datumEditorTheme,
         keymap.of([
           {
             key: 'Mod-s',
