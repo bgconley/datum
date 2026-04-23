@@ -350,6 +350,7 @@ export function Sidebar({ style }: SidebarProps) {
     [preferences.pinnedSlugs, projectBySlug, projects],
   )
   const lastVisitedProject = recentProjects[0] ?? null
+  const workspaceEmpty = !selectedProject && projects.length === 0
 
   return (
     <aside className="flex shrink-0 flex-col bg-sidebar text-sidebar-foreground" style={style}>
@@ -420,7 +421,7 @@ export function Sidebar({ style }: SidebarProps) {
         {/* Separator */}
         <div className="h-px w-full bg-white/10" />
 
-        {!selectedProject && (
+        {!selectedProject && !workspaceEmpty && (
           <>
             <div className="py-2">
               <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
@@ -496,9 +497,21 @@ export function Sidebar({ style }: SidebarProps) {
               className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
               onClick={() => navigate({ to: '/search', search: createSearchRouteStateForLaunch() })}
             >
-              + Search All
+              {workspaceEmpty ? '+ Open global search' : '+ Search All'}
             </button>
-            {lastVisitedProject && (
+            {workspaceEmpty ? (
+              <button
+                type="button"
+                className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
+                onClick={() =>
+                  document
+                    .getElementById('empty-project-workflow')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                }
+              >
+                + Learn the workflow
+              </button>
+            ) : lastVisitedProject ? (
               <button
                 type="button"
                 className="w-full py-[5px] pl-4 pr-3 text-left text-[11px] font-medium text-primary hover:text-primary/80"
@@ -506,7 +519,7 @@ export function Sidebar({ style }: SidebarProps) {
               >
                 + Resume {lastVisitedProject.project.name}
               </button>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -548,18 +561,29 @@ export function Sidebar({ style }: SidebarProps) {
             <div className="pb-1 pl-4 pt-2 text-[9px] font-semibold text-[#666]">
               WORKSPACE
             </div>
-            <div className="px-4 py-[5px] text-[11px] text-[#999]">
-              • {projects.length} active projects
-            </div>
-            <div className="px-4 py-[5px] text-[11px] text-[#999]">
-              • {preferences.pinnedSlugs.length} pinned
-            </div>
-            <div className="px-4 py-[5px] text-[11px] text-[#999]">
-              • {recentProjects.length} recent
-            </div>
-            <div className="px-4 py-[5px] text-[11px] text-[#999]">
-              • global search enabled
-            </div>
+            {workspaceEmpty ? (
+              <>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">• 0 projects yet</div>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">• create your first cabinet</div>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">• upload docs or start blank</div>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">• search spans all projects later</div>
+              </>
+            ) : (
+              <>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">
+                  • {projects.length} active projects
+                </div>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">
+                  • {preferences.pinnedSlugs.length} pinned
+                </div>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">
+                  • {recentProjects.length} recent
+                </div>
+                <div className="px-4 py-[5px] text-[11px] text-[#999]">
+                  • global search enabled
+                </div>
+              </>
+            )}
           </div>
         )}
 

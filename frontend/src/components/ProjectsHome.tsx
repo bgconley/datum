@@ -210,14 +210,19 @@ export function ProjectsHome() {
                   variant="outline"
                   className="gap-2 border-[#d6e0e8] bg-white text-[#1b2431]"
                   onClick={() =>
-                    navigate({ to: '/search', search: createSearchRouteStateForLaunch() })
+                    document
+                      .getElementById('empty-project-workflow')
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
                   }
                 >
                   <Search className="size-4" />
-                  Open Global Search
+                  View Workflow
                 </Button>
               </div>
-              <div className="mx-auto mt-6 max-w-[470px] border-t border-[#e1e8ed] pt-5 text-[12px] leading-6 text-[#666]">
+              <div
+                id="empty-project-workflow"
+                className="mx-auto mt-6 max-w-[470px] border-t border-[#e1e8ed] pt-5 text-[12px] leading-6 text-[#666]"
+              >
                 <div className="font-semibold text-[#1b2431]">1. Create the project record</div>
                 <div className="text-[#7b8794]">
                   Name it, confirm the slug, and add a short description.
